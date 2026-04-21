@@ -13,6 +13,8 @@ import { BrushSettings, CustomFont, PaperBackground, PlacedSticker, Sticker, Was
 
 export interface DrawingCanvasHandle {
   getCanvas: () => HTMLCanvasElement | null;
+  getCanvasImageData: () => string | null;
+  setCanvasImageData: (imageData: string | null) => void;
   clearCanvas: () => void;
   undo: () => void;
   redo: () => void;
@@ -639,8 +641,33 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       [shiftSingleCanvas]
     );
 
+    const getCanvasImageData = useCallback(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      return canvas.toDataURL("image/png");
+    }, []);
+
+    const setCanvasImageData = useCallback((imageData: string | null) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!imageData) return;
+
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      img.src = imageData;
+    }, []);
+
     useImperativeHandle(ref, () => ({
       getCanvas: () => canvasRef.current,
+      getCanvasImageData,
+      setCanvasImageData,
       clearCanvas,
       undo,
       redo,

@@ -577,6 +577,24 @@ export function useAssets(user: ViewerIdentity) {
     setPlacedItems((prev) => prev.slice(0, -1));
   }, []);
 
+  const applySharedCanvasState = useCallback((state: {
+    placedItems?: PlacedSticker[];
+    selectedPaper?: PaperBackground | null;
+  }) => {
+    if (state.placedItems) {
+      setPlacedItems(state.placedItems);
+    }
+
+    if (state.selectedPaper) {
+      const selected = state.selectedPaper;
+      setPapers((prev) => {
+        if (prev.some((paper) => paper.id === selected.id)) return prev;
+        return [...prev, selected];
+      });
+      setSelectedPaper(selected);
+    }
+  }, []);
+
   return {
     stickers,
     washiTapes,
@@ -606,5 +624,6 @@ export function useAssets(user: ViewerIdentity) {
     removeEnvelope,
     removeCustomFont,
     undoLastPlacement,
+    applySharedCanvasState,
   };
 }

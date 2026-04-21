@@ -58,6 +58,14 @@ type PresenceTransport = {
   close: () => void;
 };
 
+type BoardSyncPayload = {
+  senderId: string;
+  ts: number;
+  placedItems: import("@/types").PlacedSticker[];
+  selectedPaper: PaperBackground | null;
+  drawingData: string | null;
+};
+
 function pruneStaleArtists(
   artists: Record<string, ArtistPresence>,
   selfId: string,
@@ -94,6 +102,8 @@ export default function Home() {
   const selfColorRef = useRef(PRESENCE_COLORS[(selfArtistId.codePointAt(0) ?? 0) % PRESENCE_COLORS.length]);
   const channelRef = useRef<PresenceTransport | null>(null);
   const lastMouseWorldRef = useRef<{ x: number; y: number } | null>(null);
+  const boardSuppressUntilRef = useRef(0);
+  const lastBoardFingerprintRef = useRef("");
 
   const CANVAS_W = 6000;
   const CANVAS_H = 4800;
@@ -128,6 +138,7 @@ export default function Home() {
     addCustomFont,
     placeItem,
     placeTextItem,
+    applySharedCanvasState,
     shiftPlacedItems,
     updatePlacedItem,
     removeSticker,
@@ -337,6 +348,55 @@ export default function Home() {
       el.removeEventListener("mouseleave", onMouseLeave);
     };
   }, [activeTab, CANVAS_H, CANVAS_W, publishPresence, shiftPlacedItems]);
+
+  useEffect(() => {
+    if (!account.hasSession) return;
+
+    const supabase = createSupabaseBrowserClient();
+    const channel = supabase
+      .channel("mochimail-studio-board", { config: { broadcast: { self: false } } })
+      .on("broadcast", { event: "board-sync" }, ({ payload }) => {
+        const data = payload as BoardSyncPayload;
+        if (!data || data.senderId === selfIdRef.current) return;
+
+        boardSuppressUntilRef.current = Date.now() + 1600;
+        applySharedCanvasState({
+          placedItems: data.placedItems,
+          selectedPaper: data.selectedPaper,
+        });
+        canvasRef.current?.setCanvasImageData(data.drawingData);
+      });
+
+    void channel.subscribe();
+
+    const syncTimer = globalThis.setInterval(() => {
+      if (Date.now() < boardSuppressUntilRef.current) return;
+
+      const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
+      const payload: BoardSyncPayload = {
+        senderId: selfIdRef.current,
+        ts: Date.now(),
+        placedItems,
+        selectedPaper: selectedPaper ?? null,
+        drawingData,
+      };
+
+      const fingerprint = JSON.stringify({
+        p: payload.placedItems,
+        paper: payload.selectedPaper?.id ?? null,
+        d: payload.drawingData,
+      });
+      if (fingerprint === lastBoardFingerprintRef.current) return;
+      lastBoardFingerprintRef.current = fingerprint;
+
+      void channel.send({ type: "broadcast", event: "board-sync", payload });
+    }, 1100);
+
+    return () => {
+      globalThis.clearInterval(syncTimer);
+      void supabase.removeChannel(channel);
+    };
+  }, [account.hasSession, applySharedCanvasState, placedItems, selectedPaper]);
 
   useEffect(() => {
     const id = selfArtistId;
