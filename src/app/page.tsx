@@ -1,25 +1,32 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import AccountPanel from "@/components/AccountPanel";
 import DrawingCanvas, { DrawingCanvasHandle } from "@/components/DrawingCanvas";
 import StudioToolbar from "@/components/StudioToolbar";
-import MailCompose from "@/components/MailCompose";
-import Mailbox from "@/components/Mailbox";
+import MailComposePanel from "@/components/MailComposePanel";
+import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
+import { FiEdit3, FiMail, FiShoppingBag } from "react-icons/fi";
 import { exportWithDSBorder } from "@/components/ExportUtil";
 import { useAccount } from "@/hooks/useAccount";
 import { useAssets } from "@/hooks/useAssets";
 import { useMail } from "@/hooks/useMail";
 import { useStore } from "@/hooks/useStore";
-import { AppTab, BrushSettings, CustomFont, PaperBackground, Sticker, WashiTape, StoreItem } from "@/types";
+import { AppTab, BrushSettings, CustomFont, EnvelopeStyle, MailStamp, PaperBackground, Sticker, WashiTape, StoreItem } from "@/types";
 
 const TABS: { id: AppTab; label: string; icon: string }[] = [
-  { id: "studio", label: "Canvas", icon: "✏️" },
-  { id: "mail", label: "Mail", icon: "💌" },
-  { id: "store", label: "Shop", icon: "🏪" },
+  { id: "studio", label: "Canvas", icon: "edit" },
+  { id: "mail", label: "Mail", icon: "mail" },
+  { id: "store", label: "Shop", icon: "shop" },
 ];
+
+const TAB_ICONS: Record<string, ReactNode> = {
+  edit: <FiEdit3 />,
+  mail: <FiMail />,
+  shop: <FiShoppingBag />,
+};
 
 const PRESENCE_COLORS = ["#ff6b9d", "#67d4f1", "#6ee7b7", "#a78bfa", "#fb923c", "#fbbf24"];
 
@@ -30,6 +37,8 @@ type ArtistPresence = {
   x: number;
   y: number;
   lastSeen: number;
+  avatarUrl?: string;
+  username?: string;
 };
 
 type PresencePayload = {
@@ -39,6 +48,8 @@ type PresencePayload = {
   x: number;
   y: number;
   ts: number;
+  avatarUrl?: string;
+  username?: string;
 };
 
 function pruneStaleArtists(
@@ -89,10 +100,14 @@ export default function Home() {
     textFont: '"Space Mono", monospace',
   });
 
+  const account = useAccount();
+
   const {
     stickers,
     washiTapes,
     papers,
+    stamps,
+    envelopes,
     customFonts,
     selectedPaper,
     placedItems,
@@ -102,22 +117,27 @@ export default function Home() {
     addSticker,
     addWashiTape,
     addPaper,
+    addStamp,
+    addEnvelope,
     addCustomFont,
     placeItem,
+    placeTextItem,
     shiftPlacedItems,
+    updatePlacedItem,
     removeSticker,
     removeWashiTape,
     removePaper,
+    removeStamp,
+    removeEnvelope,
     removeCustomFont,
-  } = useAssets();
+  } = useAssets(account.viewer);
 
   const [artists, setArtists] = useState<Record<string, ArtistPresence>>({});
   const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
   const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
 
-  const account = useAccount();
   const mail = useMail(account.viewer);
-  const store = useStore();
+  const store = useStore(account.viewer);
 
   const handleBrushChange = useCallback((update: Partial<BrushSettings>) => {
     setBrushSettings((prev) => ({ ...prev, ...update }));
@@ -156,15 +176,19 @@ export default function Home() {
       } else if (item.type === "background") {
         const paper = addPaper(item.name, item.imageData, item.width, item.height);
         setSelectedPaper(paper);
+      } else if (item.type === "stamp") {
+        addStamp(item.name, item.imageData, item.width, item.height);
+      } else if (item.type === "envelope") {
+        addEnvelope(item.name, item.imageData, item.width, item.height);
       } else if (item.type === "font" && item.fontData) {
         addCustomFont(item.fontData.name, item.fontData.glyphs, item.fontData.glyphWidth, item.fontData.glyphHeight);
       }
     },
-    [addSticker, addWashiTape, addPaper, addCustomFont, setSelectedPaper]
+    [addSticker, addWashiTape, addPaper, addStamp, addEnvelope, addCustomFont, setSelectedPaper]
   );
 
   const handleStorePublish = useCallback(
-    (item: Sticker | WashiTape | PaperBackground | CustomFont, itemType: StoreItem["type"], tags: string[]) => {
+    (item: Sticker | WashiTape | PaperBackground | CustomFont | MailStamp | EnvelopeStyle, itemType: StoreItem["type"], tags: string[]) => {
       store.publishToStore(item, itemType, account.viewer.name, account.viewer.accountId ?? account.viewer.id, tags);
     },
     [account.viewer, store]
@@ -192,6 +216,8 @@ export default function Home() {
       x: pos.x,
       y: pos.y,
       ts: Date.now(),
+      avatarUrl: account.viewer.avatarUrl,
+      username: account.viewer.username,
     };
     setArtists((prev) => ({
       ...prev,
@@ -202,10 +228,12 @@ export default function Home() {
         x: payload.x,
         y: payload.y,
         lastSeen: payload.ts,
+        avatarUrl: payload.avatarUrl,
+        username: payload.username,
       },
     }));
     channelRef.current?.postMessage(payload);
-  }, [getViewportCenterWorld, mail.user.name]);
+  }, [getViewportCenterWorld, mail.user.name, account.viewer.avatarUrl, account.viewer.username]);
 
   const jumpToArtist = useCallback(
     (artist: ArtistPresence) => {
@@ -324,6 +352,8 @@ export default function Home() {
           x: payload.x,
           y: payload.y,
           lastSeen: payload.ts,
+          avatarUrl: payload.avatarUrl,
+          username: payload.username,
         },
       }));
     };
@@ -375,14 +405,15 @@ export default function Home() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold"
+                className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
                 style={{
                   background: activeTab === tab.id ? "var(--surface-hover)" : "transparent",
                   color: activeTab === tab.id ? "var(--foreground)" : "var(--muted)",
                 }}
                 aria-current={activeTab === tab.id ? "page" : undefined}
+                aria-label={tab.label}
               >
-                <span>{tab.icon}</span>
+                <span>{TAB_ICONS[tab.icon]}</span>
                 <span className="hidden sm:inline">{tab.label}</span>
                 {tab.id === "mail" && unreadCount > 0 && (
                   <span
@@ -436,52 +467,11 @@ export default function Home() {
 
       {/* Studio — stays mounted for canvas persistence */}
       <div
-        className="mx-auto flex w-full max-w-7xl flex-1 flex-col overflow-hidden px-3 pb-3 pt-2 sm:px-4"
+        className="relative flex-1 overflow-hidden"
         style={{ display: activeTab === "studio" ? "flex" : "none" }}
       >
-        {/* Framed viewport — border stays as window chrome, inside scrolls */}
-        <div
-          className="panel relative flex-1 overflow-hidden"
-          style={{ background: "#f8f1ff" }}
-        >
-          <div
-            className="pointer-events-none absolute inset-0 z-30 rounded-[inherit]"
-            style={{
-              border: "2px solid rgba(174, 139, 209, 0.78)",
-              boxShadow:
-                "inset 0 0 0 2px rgba(255,255,255,0.72), inset 0 0 0 10px rgba(255,255,255,0.2)",
-            }}
-          />
-          {/* HUD chips — pinned to viewport corners */}
-          <div className="pointer-events-none absolute left-3 top-3 z-40 chip">
-            📄 {selectedPaper?.name ?? "Plain Paper"}
-          </div>
-          <div className="absolute right-3 top-3 z-40 w-52 rounded-xl border p-2" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
-              Current Artists ({artistList.length})
-            </p>
-            <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
-              {artistList.map((artist) => {
-                const isSelf = artist.id === selfArtistId;
-                return (
-                  <button
-                    key={artist.id}
-                    onClick={() => jumpToArtist(artist)}
-                    className="btn-smooth flex items-center gap-2 rounded-lg px-2 py-1 text-left text-xs"
-                    style={{ background: "var(--surface-soft)", color: "var(--foreground-soft)" }}
-                  >
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: artist.color }} />
-                    <span className="truncate">{isSelf ? `${artist.name} (you)` : artist.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div className="pointer-events-none absolute bottom-3 right-3 z-40 chip">
-            ↑T text tool · stickers tap · tape drag
-          </div>
-          {/* Edge presence indicators — off-screen remote cursors */}
-          {viewSize.w > 0 && remoteArtists.map((artist) => {
+        {/* Edge presence indicators — off-screen remote cursors */}
+        {viewSize.w > 0 && remoteArtists.map((artist) => {
             const MARGIN = 32;
             const canvasX = artist.x - worldOffset.x;
             const canvasY = artist.y - worldOffset.y;
@@ -540,6 +530,8 @@ export default function Home() {
                 selectedPaper={selectedPaper}
                 customFonts={customFonts}
                 onPlaceAsset={(asset, x, y) => placeItem(asset, x, y)}
+                onAddTextItem={(item) => placeTextItem(item.text ?? "Text", item.x, item.y, item.textColor ?? brushSettings.color, item.textSize ?? 32, item.textFont ?? '"Space Mono", monospace')}
+                onUpdatePlacedItem={updatePlacedItem}
                 backgroundOffsetX={worldOffset.x}
                 backgroundOffsetY={worldOffset.y}
                 width={CANVAS_W}
@@ -578,11 +570,11 @@ export default function Home() {
               })}
             </div>
           </div>
-        </div>
         <StudioToolbar
           brushSettings={brushSettings}
           onBrushChange={handleBrushChange}
           onUndo={() => canvasRef.current?.undo()}
+          onRedo={() => canvasRef.current?.redo()}
           onClear={() => canvasRef.current?.clearCanvas()}
           onExport={handleExport}
           stickers={stickers}
@@ -602,37 +594,55 @@ export default function Home() {
           onSaveSticker={addSticker}
           onSaveWashi={addWashiTape}
           onSaveCustomFont={addCustomFont}
+          collaborators={artistList.map((artist) => ({
+            id: artist.id,
+            name: artist.name,
+            color: artist.color,
+            avatarUrl: artist.avatarUrl,
+            username: artist.username,
+          }))}
+          selfCollaboratorId={selfArtistId}
+          onJumpToCollaborator={(artistId) => {
+            const artist = artistList.find((item) => item.id === artistId);
+            if (artist) jumpToArtist(artist);
+          }}
         />
       </div>
 
       {/* Mail */}
       <div
-        className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col items-center overflow-hidden px-3 pb-3 pt-2 sm:px-4"
+        className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col items-center overflow-y-auto px-3 pb-3 pt-2 sm:px-4"
         style={{ display: activeTab === "mail" ? "flex" : "none" }}
       >
-        <div className="panel flex min-h-0 h-full w-full max-w-4xl flex-col overflow-hidden">
+        <div className="panel flex w-full max-w-4xl flex-col overflow-visible">
           {mailView === "compose" ? (
-            <MailCompose
+            <MailComposePanel
               senderName={mail.user.name}
               stickers={stickers}
               washiTapes={washiTapes}
               papers={papers}
+              stamps={stamps}
+              envelopes={envelopes}
               customFonts={customFonts}
               onSaveSticker={addSticker}
               onSaveWashi={addWashiTape}
+              onSavePaper={addPaper}
+              onSaveStamp={addStamp}
+              onSaveEnvelope={addEnvelope}
               onSaveCustomFont={addCustomFont}
               onDeleteSticker={removeSticker}
               onDeleteWashi={removeWashiTape}
               onDeletePaper={removePaper}
+              onDeleteStamp={removeStamp}
+              onDeleteEnvelope={removeEnvelope}
               onDeleteCustomFont={removeCustomFont}
               onBack={() => setMailView("inbox")}
-              onSend={(receiver, imageData, speed, stamp) => {
-                mail.sendLetter(receiver, imageData, speed, stamp);
-                setMailView("inbox");
+              onSend={(payload) => {
+                mail.sendLetter(payload);
               }}
             />
           ) : (
-            <Mailbox
+            <MailboxPanel
               inbox={mail.inbox}
               sent={mail.sent}
               userId={mail.user.id}
@@ -665,6 +675,8 @@ export default function Home() {
             userStickers={stickers}
             userWashiTapes={washiTapes}
             userPapers={papers}
+            userStamps={stamps}
+            userEnvelopes={envelopes}
             userFonts={customFonts}
             onPublish={handleStorePublish}
           />

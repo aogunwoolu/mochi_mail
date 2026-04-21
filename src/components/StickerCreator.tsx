@@ -7,8 +7,8 @@ interface StickerCreatorProps {
   onSave: (name: string, imageData: string, width: number, height: number) => void;
 }
 
-const GRID_SIZE = 32;
-const PIXEL_SIZE = 10;
+const CANVAS_SIZE = 320;
+const BRUSH_SIZE = 12;
 
 export default function StickerCreator({ onSave }: StickerCreatorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -16,8 +16,9 @@ export default function StickerCreator({ onSave }: StickerCreatorProps) {
   const [selectedColor, setSelectedColor] = useState("#ff6b9d");
   const [stickerName, setStickerName] = useState("");
   const isDrawing = useRef(false);
+  const lastPoint = useRef<{ x: number; y: number } | null>(null);
 
-  const drawPixel = useCallback(
+  const drawStroke = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -26,10 +27,27 @@ export default function StickerCreator({ onSave }: StickerCreatorProps) {
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
-      const x = Math.floor(((e.clientX - rect.left) * scaleX) / PIXEL_SIZE) * PIXEL_SIZE;
-      const y = Math.floor(((e.clientY - rect.top) * scaleY) / PIXEL_SIZE) * PIXEL_SIZE;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
+
+      ctx.strokeStyle = selectedColor;
       ctx.fillStyle = selectedColor;
-      ctx.fillRect(x, y, PIXEL_SIZE, PIXEL_SIZE);
+      ctx.lineWidth = BRUSH_SIZE;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      const previous = lastPoint.current;
+      if (!previous) {
+        ctx.beginPath();
+        ctx.arc(x, y, BRUSH_SIZE / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(previous.x, previous.y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+      lastPoint.current = { x, y };
     },
     [selectedColor]
   );
@@ -37,21 +55,25 @@ export default function StickerCreator({ onSave }: StickerCreatorProps) {
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     isDrawing.current = true;
-    drawPixel(e);
-  }, [drawPixel]);
+    drawStroke(e);
+  }, [drawStroke]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing.current) return;
     e.preventDefault();
-    drawPixel(e);
-  }, [drawPixel]);
+    drawStroke(e);
+  }, [drawStroke]);
 
-  const handlePointerUp = useCallback(() => { isDrawing.current = false; }, []);
+  const handlePointerUp = useCallback(() => {
+    isDrawing.current = false;
+    lastPoint.current = null;
+  }, []);
 
   const handleClear = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    lastPoint.current = null;
   }, []);
 
   const handleSave = useCallback(() => {
@@ -126,10 +148,10 @@ export default function StickerCreator({ onSave }: StickerCreatorProps) {
         <div className="overflow-hidden rounded-lg" style={{ border: "1px solid var(--border)" }}>
           <canvas
             ref={canvasRef}
-            width={GRID_SIZE * PIXEL_SIZE}
-            height={GRID_SIZE * PIXEL_SIZE}
+            width={CANVAS_SIZE}
+            height={CANVAS_SIZE}
             className="block"
-            style={{ width: GRID_SIZE * PIXEL_SIZE * 0.6, height: GRID_SIZE * PIXEL_SIZE * 0.6, touchAction: "none", cursor: "crosshair", imageRendering: "pixelated", background: "rgba(255,255,255,0.05)" }}
+            style={{ width: CANVAS_SIZE * 0.6, height: CANVAS_SIZE * 0.6, touchAction: "none", cursor: "crosshair", background: "rgba(255,255,255,0.05)" }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}

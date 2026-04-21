@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont } from "@/types";
+import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity } from "@/types";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import type { Json } from "@/types/database";
 
-type VisualAsset = Sticker | WashiTape | PaperBackground;
+type VisualAsset = Sticker | WashiTape | PaperBackground | MailStamp | EnvelopeStyle;
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -12,10 +14,20 @@ function generateId() {
 const STORE_KEY = "mochimail_store";
 const COLLECTION_KEY = "mochimail_store_collection";
 
-function loadStore(): StoreItem[] {
+function storeKeyFor(user: ViewerIdentity): string {
+  const id = user.accountId ?? user.id ?? "guest";
+  return `${STORE_KEY}:${id}`;
+}
+
+function collectionKeyFor(user: ViewerIdentity): string {
+  const id = user.accountId ?? user.id ?? "guest";
+  return `${COLLECTION_KEY}:${id}`;
+}
+
+function loadStore(key: string): StoreItem[] {
   if (!globalThis.window) return [];
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return getDefaultStoreItems();
     const parsed = JSON.parse(raw) as StoreItem[];
     const migrated = parsed.map((item) => {
@@ -41,10 +53,15 @@ function saveStore(items: StoreItem[]) {
   localStorage.setItem(STORE_KEY, JSON.stringify(items));
 }
 
-function loadCollection(): string[] {
+function saveStoreByKey(key: string, items: StoreItem[]) {
+  if (!globalThis.window) return;
+  localStorage.setItem(key, JSON.stringify(items));
+}
+
+function loadCollection(key: string): string[] {
   if (!globalThis.window) return [];
   try {
-    const raw = localStorage.getItem(COLLECTION_KEY);
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
@@ -54,6 +71,11 @@ function loadCollection(): string[] {
 function saveCollection(ids: string[]) {
   if (!globalThis.window) return;
   localStorage.setItem(COLLECTION_KEY, JSON.stringify(ids));
+}
+
+function saveCollectionByKey(key: string, ids: string[]) {
+  if (!globalThis.window) return;
+  localStorage.setItem(key, JSON.stringify(ids));
 }
 
 function createCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
@@ -149,6 +171,58 @@ function makeGraphPaper(): string {
   return canvas.toDataURL("image/png");
 }
 
+function makeStoreStamp(): string {
+  const data = createCanvas(140, 160);
+  if (!data) return "";
+  const { canvas, ctx } = data;
+  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+  gradient.addColorStop(0, "#ff8eb9");
+  gradient.addColorStop(1, "#ffc6d8");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(8, 8, canvas.width - 16, canvas.height - 16);
+  ctx.setLineDash([10, 6]);
+  ctx.strokeStyle = "rgba(255,255,255,0.92)";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(14, 14, canvas.width - 28, canvas.height - 28);
+  ctx.setLineDash([]);
+  ctx.font = "64px serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(255,255,255,0.98)";
+  ctx.fillText("💌", canvas.width / 2, canvas.height / 2 + 4);
+  return canvas.toDataURL("image/png");
+}
+
+function makeStoreEnvelope(): string {
+  const data = createCanvas(820, 520);
+  if (!data) return "";
+  const { canvas, ctx } = data;
+  ctx.fillStyle = "#fff3f7";
+  ctx.beginPath();
+  ctx.roundRect(40, 110, 740, 320, 28);
+  ctx.fill();
+  ctx.fillStyle = "#ffd6e4";
+  ctx.beginPath();
+  ctx.moveTo(60, 128);
+  ctx.lineTo(410, 315);
+  ctx.lineTo(760, 128);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.beginPath();
+  ctx.moveTo(60, 408);
+  ctx.lineTo(410, 236);
+  ctx.lineTo(760, 408);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 133, 176, 0.45)";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.roundRect(40, 110, 740, 320, 28);
+  ctx.stroke();
+  return canvas.toDataURL("image/png");
+}
+
 function getDefaultStoreItems(): StoreItem[] {
   // Only generate defaults in browser
   if (typeof document === "undefined") return [];
@@ -206,19 +280,110 @@ function getDefaultStoreItems(): StoreItem[] {
       height: 800,
       tags: ["paper", "graph", "cute"],
     },
+    {
+      id: "default_stamp",
+      name: "Love Letter Stamp",
+      imageData: makeStoreStamp(),
+      type: "stamp",
+      authorName: "MochiTeam",
+      authorId: "system",
+      downloads: 14,
+      createdAt: Date.now() - 432000000,
+      width: 140,
+      height: 160,
+      tags: ["stamp", "mail", "cute"],
+    },
+    {
+      id: "default_envelope",
+      name: "Blush Envelope",
+      imageData: makeStoreEnvelope(),
+      type: "envelope",
+      authorName: "MochiTeam",
+      authorId: "system",
+      downloads: 11,
+      createdAt: Date.now() - 518400000,
+      width: 820,
+      height: 520,
+      tags: ["envelope", "mail", "pink"],
+    },
   ];
 }
 
-export function useStore() {
+export function useStore(user: ViewerIdentity) {
   const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [collection, setCollection] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterType, setFilterType] = useState<"all" | "sticker" | "washi" | "background" | "font">("all");
+  const [filterType, setFilterType] = useState<"all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope">("all");
+  const [hydratedRemote, setHydratedRemote] = useState(false);
+  const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
+  const storeKey = storeKeyFor(user);
+  const collectionKey = collectionKeyFor(user);
 
   useEffect(() => {
-    setStoreItems(loadStore());
-    setCollection(loadCollection());
-  }, []);
+    const localStore = loadStore(storeKey);
+    const localCollection = loadCollection(collectionKey);
+    setStoreItems(localStore);
+    setCollection(localCollection);
+
+    if (!ownerId) {
+      setHydratedRemote(true);
+      return;
+    }
+
+    let cancelled = false;
+    const loadRemote = async () => {
+      try {
+        const supabase = createSupabaseBrowserClient();
+        const { data } = await supabase
+          .from("store_states")
+          .select("payload")
+          .eq("owner_id", ownerId)
+          .maybeSingle();
+
+        if (cancelled) return;
+        const payload = (data?.payload ?? null) as { storeItems?: StoreItem[]; collection?: string[] } | null;
+        if (payload) {
+          const nextStore = payload.storeItems ?? localStore;
+          const nextCollection = payload.collection ?? localCollection;
+          setStoreItems(nextStore);
+          setCollection(nextCollection);
+          saveStoreByKey(storeKey, nextStore);
+          saveCollectionByKey(collectionKey, nextCollection);
+        }
+      } catch {
+        // Keep local fallback.
+      } finally {
+        if (!cancelled) setHydratedRemote(true);
+      }
+    };
+
+    void loadRemote();
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerId, storeKey, collectionKey]);
+
+  useEffect(() => {
+    if (!hydratedRemote) return;
+    saveStoreByKey(storeKey, storeItems);
+    saveCollectionByKey(collectionKey, collection);
+    if (!ownerId) return;
+
+    const timeout = globalThis.setTimeout(() => {
+      void (async () => {
+        try {
+          const supabase = createSupabaseBrowserClient();
+          await supabase
+            .from("store_states")
+            .upsert({ owner_id: ownerId, payload: ({ storeItems, collection } as unknown as Json), updated_at: new Date().toISOString() }, { onConflict: "owner_id" });
+        } catch {
+          // Local state already saved.
+        }
+      })();
+    }, 350);
+
+    return () => globalThis.clearTimeout(timeout);
+  }, [hydratedRemote, ownerId, storeKey, collectionKey, storeItems, collection]);
 
   const publishToStore = useCallback(
     (
@@ -250,12 +415,12 @@ export function useStore() {
       };
       setStoreItems((prev) => {
         const updated = [storeItem, ...prev];
-        saveStore(updated);
+        saveStoreByKey(storeKey, updated);
         return updated;
       });
       return storeItem;
     },
-    []
+    [storeKey]
   );
 
   const addToCollection = useCallback(
@@ -263,7 +428,7 @@ export function useStore() {
       if (collection.includes(itemId)) return;
       setCollection((prev) => {
         const updated = [...prev, itemId];
-        saveCollection(updated);
+        saveCollectionByKey(collectionKey, updated);
         return updated;
       });
       // Increment download count
@@ -271,20 +436,20 @@ export function useStore() {
         const updated = prev.map((item) =>
           item.id === itemId ? { ...item, downloads: item.downloads + 1 } : item
         );
-        saveStore(updated);
+        saveStoreByKey(storeKey, updated);
         return updated;
       });
     },
-    [collection]
+    [collection, collectionKey, storeKey]
   );
 
   const removeFromCollection = useCallback((itemId: string) => {
     setCollection((prev) => {
       const updated = prev.filter((id) => id !== itemId);
-      saveCollection(updated);
+      saveCollectionByKey(collectionKey, updated);
       return updated;
     });
-  }, []);
+  }, [collectionKey]);
 
   const isInCollection = useCallback(
     (itemId: string) => collection.includes(itemId),
@@ -305,7 +470,7 @@ export function useStore() {
   });
 
   const getStoreItemAsAsset = useCallback(
-    (itemId: string): Sticker | WashiTape | PaperBackground | CustomFont | null => {
+    (itemId: string): Sticker | WashiTape | PaperBackground | CustomFont | MailStamp | EnvelopeStyle | null => {
       const item = storeItems.find((i) => i.id === itemId);
       if (!item) return null;
       if (item.type === "washi") {
@@ -326,6 +491,24 @@ export function useStore() {
           width: item.width,
           height: item.height,
         } as PaperBackground;
+      }
+      if (item.type === "stamp") {
+        return {
+          id: item.id,
+          name: item.name,
+          imageData: item.imageData,
+          width: item.width,
+          height: item.height,
+        } as MailStamp;
+      }
+      if (item.type === "envelope") {
+        return {
+          id: item.id,
+          name: item.name,
+          imageData: item.imageData,
+          width: item.width,
+          height: item.height,
+        } as EnvelopeStyle;
       }
       if (item.type === "font" && item.fontData) {
         return {

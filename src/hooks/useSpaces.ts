@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { SpaceItem, SpaceItemType, UserSpace } from "@/types";
 import type { Database } from "@/types/database";
 
 type SpaceRow = Database["public"]["Tables"]["spaces"]["Row"];
 type SpaceItemRow = Database["public"]["Tables"]["space_items"]["Row"];
+type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type SpaceUpdate = Database["public"]["Tables"]["spaces"]["Update"];
 type SpaceItemUpdate = Database["public"]["Tables"]["space_items"]["Update"];
 
@@ -27,24 +28,6 @@ function rowToSpaceItem(row: SpaceItemRow): SpaceItem {
     color: row.color,
     rotation: row.rotation,
     imageUrl: row.image_url ?? undefined,
-  };
-}
-
-function rowsToUserSpace(space: SpaceRow, items: SpaceItemRow[]): UserSpace {
-  return {
-    id: space.id,
-    ownerId: space.owner_id,
-    ownerName: "",
-    slug: space.id,
-    title: space.title,
-    tagline: space.tagline,
-    aboutMe: space.about_me,
-    avatarUrl: "",
-    youtubeUrl: "",
-    accentColor: "",
-    wallpaper: "",
-    items: items.map(rowToSpaceItem),
-    updatedAt: new Date(space.updated_at).getTime(),
   };
 }
 
@@ -81,99 +64,179 @@ function makeItem(type: SpaceItemType, overrides: Partial<SpaceItem> = {}): Spac
   };
 }
 
+function buildSpace(
+  space: SpaceRow,
+  items: SpaceItemRow[],
+  profile: ProfileRow | undefined,
+  currentAccount: { id: string; displayName: string; username: string; bio: string; avatarUrl: string; youtubeUrl: string; accentColor: string; wallpaper: string; homeTitle: string } | null
+): UserSpace {
+  const isCurrentUser = Boolean(currentAccount && currentAccount.id === space.owner_id);
+
+  const ownerName = isCurrentUser
+    ? currentAccount!.displayName
+    : (profile?.display_name ?? "Artist");
+
+  const slug = profile?.username ?? space.id;
+
+  return {
+    id: space.id,
+    ownerId: space.owner_id,
+    ownerName,
+    slug,
+    title: space.title,
+    tagline: space.tagline,
+    aboutMe: space.about_me,
+    avatarUrl: isCurrentUser ? currentAccount!.avatarUrl : (profile?.avatar_url ?? ""),
+    youtubeUrl: isCurrentUser ? currentAccount!.youtubeUrl : (profile?.youtube_url ?? ""),
+    accentColor: isCurrentUser ? currentAccount!.accentColor : (profile?.accent_color ?? "#ff6b9d"),
+    wallpaper: isCurrentUser ? currentAccount!.wallpaper : (profile?.wallpaper ?? ""),
+    items: items.map(rowToSpaceItem),
+    updatedAt: new Date(space.updated_at).getTime(),
+  };
+}
+
+function toSpaceItemUpdate(patch: Partial<SpaceItem>): SpaceItemUpdate {
+  const dbPatch: SpaceItemUpdate = { updated_at: new Date().toISOString() };
+  if (patch.title !== undefined) dbPatch.title = patch.title;
+  if (patch.content !== undefined) dbPatch.content = patch.content;
+  if (patch.x !== undefined) dbPatch.x = patch.x;
+  if (patch.y !== undefined) dbPatch.y = patch.y;
+  if (patch.width !== undefined) dbPatch.width = patch.width;
+  if (patch.height !== undefined) dbPatch.height = patch.height;
+  if (patch.color !== undefined) dbPatch.color = patch.color;
+  if (patch.rotation !== undefined) dbPatch.rotation = patch.rotation;
+  if (patch.imageUrl !== undefined) dbPatch.image_url = patch.imageUrl;
+  return dbPatch;
+}
+
 export function useSpaces(
   _accounts: never[],
   currentAccount: { id: string; displayName: string; username: string; bio: string; avatarUrl: string; youtubeUrl: string; accentColor: string; wallpaper: string; homeTitle: string } | null
 ) {
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
+  const pendingItemPatchRef = useRef<Record<string, Partial<SpaceItem>>>({});
+  const pendingItemTimerRef = useRef<Record<string, number>>({});
 
-  // Load spaces for the current user from Supabase
   useEffect(() => {
-    if (!currentAccount) { setSpaces([]); return; }
+    return () => {
+      Object.values(pendingItemTimerRef.current).forEach((timerId) => globalThis.clearTimeout(timerId));
+      pendingItemTimerRef.current = {};
+      pendingItemPatchRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentAccount) {
+      setSpaces([]);
+      return;
+    }
+
     const supabase = createSupabaseBrowserClient();
+    let cancelled = false;
+
+    async function ensureOwnSpace() {
+      const { data: ownSpace } = await supabase
+        .from("spaces")
+        .select("*")
+        .eq("owner_id", currentAccount.id)
+        .maybeSingle();
+
+      if (ownSpace) return ownSpace;
+
+      const { data: created } = await supabase
+        .from("spaces")
+        .insert({
+          owner_id: currentAccount.id,
+          title: currentAccount.homeTitle,
+          tagline: "A public creative board full of scraps, sounds, and mood.",
+          about_me: currentAccount.bio,
+        })
+        .select()
+        .single();
+
+      if (!created) return null;
+
+      const aboutItem = makeItem("about", { content: currentAccount.bio });
+      const noteItem = makeItem("note", { color: "#ffe08a", content: "Pin ideas, to-dos, or little moods here." });
+
+      await supabase.from("space_items").insert([
+        {
+          space_id: created.id,
+          type: aboutItem.type,
+          title: aboutItem.title,
+          content: aboutItem.content,
+          x: 90,
+          y: 100,
+          width: 280,
+          height: 220,
+          color: aboutItem.color,
+          rotation: 0,
+        },
+        {
+          space_id: created.id,
+          type: noteItem.type,
+          title: noteItem.title,
+          content: noteItem.content,
+          x: 430,
+          y: 90,
+          width: 220,
+          height: 170,
+          color: noteItem.color,
+          rotation: 0,
+        },
+      ]);
+
+      return created;
+    }
 
     async function load() {
+      await ensureOwnSpace();
+
       const { data: spaceRows } = await supabase
         .from("spaces")
         .select("*")
-        .eq("owner_id", currentAccount!.id);
+        .order("updated_at", { ascending: false });
 
       if (!spaceRows || spaceRows.length === 0) {
-        // Create a default space for this user
-        const { data: newSpace } = await supabase
-          .from("spaces")
-          .insert({
-            owner_id: currentAccount!.id,
-            title: currentAccount!.homeTitle,
-            tagline: "A public creative board full of scraps, sounds, and mood.",
-            about_me: currentAccount!.bio,
-          })
-          .select()
-          .single();
-
-        if (newSpace) {
-          const aboutItem = makeItem("about", { content: currentAccount!.bio });
-          const noteItem = makeItem("note", { color: "#ffe08a", content: "Pin ideas, to-dos, or little moods here." });
-
-          await supabase.from("space_items").insert([
-            { space_id: newSpace.id, type: aboutItem.type, title: aboutItem.title, content: aboutItem.content, x: 90, y: 100, width: 280, height: 220, color: aboutItem.color, rotation: 0 },
-            { space_id: newSpace.id, type: noteItem.type, title: noteItem.title, content: noteItem.content, x: 430, y: 90, width: 220, height: 170, color: noteItem.color, rotation: 0 },
-          ]);
-
-          const { data: freshSpace } = await supabase
-            .from("spaces")
-            .select("*")
-            .eq("id", newSpace.id)
-            .single();
-
-          const { data: freshItems } = await supabase
-            .from("space_items")
-            .select("*")
-            .eq("space_id", newSpace.id);
-
-          if (freshSpace) {
-            const space = rowsToUserSpace(freshSpace, freshItems ?? []);
-            space.ownerName = currentAccount!.displayName;
-            space.avatarUrl = currentAccount!.avatarUrl;
-            space.youtubeUrl = currentAccount!.youtubeUrl;
-            space.accentColor = currentAccount!.accentColor;
-            space.wallpaper = currentAccount!.wallpaper;
-            setSpaces([space]);
-          }
-        }
+        if (!cancelled) setSpaces([]);
         return;
       }
 
       const spaceIds = spaceRows.map((row) => row.id);
-      const { data: itemRows } = await supabase
-        .from("space_items")
-        .select("*")
-        .in("space_id", spaceIds);
+      const ownerIds = [...new Set(spaceRows.map((row) => row.owner_id))];
+
+      const [{ data: itemRows }, { data: profiles }] = await Promise.all([
+        supabase.from("space_items").select("*").in("space_id", spaceIds),
+        supabase.from("profiles").select("*").in("id", ownerIds),
+      ]);
+
+      if (cancelled) return;
 
       const itemsBySpace = new Map<string, SpaceItemRow[]>();
       for (const row of itemRows ?? []) {
-        const existing = itemsBySpace.get(row.space_id);
-        if (existing) {
-          existing.push(row);
-        } else {
-          itemsBySpace.set(row.space_id, [row]);
-        }
+        const list = itemsBySpace.get(row.space_id);
+        if (list) list.push(row);
+        else itemsBySpace.set(row.space_id, [row]);
       }
 
-      const mapped = spaceRows.map((row) => {
-        const space = rowsToUserSpace(row, itemsBySpace.get(row.id) ?? []);
-        space.ownerName = currentAccount!.displayName;
-        space.avatarUrl = currentAccount!.avatarUrl;
-        space.youtubeUrl = currentAccount!.youtubeUrl;
-        space.accentColor = currentAccount!.accentColor;
-        space.wallpaper = currentAccount!.wallpaper;
-        return space;
-      });
+      const profilesByOwner = new Map<string, ProfileRow>();
+      for (const profile of profiles ?? []) {
+        profilesByOwner.set(profile.id, profile);
+      }
+
+      const mapped = spaceRows.map((space) =>
+        buildSpace(space, itemsBySpace.get(space.id) ?? [], profilesByOwner.get(space.owner_id), currentAccount)
+      );
+
       setSpaces(mapped);
     }
 
-    load();
-  }, [currentAccount?.id]);
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentAccount?.id, currentAccount?.displayName, currentAccount?.username, currentAccount?.bio, currentAccount?.avatarUrl, currentAccount?.youtubeUrl, currentAccount?.accentColor, currentAccount?.wallpaper, currentAccount?.homeTitle]);
 
   const ownSpace = useMemo(
     () => (currentAccount ? spaces.find((s) => s.ownerId === currentAccount.id) ?? null : null),
@@ -190,6 +253,19 @@ export function useSpaces(
     if (patch.aboutMe !== undefined) dbPatch.about_me = patch.aboutMe;
 
     await supabase.from("spaces").update(dbPatch).eq("id", ownSpace.id);
+
+    await supabase
+      .from("profiles")
+      .update({
+        display_name: patch.ownerName,
+        avatar_url: patch.avatarUrl,
+        bio: patch.aboutMe,
+        accent_color: patch.accentColor,
+        wallpaper: patch.wallpaper,
+        youtube_url: patch.youtubeUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", currentAccount.id);
 
     setSpaces((prev) =>
       prev.map((s) =>
@@ -228,21 +304,7 @@ export function useSpaces(
     return item;
   }, [currentAccount, ownSpace]);
 
-  const updateSpaceItem = useCallback(async (spaceId: string, itemId: string, patch: Partial<SpaceItem>) => {
-    const supabase = createSupabaseBrowserClient();
-    const dbPatch: SpaceItemUpdate = { updated_at: new Date().toISOString() };
-    if (patch.title !== undefined) dbPatch.title = patch.title;
-    if (patch.content !== undefined) dbPatch.content = patch.content;
-    if (patch.x !== undefined) dbPatch.x = patch.x;
-    if (patch.y !== undefined) dbPatch.y = patch.y;
-    if (patch.width !== undefined) dbPatch.width = patch.width;
-    if (patch.height !== undefined) dbPatch.height = patch.height;
-    if (patch.color !== undefined) dbPatch.color = patch.color;
-    if (patch.rotation !== undefined) dbPatch.rotation = patch.rotation;
-    if (patch.imageUrl !== undefined) dbPatch.image_url = patch.imageUrl;
-
-    await supabase.from("space_items").update(dbPatch).eq("id", itemId);
-
+  const updateSpaceItem = useCallback((spaceId: string, itemId: string, patch: Partial<SpaceItem>) => {
     setSpaces((prev) =>
       prev.map((s) =>
         s.id === spaceId
@@ -254,9 +316,33 @@ export function useSpaces(
           : s
       )
     );
+
+    const mergedPatch = { ...(pendingItemPatchRef.current[itemId] ?? {}), ...patch };
+    pendingItemPatchRef.current[itemId] = mergedPatch;
+
+    const existingTimer = pendingItemTimerRef.current[itemId];
+    if (existingTimer) globalThis.clearTimeout(existingTimer);
+
+    pendingItemTimerRef.current[itemId] = globalThis.setTimeout(() => {
+      const payload = pendingItemPatchRef.current[itemId];
+      delete pendingItemPatchRef.current[itemId];
+      delete pendingItemTimerRef.current[itemId];
+
+      if (!payload) return;
+
+      const supabase = createSupabaseBrowserClient();
+      void supabase.from("space_items").update(toSpaceItemUpdate(payload)).eq("id", itemId);
+    }, 140);
   }, []);
 
   const removeSpaceItem = useCallback(async (spaceId: string, itemId: string) => {
+    const pendingTimer = pendingItemTimerRef.current[itemId];
+    if (pendingTimer) {
+      globalThis.clearTimeout(pendingTimer);
+      delete pendingItemTimerRef.current[itemId];
+      delete pendingItemPatchRef.current[itemId];
+    }
+
     const supabase = createSupabaseBrowserClient();
     await supabase.from("space_items").delete().eq("id", itemId);
 

@@ -1,7 +1,18 @@
-export type Tool = "pen" | "eraser" | "sticker" | "washi" | "text";
+export type Tool = "pen" | "eraser" | "sticker" | "washi" | "text" | "select";
 export type AppTab = "studio" | "mail" | "store";
 export type DeliverySpeed = "express" | "standard" | "slow";
 export type SpaceItemType = "note" | "about" | "image" | "drawing";
+
+export interface LetterSendPayload {
+  receiverName: string;
+  imageData: string;
+  speed: DeliverySpeed;
+  stampStyle: string;
+  envelopeImageData?: string;
+  envelopeName?: string;
+  stampImageData?: string;
+  stampName?: string;
+}
 
 export interface BrushSettings {
   color: string;
@@ -31,6 +42,7 @@ export interface Sticker {
   imageData: string;
   width: number;
   height: number;
+  isAnimated?: boolean;
 }
 
 export interface WashiTape {
@@ -50,6 +62,22 @@ export interface PaperBackground {
   height: number;
 }
 
+export interface MailStamp {
+  id: string;
+  name: string;
+  imageData: string;
+  width: number;
+  height: number;
+}
+
+export interface EnvelopeStyle {
+  id: string;
+  name: string;
+  imageData: string;
+  width: number;
+  height: number;
+}
+
 export interface PlacedSticker {
   id: string;
   stickerId: string;
@@ -58,8 +86,14 @@ export interface PlacedSticker {
   imageData: string;
   width: number;
   height: number;
-  type: "sticker" | "washi";
+  rotation: number;
+  type: "sticker" | "washi" | "text";
   opacity: number;
+  isAnimated?: boolean;
+  text?: string;
+  textColor?: string;
+  textSize?: number;
+  textFont?: string;
 }
 
 export interface Letter {
@@ -69,6 +103,10 @@ export interface Letter {
   receiverId: string;
   receiverName: string;
   imageData: string; // the drawn letter as PNG data URL
+  envelopeImageData?: string;
+  envelopeName?: string;
+  stampImageData?: string;
+  stampName?: string;
   sentAt: number; // timestamp
   deliveryDuration: number; // ms
   deliverySpeed: DeliverySpeed;
@@ -138,7 +176,7 @@ export interface StoreItem {
   id: string;
   name: string;
   imageData: string;
-  type: "sticker" | "washi" | "background" | "font";
+  type: "sticker" | "washi" | "background" | "font" | "stamp" | "envelope";
   authorName: string;
   authorId: string;
   downloads: number;

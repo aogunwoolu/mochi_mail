@@ -266,6 +266,41 @@ textarea::placeholder {
   animation: float 3s ease-in-out infinite;
 }
 
+@keyframes mail-letter-send {
+  0% { transform: translate(-50%, -10%) scale(0.94) rotate(-2deg); opacity: 0; }
+  25% { opacity: 1; }
+  100% { transform: translate(-50%, 58%) scale(0.82) rotate(1deg); opacity: 1; }
+}
+.animate-mail-letter-send {
+  animation: mail-letter-send 1.15s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+@keyframes mail-stamp-pop {
+  0% { transform: scale(0.2) rotate(-18deg); opacity: 0; }
+  60% { transform: scale(1.14) rotate(6deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+.animate-mail-stamp-pop {
+  animation: mail-stamp-pop 0.55s 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes envelope-open {
+  0% { transform: scale(1); filter: drop-shadow(0 16px 32px rgba(126, 101, 154, 0.12)); }
+  100% { transform: translateY(10%) scale(0.9); filter: drop-shadow(0 10px 18px rgba(126, 101, 154, 0.08)); opacity: 0.62; }
+}
+.animate-envelope-open {
+  animation: envelope-open 0.9s ease forwards;
+}
+
+@keyframes letter-reveal {
+  0% { transform: translateY(26%) scale(0.88); opacity: 0; }
+  45% { opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.animate-letter-reveal {
+  animation: letter-reveal 0.92s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

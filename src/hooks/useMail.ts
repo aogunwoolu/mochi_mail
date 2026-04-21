@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { Letter, DeliverySpeed, DELIVERY_SPEEDS, ViewerIdentity } from "@/types";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { Letter, DELIVERY_SPEEDS, LetterSendPayload, ViewerIdentity } from "@/types";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import type { Json } from "@/types/database";
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
-
-const STORAGE_KEY = "mochimail_letters";
 
 function normalizeName(user: ViewerIdentity): string {
   return user.name?.trim() || user.username?.trim() || "Guest";
@@ -17,50 +17,115 @@ function safeLower(value: string | undefined): string {
   return value?.toLowerCase() ?? "";
 }
 
-function loadLetters(): Letter[] {
+function storageKeyFor(user: ViewerIdentity): string {
+  const id = user.accountId ?? user.id ?? "guest";
+  return `mochimail_letters:${id}`;
+}
+
+function loadLetters(storageKey: string): Letter[] {
   if (!globalThis.window) return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const raw = localStorage.getItem(storageKey);
+    return raw ? (JSON.parse(raw) as Letter[]) : [];
   } catch {
     return [];
   }
 }
 
-function saveLetters(letters: Letter[]) {
+function saveLetters(storageKey: string, letters: Letter[]) {
   if (!globalThis.window) return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(letters));
+  localStorage.setItem(storageKey, JSON.stringify(letters));
 }
 
 export function useMail(user: ViewerIdentity) {
   const [letters, setLetters] = useState<Letter[]>([]);
   const [tick, setTick] = useState(0);
+  const [hydratedRemote, setHydratedRemote] = useState(false);
   const viewerName = normalizeName(user);
-  const normalizedUser = { ...user, name: viewerName };
+  const normalizedUser = useMemo(() => ({ ...user, name: viewerName }), [user, viewerName]);
+  const storageKey = useMemo(() => storageKeyFor(user), [user]);
+  const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
 
-  // Load on mount
   useEffect(() => {
-    setLetters(loadLetters());
-  }, []);
+    const local = loadLetters(storageKey);
+    setLetters(local);
 
-  // Persist on change
-  useEffect(() => {
-    if (letters.length > 0) saveLetters(letters);
-  }, [letters]);
+    if (!ownerId) {
+      setHydratedRemote(true);
+      return;
+    }
 
-  // Timer tick to update delivery status
+    let cancelled = false;
+    const loadRemote = async () => {
+      try {
+        const supabase = createSupabaseBrowserClient();
+        const { data } = await supabase
+          .from("mail_states")
+          .select("payload")
+          .eq("owner_id", ownerId)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        const remoteLetters = ((data?.payload as { letters?: Letter[] } | null)?.letters ?? null);
+        if (Array.isArray(remoteLetters)) {
+          setLetters(remoteLetters);
+          saveLetters(storageKey, remoteLetters);
+        } else if (local.length > 0) {
+          await supabase
+            .from("mail_states")
+            .upsert({ owner_id: ownerId, payload: ({ letters: local } as unknown as Json), updated_at: new Date().toISOString() }, { onConflict: "owner_id" });
+        }
+      } catch {
+        // Keep local fallback when Supabase is unavailable.
+      } finally {
+        if (!cancelled) setHydratedRemote(true);
+      }
+    };
+
+    void loadRemote();
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerId, storageKey]);
+
   useEffect(() => {
-    const interval = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => clearInterval(interval);
+    if (!hydratedRemote) return;
+    saveLetters(storageKey, letters);
+    if (!ownerId) return;
+
+    const timeout = globalThis.setTimeout(() => {
+      void (async () => {
+        try {
+          const supabase = createSupabaseBrowserClient();
+          await supabase
+            .from("mail_states")
+            .upsert({ owner_id: ownerId, payload: ({ letters } as unknown as Json), updated_at: new Date().toISOString() }, { onConflict: "owner_id" });
+        } catch {
+          // Local persistence already succeeded.
+        }
+      })();
+    }, 350);
+
+    return () => globalThis.clearTimeout(timeout);
+  }, [letters, ownerId, storageKey, hydratedRemote]);
+
+  useEffect(() => {
+    const interval = globalThis.setInterval(() => setTick((t) => t + 1), 5000);
+    return () => globalThis.clearInterval(interval);
   }, []);
 
   const sendLetter = useCallback(
-    (
-      receiverName: string,
-      imageData: string,
-      speed: DeliverySpeed,
-      stampStyle: string
-    ) => {
+    ({
+      receiverName,
+      imageData,
+      speed,
+      stampStyle,
+      envelopeImageData,
+      envelopeName,
+      stampImageData,
+      stampName,
+    }: LetterSendPayload) => {
       const speedConfig = DELIVERY_SPEEDS.find((s) => s.id === speed)!;
       const letter: Letter = {
         id: generateId(),
@@ -69,17 +134,17 @@ export function useMail(user: ViewerIdentity) {
         receiverId: receiverName.toLowerCase().replaceAll(/\s+/g, "_"),
         receiverName,
         imageData,
+        envelopeImageData,
+        envelopeName,
+        stampImageData,
+        stampName,
         sentAt: Date.now(),
         deliveryDuration: speedConfig.duration,
         deliverySpeed: speed,
         read: false,
         stampStyle,
       };
-      setLetters((prev) => {
-        const updated = [...prev, letter];
-        saveLetters(updated);
-        return updated;
-      });
+      setLetters((prev) => [...prev, letter]);
       return letter;
     },
     [user.id, viewerName]
@@ -106,11 +171,7 @@ export function useMail(user: ViewerIdentity) {
   }, [tick]);
 
   const markAsRead = useCallback((letterId: string) => {
-    setLetters((prev) => {
-      const updated = prev.map((l) => (l.id === letterId ? { ...l, read: true } : l));
-      saveLetters(updated);
-      return updated;
-    });
+    setLetters((prev) => prev.map((l) => (l.id === letterId ? { ...l, read: true } : l)));
   }, []);
 
   const inbox = letters.filter(

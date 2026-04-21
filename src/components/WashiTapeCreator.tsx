@@ -9,7 +9,7 @@ interface WashiTapeCreatorProps {
 
 const TAPE_WIDTH = 240;
 const TAPE_HEIGHT = 48;
-const PIXEL_SIZE = 6;
+const BRUSH_SIZE = 6;
 
 export default function WashiTapeCreator({ onSave }: WashiTapeCreatorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -18,8 +18,9 @@ export default function WashiTapeCreator({ onSave }: WashiTapeCreatorProps) {
   const [tapeName, setTapeName] = useState("");
   const [opacity, setOpacity] = useState(70);
   const isDrawing = useRef(false);
+  const lastPoint = useRef<{ x: number; y: number } | null>(null);
 
-  const drawPixel = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+  const drawStroke = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -27,30 +28,51 @@ export default function WashiTapeCreator({ onSave }: WashiTapeCreatorProps) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    const x = Math.floor(((e.clientX - rect.left) * scaleX) / PIXEL_SIZE) * PIXEL_SIZE;
-    const y = Math.floor(((e.clientY - rect.top) * scaleY) / PIXEL_SIZE) * PIXEL_SIZE;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    ctx.strokeStyle = selectedColor;
     ctx.fillStyle = selectedColor;
-    ctx.fillRect(x, y, PIXEL_SIZE, PIXEL_SIZE);
+    ctx.lineWidth = BRUSH_SIZE;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    const previous = lastPoint.current;
+    if (!previous) {
+      ctx.beginPath();
+      ctx.arc(x, y, BRUSH_SIZE / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(previous.x, previous.y);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+    lastPoint.current = { x, y };
   }, [selectedColor]);
 
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     isDrawing.current = true;
-    drawPixel(e);
-  }, [drawPixel]);
+    drawStroke(e);
+  }, [drawStroke]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing.current) return;
     e.preventDefault();
-    drawPixel(e);
-  }, [drawPixel]);
+    drawStroke(e);
+  }, [drawStroke]);
 
-  const handlePointerUp = useCallback(() => { isDrawing.current = false; }, []);
+  const handlePointerUp = useCallback(() => {
+    isDrawing.current = false;
+    lastPoint.current = null;
+  }, []);
 
   const handleClear = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    lastPoint.current = null;
   }, []);
 
   const handleFill = useCallback(() => {
@@ -110,7 +132,7 @@ export default function WashiTapeCreator({ onSave }: WashiTapeCreatorProps) {
             width={TAPE_WIDTH}
             height={TAPE_HEIGHT}
             className="block"
-            style={{ width: TAPE_WIDTH, height: TAPE_HEIGHT, touchAction: "none", cursor: "crosshair", imageRendering: "pixelated", background: "rgba(255,255,255,0.05)" }}
+            style={{ width: TAPE_WIDTH, height: TAPE_HEIGHT, touchAction: "none", cursor: "crosshair", background: "rgba(255,255,255,0.05)" }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}

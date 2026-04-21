@@ -87,6 +87,48 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["space_items"]["Insert"]>;
         Relationships: [];
       };
+      mail_states: {
+        Row: {
+          owner_id: string;
+          payload: Json;
+          updated_at: string;
+        };
+        Insert: {
+          owner_id: string;
+          payload?: Json;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["mail_states"]["Insert"]>;
+        Relationships: [];
+      };
+      asset_states: {
+        Row: {
+          owner_id: string;
+          payload: Json;
+          updated_at: string;
+        };
+        Insert: {
+          owner_id: string;
+          payload?: Json;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["asset_states"]["Insert"]>;
+        Relationships: [];
+      };
+      store_states: {
+        Row: {
+          owner_id: string;
+          payload: Json;
+          updated_at: string;
+        };
+        Insert: {
+          owner_id: string;
+          payload?: Json;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["store_states"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

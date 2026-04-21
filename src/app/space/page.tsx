@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAccount } from "@/hooks/useAccount";
 import { useSpaces } from "@/hooks/useSpaces";
 import SpaceStudio from "@/components/SpaceStudio";
@@ -8,10 +8,28 @@ import { useState, useEffect } from "react";
 
 export default function SpacePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const account = useAccount();
   const spaces = useSpaces(account.accounts, account.currentAccount);
   const [selectedSpaceId, setSelectedSpaceId] = useState("");
   const isPreparingSpace = account.hydrated && account.hasSession && !account.currentAccount;
+  const requestedUser = searchParams.get("u")?.trim().toLowerCase() ?? "";
+
+  const selectedSpace = spaces.spaces.find((s) => s.id === selectedSpaceId)
+    ?? spaces.ownSpace
+    ?? spaces.spaces[0]
+    ?? null;
+
+  useEffect(() => {
+    if (!requestedUser || spaces.spaces.length === 0) return;
+    const match = spaces.spaces.find((space) =>
+      space.slug.toLowerCase() === requestedUser ||
+      space.ownerName.toLowerCase() === requestedUser
+    );
+    if (match && selectedSpaceId !== match.id) {
+      setSelectedSpaceId(match.id);
+    }
+  }, [requestedUser, spaces.spaces, selectedSpaceId]);
 
   // Redirect guests to home — they need an account for a space
   useEffect(() => {
@@ -40,7 +58,7 @@ export default function SpacePage() {
   return (
     <div
       className="flex h-dvh flex-col overflow-hidden"
-      style={{ background: account.viewer.wallpaper || "var(--bg)" }}
+      style={{ background: selectedSpace?.wallpaper || account.viewer.wallpaper || "var(--bg)" }}
     >
       {/* Header bar */}
       <header

@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont } from "@/types";
+import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle } from "@/types";
 
-type StoreFilterType = "all" | "sticker" | "washi" | "background" | "font";
+type StoreFilterType = "all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope";
 
 interface StoreViewProps {
   storeItems: StoreItem[];
@@ -19,8 +19,10 @@ interface StoreViewProps {
   userStickers: Sticker[];
   userWashiTapes: WashiTape[];
   userPapers: PaperBackground[];
+  userStamps: MailStamp[];
+  userEnvelopes: EnvelopeStyle[];
   userFonts: CustomFont[];
-  onPublish: (item: Sticker | WashiTape | PaperBackground | CustomFont, itemType: StoreItem["type"], tags: string[]) => void;
+  onPublish: (item: Sticker | WashiTape | PaperBackground | CustomFont | MailStamp | EnvelopeStyle, itemType: StoreItem["type"], tags: string[]) => void;
 }
 
 function filterLabel(type: StoreFilterType): string {
@@ -28,6 +30,8 @@ function filterLabel(type: StoreFilterType): string {
   if (type === "sticker") return "Stickers";
   if (type === "washi") return "Tape";
   if (type === "background") return "Paper";
+  if (type === "stamp") return "Stamps";
+  if (type === "envelope") return "Envelopes";
   return "Fonts";
 }
 
@@ -35,6 +39,8 @@ function itemTypeLabel(type: StoreItem["type"]): string {
   if (type === "background") return "Paper";
   if (type === "washi") return "Washi Tape";
   if (type === "font") return "Font";
+  if (type === "stamp") return "Stamp";
+  if (type === "envelope") return "Envelope";
   return "Sticker";
 }
 
@@ -51,6 +57,8 @@ export default function StoreView({
   userStickers,
   userWashiTapes,
   userPapers,
+  userStamps,
+  userEnvelopes,
   userFonts,
   onPublish,
 }: Readonly<StoreViewProps>) {
@@ -62,6 +70,8 @@ export default function StoreView({
     ...userStickers.map((s) => ({ ...s, assetType: "sticker" as const })),
     ...userWashiTapes.map((t) => ({ ...t, assetType: "washi" as const })),
     ...userPapers.map((p) => ({ ...p, assetType: "background" as const })),
+    ...userStamps.map((s) => ({ ...s, assetType: "stamp" as const })),
+    ...userEnvelopes.map((e) => ({ ...e, assetType: "envelope" as const })),
     ...userFonts.map((f) => ({
       ...f,
       assetType: "font" as const,
@@ -90,7 +100,7 @@ export default function StoreView({
         <div>
           <h2 className="text-lg font-bold">Community Store</h2>
           <p className="text-xs" style={{ color: "var(--muted)" }}>
-            Share your stickers, washi tape, paper themes, and custom fonts.
+            Share your stickers, washi tape, papers, stamps, envelopes, and custom fonts.
           </p>
         </div>
       </div>
@@ -101,14 +111,14 @@ export default function StoreView({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search stickers, tape, paper, or fonts..."
+            placeholder="Search stickers, tape, paper, stamps, envelopes, or fonts..."
             className="input-soft py-2.5 pl-10 pr-4 text-sm outline-none"
             style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--foreground)" }}
           />
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: "var(--muted)" }}>🔍</span>
         </div>
         <div className="flex gap-1 rounded-xl p-1" style={{ background: "var(--surface)" }}>
-          {(["all", "sticker", "washi", "background", "font"] as const).map((type) => (
+          {(["all", "sticker", "washi", "background", "stamp", "envelope", "font"] as const).map((type) => (
             <button
               key={type}
               onClick={() => setFilterType(type)}
@@ -139,7 +149,7 @@ export default function StoreView({
           </div>
           {allUserAssets.length === 0 ? (
             <div className="py-4 text-center text-sm" style={{ color: "var(--muted)" }}>
-              No assets to publish. Create stickers or tape first!
+              No assets to publish yet. Create stickers, papers, stamps, or envelopes first.
             </div>
           ) : (
             <>
@@ -160,9 +170,9 @@ export default function StoreView({
                           : "1px solid var(--border)",
                     }}
                   >
-                    <div className={`overflow-hidden rounded ${asset.assetType === "background" || asset.assetType === "font" ? "h-10 w-14" : "h-14 w-14"}`}>
+                    <div className={`overflow-hidden rounded ${asset.assetType === "background" || asset.assetType === "font" || asset.assetType === "envelope" ? "h-10 w-14" : "h-14 w-14"}`}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={asset.imageData} alt={asset.name} className="h-full w-full object-cover" style={{ imageRendering: asset.assetType === "background" || asset.assetType === "font" ? "auto" : "pixelated" }} />
+                      <img src={asset.imageData} alt={asset.name} className="h-full w-full object-cover" style={{ imageRendering: asset.assetType === "background" || asset.assetType === "font" || asset.assetType === "envelope" ? "auto" : "pixelated" }} />
                     </div>
                   </button>
                 ))}
@@ -205,13 +215,13 @@ export default function StoreView({
                 key={item.id}
                 className="glass group rounded-2xl p-3 transition-all hover:scale-[1.02]"
               >
-                <div className={`mb-2 flex items-center justify-center overflow-hidden rounded-xl ${item.type === "background" || item.type === "font" ? "aspect-4/3" : "aspect-square"}`} style={{ background: "rgba(255,255,255,0.03)" }}>
+                <div className={`mb-2 flex items-center justify-center overflow-hidden rounded-xl ${item.type === "background" || item.type === "font" || item.type === "envelope" ? "aspect-4/3" : "aspect-square"}`} style={{ background: "rgba(255,255,255,0.03)" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={item.imageData}
                     alt={item.name}
                     className="h-full w-full object-cover"
-                    style={{ imageRendering: item.type === "background" || item.type === "font" ? "auto" : "pixelated", opacity: item.type === "washi" ? item.opacity ?? 0.7 : 1 }}
+                    style={{ imageRendering: item.type === "background" || item.type === "font" || item.type === "envelope" ? "auto" : "pixelated", opacity: item.type === "washi" ? item.opacity ?? 0.7 : 1 }}
                   />
                 </div>
                 <div className="mb-1 truncate text-sm font-semibold">{item.name}</div>
@@ -249,7 +259,7 @@ export default function StoreView({
                     style={{ background: "var(--surface)", color: "var(--lavender)", border: "1px solid var(--border)" }}
                     title="Add to your assets"
                   >
-                    {item.type === "background" || item.type === "font" ? "Use" : "+"}
+                    {item.type === "background" || item.type === "font" || item.type === "stamp" || item.type === "envelope" ? "Use" : "+"}
                   </button>
                 </div>
               </div>

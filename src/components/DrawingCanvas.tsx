@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useCallback,
   useState,
+  useMemo,
   forwardRef,
   useImperativeHandle,
 } from "react";
@@ -14,42 +15,9 @@ export interface DrawingCanvasHandle {
   getCanvas: () => HTMLCanvasElement | null;
   clearCanvas: () => void;
   undo: () => void;
+  redo: () => void;
   getCompositeCanvas: () => HTMLCanvasElement;
   shiftContent: (dx: number, dy: number) => void;
-}
-
-async function renderCustomFontText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  font: CustomFont,
-  size: number,
-  glyphImagesRef: React.RefObject<Map<string, HTMLImageElement>>
-) {
-  let cursorX = x;
-  const scale = size / font.glyphHeight;
-  for (const char of text) {
-    const glyphData = font.glyphs[char] ?? font.glyphs[char.toUpperCase()] ?? font.glyphs[char.toLowerCase()];
-    if (!glyphData) {
-      cursorX += Math.max(font.glyphWidth * scale * 0.6, 6);
-      continue;
-    }
-    const cacheKey = `${font.id}:${char}`;
-    let img = glyphImagesRef.current.get(cacheKey);
-    if (!img) {
-      img = new Image();
-      img.src = glyphData;
-      glyphImagesRef.current.set(cacheKey, img);
-    }
-    if (!img.complete) {
-      await img.decode().catch(() => undefined);
-    }
-    const glyphW = font.glyphWidth * scale;
-    const glyphH = font.glyphHeight * scale;
-    ctx.drawImage(img, cursorX, y - glyphH, glyphW, glyphH);
-    cursorX += glyphW * 0.72;
-  }
 }
 
 interface DrawingCanvasProps {
@@ -59,11 +27,14 @@ interface DrawingCanvasProps {
   selectedPaper: PaperBackground | null;
   customFonts?: CustomFont[];
   onPlaceAsset: (asset: Sticker | WashiTape, x: number, y: number) => void;
+  onAddTextItem?: (item: PlacedSticker) => PlacedSticker | void;
+  onUpdatePlacedItem?: (id: string, updates: Partial<PlacedSticker>) => void;
   backgroundOffsetX?: number;
   backgroundOffsetY?: number;
   width?: number;
   height?: number;
   fillContainer?: boolean;
+  backgroundMode?: "tile" | "cover";
 }
 
 const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
@@ -75,11 +46,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       selectedPaper,
       customFonts = [],
       onPlaceAsset,
+      onAddTextItem,
+      onUpdatePlacedItem,
       backgroundOffsetX = 0,
       backgroundOffsetY = 0,
       width = 1200,
       height = 800,
       fillContainer = false,
+      backgroundMode = "tile",
     },
     ref
   ) => {
@@ -92,10 +66,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const washiStartRef = useRef<{ x: number; y: number } | null>(null);
     const preWashiStateRef = useRef<ImageData | null>(null);
     const [history, setHistory] = useState<ImageData[]>([]);
-    const [textOverlay, setTextOverlay] = useState<{ x: number; y: number; value: string } | null>(null);
+    const [redoHistory, setRedoHistory] = useState<ImageData[]>([]);
+    const [textOverlay, setTextOverlay] = useState<{ id: string; x: number; y: number; value: string } | null>(null);
+    const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+    const selectionDragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
     const assetImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const paperImageRef = useRef<HTMLImageElement | null>(null);
-    const glyphImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
 
     // Preload images for placed items
     useEffect(() => {
@@ -127,15 +103,87 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       const ctx = overlay.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+      const wrapLines = (text: string, maxWidth: number, font: string): string[] => {
+        ctx.font = font;
+        const lines: string[] = [];
+        const hardLines = text.split("\n");
+        for (const hardLine of hardLines) {
+          const words = hardLine.split(" ");
+          if (words.length === 0) {
+            lines.push("");
+            continue;
+          }
+          let current = words[0] ?? "";
+          for (let i = 1; i < words.length; i += 1) {
+            const next = `${current} ${words[i]}`;
+            if (ctx.measureText(next).width <= maxWidth) {
+              current = next;
+            } else {
+              lines.push(current);
+              current = words[i] ?? "";
+            }
+          }
+          lines.push(current);
+        }
+        return lines;
+      };
+
       placedItems.forEach((item) => {
+        if (item.type === "text") {
+          const fontSize = Math.max(10, item.textSize ?? 28);
+          const fontFamily = item.textFont?.startsWith("custom:")
+            ? '"Space Mono", monospace'
+            : (item.textFont ?? '"Space Mono", monospace');
+          const lines = wrapLines(item.text ?? "", Math.max(40, item.width - 10), `${fontSize}px ${fontFamily}`);
+          ctx.save();
+          ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
+          ctx.rotate((item.rotation * Math.PI) / 180);
+          ctx.translate(-item.width / 2, -item.height / 2);
+          ctx.globalAlpha = item.opacity;
+          ctx.font = `${fontSize}px ${fontFamily}`;
+          ctx.fillStyle = item.textColor ?? "#1e1e2e";
+          ctx.textBaseline = "top";
+          let y = 4;
+          const lineHeight = fontSize * 1.35;
+          lines.forEach((line) => {
+            ctx.fillText(line, 4, y, Math.max(20, item.width - 8));
+            y += lineHeight;
+          });
+          ctx.restore();
+          ctx.globalAlpha = 1;
+          return;
+        }
+
+        if (item.isAnimated) return;
         const img = assetImagesRef.current.get(item.id);
         if (img?.complete) {
           ctx.globalAlpha = item.opacity;
-          ctx.drawImage(img, item.x, item.y, item.width, item.height);
+          ctx.save();
+          ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
+          ctx.rotate((item.rotation * Math.PI) / 180);
+          ctx.drawImage(img, -item.width / 2, -item.height / 2, item.width, item.height);
+          ctx.restore();
           ctx.globalAlpha = 1;
         }
       });
     }, [placedItems]);
+
+    const pointHitsItem = useCallback((x: number, y: number, item: PlacedSticker) => {
+      const centerX = item.x + item.width / 2;
+      const centerY = item.y + item.height / 2;
+      const angle = (-item.rotation * Math.PI) / 180;
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
+      const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
+      return (
+        localX >= -item.width / 2 &&
+        localX <= item.width / 2 &&
+        localY >= -item.height / 2 &&
+        localY <= item.height / 2
+      );
+    }, []);
 
     const renderBackground = useCallback(() => {
       const background = backgroundCanvasRef.current;
@@ -148,6 +196,30 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
       if (selectedPaper && paperImageRef.current?.complete) {
         const paper = paperImageRef.current;
+        if (backgroundMode === "cover") {
+          const srcW = paper.naturalWidth || paper.width || background.width;
+          const srcH = paper.naturalHeight || paper.height || background.height;
+          const srcRatio = srcW / srcH;
+          const dstRatio = background.width / background.height;
+
+          let drawW = background.width;
+          let drawH = background.height;
+          let offsetX = 0;
+          let offsetY = 0;
+          if (srcRatio > dstRatio) {
+            drawH = background.height;
+            drawW = drawH * srcRatio;
+            offsetX = (background.width - drawW) / 2;
+          } else {
+            drawW = background.width;
+            drawH = drawW / srcRatio;
+            offsetY = (background.height - drawH) / 2;
+          }
+
+          ctx.drawImage(paper, offsetX, offsetY, drawW, drawH);
+          return;
+        }
+
         const tileW = paper.naturalWidth || paper.width || background.width;
         const tileH = paper.naturalHeight || paper.height || background.height;
         const startX = -((((backgroundOffsetX % tileW) + tileW) % tileW));
@@ -159,10 +231,21 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           }
         }
       } else {
+        // Lined notebook paper
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, background.width, background.height);
+        ctx.strokeStyle = "rgba(175, 165, 200, 0.28)";
+        ctx.lineWidth = 1;
+        const lineSpacing = 32;
+        const lineOffset = ((backgroundOffsetY % lineSpacing) + lineSpacing) % lineSpacing;
+        for (let y = lineSpacing - lineOffset; y < background.height + lineSpacing; y += lineSpacing) {
+          ctx.beginPath();
+          ctx.moveTo(0, Math.round(y) + 0.5);
+          ctx.lineTo(background.width, Math.round(y) + 0.5);
+          ctx.stroke();
+        }
       }
-    }, [selectedPaper, backgroundOffsetX, backgroundOffsetY]);
+    }, [selectedPaper, backgroundOffsetX, backgroundOffsetY, backgroundMode]);
 
     useEffect(() => {
       renderOverlay();
@@ -197,6 +280,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         ...prev.slice(-30),
         ctx.getImageData(0, 0, canvas.width, canvas.height),
       ]);
+      setRedoHistory([]);
     }, []);
 
     const getCanvasPoint = useCallback(
@@ -282,9 +366,54 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         }
         const point = getCanvasPoint(e);
 
-        // Text: click to open text overlay
+        // Text: click existing text to edit, or create a new text block
         if (brushSettings.tool === "text") {
-          setTextOverlay({ x: point.x, y: point.y, value: "" });
+          const target = [...placedItems].reverse().find((item) => pointHitsItem(point.x, point.y, item));
+          if (target?.type === "text") {
+            setSelectedItemId(target.id);
+            setTextOverlay({ id: target.id, x: target.x, y: target.y, value: target.text ?? "" });
+            return;
+          }
+
+          const textSize = Math.max(12, brushSettings.textSize ?? Math.max(14, brushSettings.size * 3));
+          const textFont = brushSettings.textFont ?? '"Space Mono", monospace';
+          const newItem: PlacedSticker = {
+            id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+            stickerId: "text",
+            x: point.x,
+            y: point.y,
+            imageData: "",
+            width: Math.max(190, textSize * 6.6),
+            height: Math.max(58, textSize * 1.8),
+            rotation: 0,
+            type: "text",
+            opacity: 1,
+            text: "",
+            textColor: brushSettings.color,
+            textSize,
+            textFont,
+          };
+
+          const created = onAddTextItem?.(newItem) ?? newItem;
+          setSelectedItemId(created.id);
+          setTextOverlay({ id: created.id, x: created.x, y: created.y, value: created.text ?? "" });
+          return;
+        }
+
+        if (brushSettings.tool === "select") {
+          const target = [...placedItems].reverse().find((item) => pointHitsItem(point.x, point.y, item));
+          if (!target) {
+            setSelectedItemId(null);
+            selectionDragRef.current = null;
+            return;
+          }
+          setSelectedItemId(target.id);
+          selectionDragRef.current = {
+            id: target.id,
+            offsetX: point.x - target.x,
+            offsetY: point.y - target.y,
+          };
+          isDrawing.current = true;
           return;
         }
 
@@ -328,8 +457,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       },
       [
         getCanvasPoint,
+        placedItems,
+        pointHitsItem,
         selectedAsset,
         brushSettings.tool,
+        brushSettings.color,
+        brushSettings.size,
+        brushSettings.textSize,
+        brushSettings.textFont,
+        onAddTextItem,
         onPlaceAsset,
         saveToHistory,
         drawLine,
@@ -343,6 +479,19 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         const point = getCanvasPoint(e);
 
         // Live washi preview: restore pre-washi state and redraw strip
+        if (
+          brushSettings.tool === "select" &&
+          selectionDragRef.current &&
+          onUpdatePlacedItem
+        ) {
+          const drag = selectionDragRef.current;
+          onUpdatePlacedItem(drag.id, {
+            x: point.x - drag.offsetX,
+            y: point.y - drag.offsetY,
+          });
+          return;
+        }
+
         if (
           brushSettings.tool === "washi" &&
           selectedAsset &&
@@ -371,6 +520,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         getCanvasPoint,
         brushSettings.tool,
         selectedAsset,
+        onUpdatePlacedItem,
         drawLine,
         paintWashiStrip,
       ]
@@ -388,6 +538,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       lastPoint.current = null;
       washiStartRef.current = null;
       preWashiStateRef.current = null;
+      selectionDragRef.current = null;
     }, []);
 
     const clearCanvas = useCallback(() => {
@@ -406,35 +557,43 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       if (!ctx || history.length === 0) return;
       const previous = history.at(-1);
       if (!previous) return;
+      setRedoHistory((prev) => [...prev.slice(-30), ctx.getImageData(0, 0, canvas.width, canvas.height)]);
       ctx.putImageData(previous, 0, 0);
       setHistory((h) => h.slice(0, -1));
     }, [history]);
 
-    const commitText = useCallback(
-      async (text: string, x: number, y: number) => {
-        if (!text.trim()) return;
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        saveToHistory();
-        const fontSize = Math.max(10, brushSettings.textSize ?? Math.max(14, brushSettings.size * 3));
-        const textFont = brushSettings.textFont ?? '"Space Mono", monospace';
+    const redo = useCallback(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx || redoHistory.length === 0) return;
+      const next = redoHistory.at(-1);
+      if (!next) return;
+      setHistory((prev) => [...prev.slice(-30), ctx.getImageData(0, 0, canvas.width, canvas.height)]);
+      ctx.putImageData(next, 0, 0);
+      setRedoHistory((prev) => prev.slice(0, -1));
+    }, [redoHistory]);
 
-        if (textFont.startsWith("custom:")) {
-          const fontId = textFont.slice("custom:".length);
-          const font = customFonts.find((f) => f.id === fontId);
-          if (!font) return;
-          await renderCustomFontText(ctx, text, x, y, font, fontSize, glyphImagesRef);
-          return;
-        }
+    const commitTextBlock = useCallback((text: string, id: string) => {
+      if (!onUpdatePlacedItem) return;
+      const nextText = text.trim();
+      if (!nextText) return;
 
-        ctx.font = `${fontSize}px ${textFont}`;
-        ctx.fillStyle = brushSettings.color;
-        ctx.fillText(text, x, y);
-      },
-      [brushSettings.color, brushSettings.size, brushSettings.textSize, brushSettings.textFont, customFonts, saveToHistory]
-    );
+      const fontSize = Math.max(10, brushSettings.textSize ?? Math.max(14, brushSettings.size * 3));
+      const lines = nextText.split("\n");
+      const longest = Math.max(...lines.map((line) => line.length), 4);
+      const blockWidth = Math.max(160, Math.min(760, longest * fontSize * 0.62));
+      const blockHeight = Math.max(fontSize * 1.6, lines.length * fontSize * 1.4 + 14);
+
+      onUpdatePlacedItem(id, {
+        text: nextText,
+        textColor: brushSettings.color,
+        textSize: fontSize,
+        textFont: brushSettings.textFont ?? '"Space Mono", monospace',
+        width: blockWidth,
+        height: blockHeight,
+      });
+    }, [onUpdatePlacedItem, brushSettings.color, brushSettings.size, brushSettings.textSize, brushSettings.textFont]);
 
     const getCompositeCanvas = useCallback(() => {
       const w = canvasRef.current?.width ?? width;
@@ -484,6 +643,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       getCanvas: () => canvasRef.current,
       clearCanvas,
       undo,
+      redo,
       getCompositeCanvas,
       shiftContent,
     }));
@@ -492,6 +652,42 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     if (brushSettings.tool === "eraser") cursor = "cell";
     else if (brushSettings.tool === "washi") cursor = "col-resize";
     else if (brushSettings.tool === "text") cursor = "text";
+    else if (brushSettings.tool === "select") cursor = "default";
+
+    const selectedItem = selectedItemId
+      ? placedItems.find((item) => item.id === selectedItemId) ?? null
+      : null;
+
+    const animatedItems = useMemo(
+      () => placedItems.filter((item) => item.isAnimated),
+      [placedItems]
+    );
+
+    const nudgeScale = (delta: number) => {
+      if (!selectedItem || !onUpdatePlacedItem) return;
+      const nextWidth = Math.max(24, Math.round(selectedItem.width * delta));
+      const nextHeight = Math.max(24, Math.round(selectedItem.height * delta));
+      if (selectedItem.type === "text") {
+        const nextTextSize = Math.max(10, Math.round((selectedItem.textSize ?? 28) * delta));
+        onUpdatePlacedItem(selectedItem.id, {
+          width: nextWidth,
+          height: nextHeight,
+          textSize: nextTextSize,
+        });
+        return;
+      }
+      onUpdatePlacedItem(selectedItem.id, {
+        width: nextWidth,
+        height: nextHeight,
+      });
+    };
+
+    const nudgeRotation = (delta: number) => {
+      if (!selectedItem || !onUpdatePlacedItem) return;
+      onUpdatePlacedItem(selectedItem.id, {
+        rotation: ((selectedItem.rotation + delta) % 360 + 360) % 360,
+      });
+    };
 
     const textFontSize = Math.max(10, brushSettings.textSize ?? Math.max(14, brushSettings.size * 3));
     const textFontFamily = brushSettings.textFont?.startsWith("custom:")
@@ -526,10 +722,96 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           className="pointer-events-none absolute inset-0"
           style={{ width: "100%", height: "100%" }}
         />
+        {animatedItems.map((item) => (
+          <img
+            key={item.id}
+            src={item.imageData}
+            alt={item.stickerId}
+            className="pointer-events-none absolute"
+            style={{
+              left: `${(item.x / width) * 100}%`,
+              top: `${(item.y / height) * 100}%`,
+              width: `${(item.width / width) * 100}%`,
+              height: `${(item.height / height) * 100}%`,
+              opacity: item.opacity,
+              transform: `rotate(${item.rotation}deg)`,
+              transformOrigin: "center",
+            }}
+          />
+        ))}
+        {brushSettings.tool === "select" && selectedItem !== null ? (
+          <>
+            <div
+              className="pointer-events-none absolute border border-dashed"
+              style={{
+                left: `${(selectedItem.x / width) * 100}%`,
+                top: `${(selectedItem.y / height) * 100}%`,
+                width: `${(selectedItem.width / width) * 100}%`,
+                height: `${(selectedItem.height / height) * 100}%`,
+                borderColor: "rgba(255,107,157,0.82)",
+                transform: `rotate(${selectedItem.rotation}deg)`,
+                transformOrigin: "center",
+                boxShadow: "0 0 0 1px rgba(255,255,255,0.7)",
+              }}
+            />
+            <div
+              className="absolute flex gap-1 rounded-lg border p-1"
+              style={{
+                left: `${((selectedItem.x + selectedItem.width) / width) * 100}%`,
+                top: `${(Math.max(0, selectedItem.y) / height) * 100}%`,
+                background: "rgba(255,255,255,0.92)",
+                borderColor: "rgba(167,139,250,0.35)",
+                boxShadow: "0 2px 12px rgba(143,109,178,0.22)",
+              }}
+            >
+              <button
+                className="btn-smooth rounded px-2 py-1 text-xs"
+                style={{ background: "rgba(255,107,157,0.15)", color: "#b4236b" }}
+                onClick={() => nudgeScale(1.12)}
+                title="Enlarge"
+              >
+                +
+              </button>
+              <button
+                className="btn-smooth rounded px-2 py-1 text-xs"
+                style={{ background: "rgba(103,212,241,0.18)", color: "#0e7490" }}
+                onClick={() => nudgeScale(0.9)}
+                title="Shrink"
+              >
+                -
+              </button>
+              <button
+                className="btn-smooth rounded px-2 py-1 text-xs"
+                style={{ background: "rgba(167,139,250,0.2)", color: "#6d28d9" }}
+                onClick={() => nudgeRotation(-15)}
+                title="Rotate left"
+              >
+                ↺
+              </button>
+              <button
+                className="btn-smooth rounded px-2 py-1 text-xs"
+                style={{ background: "rgba(167,139,250,0.2)", color: "#6d28d9" }}
+                onClick={() => nudgeRotation(15)}
+                title="Rotate right"
+              >
+                ↻
+              </button>
+              {selectedItem.type === "text" ? (
+                <button
+                  className="btn-smooth rounded px-2 py-1 text-xs"
+                  style={{ background: "rgba(249,168,212,0.22)", color: "#9d174d" }}
+                  onClick={() => setTextOverlay({ id: selectedItem.id, x: selectedItem.x, y: selectedItem.y, value: selectedItem.text ?? "" })}
+                  title="Edit text"
+                >
+                  ✎
+                </button>
+              ) : null}
+            </div>
+          </>
+        ) : null}
         {textOverlay !== null && (
-          <input
+          <textarea
             autoFocus
-            type="text"
             value={textOverlay.value}
             onChange={(e) =>
               setTextOverlay((prev) =>
@@ -537,14 +819,16 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               )
             }
             onBlur={() => {
-              if (textOverlay.value.trim())
-                void commitText(textOverlay.value, textOverlay.x, textOverlay.y);
+              if (textOverlay.value.trim()) {
+                commitTextBlock(textOverlay.value, textOverlay.id);
+              }
               setTextOverlay(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                if (textOverlay.value.trim())
-                  void commitText(textOverlay.value, textOverlay.x, textOverlay.y);
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                if (textOverlay.value.trim()) {
+                  commitTextBlock(textOverlay.value, textOverlay.id);
+                }
                 setTextOverlay(null);
               } else if (e.key === "Escape") {
                 setTextOverlay(null);
@@ -552,19 +836,20 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             }}
             style={{
               position: "absolute",
-              left: textOverlay.x,
-              top: textOverlay.y - textFontSize,
-              minWidth: 120,
-              fontSize: textFontSize,
+              left: `${(textOverlay.x / width) * 100}%`,
+              top: `${((textOverlay.y - textFontSize) / height) * 100}%`,
+              minWidth: "12%",
+              minHeight: "7%",
+              fontSize: `clamp(10px, ${(textFontSize / width) * 100}vw, 64px)`,
               fontFamily: textFontFamily,
               color: brushSettings.color,
-              background: "rgba(255,255,255,0.85)",
-              border: "1.5px dashed rgba(167,139,250,0.6)",
-              borderRadius: 6,
-              padding: "2px 6px",
+              background: "rgba(255,255,255,0.04)",
+              border: "1px dashed rgba(167,139,250,0.55)",
+              borderRadius: 4,
+              padding: "4px 6px",
               outline: "none",
-              boxShadow: "0 2px 12px rgba(143,109,178,0.18)",
               lineHeight: 1.4,
+              resize: "both",
             }}
           />
         )}
