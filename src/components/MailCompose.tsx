@@ -73,10 +73,9 @@ export default function MailCompose({
     supabase
       .from("profiles")
       .select("username")
-      .then(({ data }) => {
-        if (data) {
-          setAllUsernames(data.map((row) => row.username));
-        }
+      .then(({ data, error }) => {
+        if (error) console.error("[MailCompose] recipient list:", error.message);
+        if (data) setAllUsernames(data.map((row) => row.username));
       });
   }, []);
 

@@ -1064,9 +1064,9 @@ export default function StudioToolbar({
     } catch (error) {
       const code = error instanceof Error ? error.message : "unknown";
       if (code === "missing_gifapi_key") {
-        setGifError("Missing NEXT_PUBLIC_GIFAPI_KEY in env. Add it to enable GIF search.");
+        setGifError("Missing GIFAPI_KEY in env. Add it to enable GIF search.");
       } else if (code === "missing_giphy_key") {
-        setGifError("Missing NEXT_PUBLIC_GIPHY_API_KEY in env for Giphy mode.");
+        setGifError("Missing GIPHY_API_KEY in env for Giphy mode.");
       } else {
         setGifError("GIF search failed. Check your provider settings and try again.");
       }

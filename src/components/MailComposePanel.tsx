@@ -36,7 +36,7 @@ const BUILTIN_TEXT_FONTS = [
 const GIF_PROVIDER = (process.env.NEXT_PUBLIC_GIF_PROVIDER ?? "giphy").toLowerCase();
 const GIFAPI_BASE_URL = process.env.NEXT_PUBLIC_GIFAPI_BASE_URL ?? "https://api.gifapi.com/v1";
 const GIFAPI_KEY = process.env.NEXT_PUBLIC_GIFAPI_KEY ?? "";
-const GIPHY_KEY = process.env.NEXT_PUBLIC_GIPHY_API_KEY ?? "";
+const GIPHY_KEY = process.env.GIPHY_API_KEY ?? "";
 
 type ComposeSurface = "letter" | "envelope";
 type ToolDrawer = "stickers" | "washi" | "paper" | "envelopes" | "stamps" | "gifs" | "create" | null;
@@ -221,10 +221,9 @@ export default function MailComposePanel({
     supabase
       .from("profiles")
       .select("username")
-      .then(({ data }) => {
-        if (data) {
-          setAllUsernames(data.map((row) => row.username));
-        }
+      .then(({ data, error }) => {
+        if (error) console.error("[MailComposePanel] recipient list:", error.message);
+        if (data) setAllUsernames(data.map((row) => row.username));
       });
   }, []);
 
@@ -293,11 +292,11 @@ export default function MailComposePanel({
       return;
     }
     if (GIF_PROVIDER === "giphy" && !GIPHY_KEY) {
-      setGifError("Missing NEXT_PUBLIC_GIPHY_API_KEY.");
+      setGifError("Missing GIPHY_API_KEY.");
       return;
     }
     if (GIF_PROVIDER !== "giphy" && !GIFAPI_KEY) {
-      setGifError("Missing NEXT_PUBLIC_GIFAPI_KEY.");
+      setGifError("Missing GIFAPI_KEY.");
       return;
     }
 
