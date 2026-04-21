@@ -24,6 +24,8 @@ type DragState = {
   startY: number;
   originX: number;
   originY: number;
+  liveX: number;
+  liveY: number;
 };
 
 const SPACE_ACCENT_PRESETS = [
@@ -631,13 +633,24 @@ export default function SpaceStudio({
     if (!dragState || !selectedSpace || !isOwner) return;
 
     const handleMove = (event: PointerEvent) => {
-      onUpdateSpaceItem(selectedSpace.id, dragState.itemId, {
-        x: Math.max(12, dragState.originX + (event.clientX - dragState.startX)),
-        y: Math.max(12, dragState.originY + (event.clientY - dragState.startY)),
+      setDragState((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          liveX: Math.max(12, prev.originX + (event.clientX - prev.startX)),
+          liveY: Math.max(12, prev.originY + (event.clientY - prev.startY)),
+        };
       });
     };
 
-    const handleUp = () => setDragState(null);
+    const handleUp = () => {
+      setDragState((prev) => {
+        if (!prev) return null;
+        // commit final position to parent (and eventually DB) once on release
+        onUpdateSpaceItem(selectedSpace.id, prev.itemId, { x: prev.liveX, y: prev.liveY });
+        return null;
+      });
+    };
 
     globalThis.addEventListener("pointermove", handleMove);
     globalThis.addEventListener("pointerup", handleUp);
@@ -744,20 +757,35 @@ export default function SpaceStudio({
             </div>
 
             {youtubeId ? (
-              <div className="absolute right-10 top-10 w-85 rounded-[28px] border p-3 shadow-[0_14px_32px_rgba(53,39,66,0.12)]" style={{ borderColor: `${selectedSpace.accentColor}55`, background: "rgba(255,255,255,0.82)" }}>
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--muted)" }}>
-                  Space soundtrack
-                </p>
-                <div className="aspect-video overflow-hidden rounded-2xl">
-                  <iframe
-                    src={`https://www.youtube.com/embed/${youtubeId}`}
-                    title={`${selectedSpace.ownerName} music`}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    className="h-full w-full border-0"
-                  />
+              <>
+                {/* Hidden background audio — no video square visible */}
+                <iframe
+                  src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&loop=1&playlist=${youtubeId}&controls=0&mute=0`}
+                  title={`${selectedSpace.ownerName} soundtrack`}
+                  allow="autoplay"
+                  className="pointer-events-none absolute opacity-0"
+                  style={{ width: 1, height: 1, left: -9999, top: -9999 }}
+                />
+                {/* Mini now-playing chip */}
+                <div
+                  className="absolute bottom-5 right-6 flex items-center gap-2 rounded-full border px-4 py-2 shadow-[0_8px_20px_rgba(53,39,66,0.14)]"
+                  style={{ borderColor: `${selectedSpace.accentColor}55`, background: "rgba(255,255,255,0.88)" }}
+                >
+                  <span className="text-lg" aria-hidden>🎵</span>
+                  <span className="text-[11px] font-semibold" style={{ color: selectedSpace.accentColor }}>
+                    Now playing
+                  </span>
+                  <a
+                    href={selectedSpace.youtubeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                    style={{ background: `${selectedSpace.accentColor}22`, color: selectedSpace.accentColor }}
+                  >
+                    Open
+                  </a>
                 </div>
-              </div>
+              </>
             ) : null}
 
             {selectedSpace.items.map((item) => {
@@ -775,12 +803,14 @@ export default function SpaceStudio({
                       startY: event.clientY,
                       originX: item.x,
                       originY: item.y,
+                      liveX: item.x,
+                      liveY: item.y,
                     });
                   }}
                   className="btn-smooth absolute overflow-hidden rounded-3xl border p-3 text-left shadow-[0_12px_28px_rgba(53,39,66,0.12)]"
                   style={{
-                    left: item.x,
-                    top: item.y,
+                    left: dragState?.itemId === item.id ? dragState.liveX : item.x,
+                    top: dragState?.itemId === item.id ? dragState.liveY : item.y,
                     width: item.width,
                     height: item.height,
                     transform: `rotate(${item.rotation}deg)`,

@@ -115,7 +115,7 @@ export function useSpaces(
 ) {
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
   const pendingItemPatchRef = useRef<Record<string, Partial<SpaceItem>>>({});
-  const pendingItemTimerRef = useRef<Record<string, number>>({});
+  const pendingItemTimerRef = useRef<Record<string, ReturnType<typeof globalThis.setTimeout>>>({});
 
   useEffect(() => {
     return () => {
@@ -138,7 +138,7 @@ export function useSpaces(
       const { data: ownSpace } = await supabase
         .from("spaces")
         .select("*")
-        .eq("owner_id", currentAccount?.id ?? null)
+        .eq("owner_id", currentAccount?.id ?? "")
         .maybeSingle();
 
       if (ownSpace) return ownSpace;
@@ -146,7 +146,7 @@ export function useSpaces(
       const { data: created } = await supabase
         .from("spaces")
         .insert({
-          owner_id: currentAccount?.id ?? null,
+          owner_id: currentAccount?.id ?? "",
           title: currentAccount?.homeTitle ?? "",
           tagline: "A public creative board full of scraps, sounds, and mood.",
           about_me: currentAccount?.bio ?? "",

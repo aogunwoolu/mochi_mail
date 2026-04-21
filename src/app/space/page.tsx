@@ -4,9 +4,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAccount } from "@/hooks/useAccount";
 import { useSpaces } from "@/hooks/useSpaces";
 import SpaceStudio from "@/components/SpaceStudio";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 
-export default function SpacePage() {
+function SpacePageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const account = useAccount();
@@ -55,10 +55,19 @@ export default function SpacePage() {
 
   if (!account.hasSession) return null;
 
+  const pageWallpaper = selectedSpace?.wallpaper || account.viewer.wallpaper || "var(--bg)";
+  const pageAccent = selectedSpace?.accentColor || account.viewer.accentColor || "#ff6b9d";
+
   return (
     <div
       className="flex h-dvh flex-col overflow-hidden"
-      style={{ background: selectedSpace?.wallpaper || account.viewer.wallpaper || "var(--bg)" }}
+      style={
+        {
+          background: pageWallpaper,
+          "--pink": pageAccent,
+          "--accent": pageAccent,
+        } as React.CSSProperties
+      }
     >
       {/* Header bar */}
       <header
@@ -98,5 +107,13 @@ export default function SpacePage() {
         />
       </div>
     </div>
+  );
+}
+
+export default function SpacePage() {
+  return (
+    <Suspense>
+      <SpacePageInner />
+    </Suspense>
   );
 }
