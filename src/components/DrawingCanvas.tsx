@@ -63,6 +63,7 @@ interface DrawingCanvasProps {
   backgroundOffsetY?: number;
   width?: number;
   height?: number;
+  fillContainer?: boolean;
 }
 
 const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
@@ -78,6 +79,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       backgroundOffsetY = 0,
       width = 1200,
       height = 800,
+      fillContainer = false,
     },
     ref
   ) => {
@@ -260,8 +262,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         ctx.rotate(Math.atan2(dy, dx));
         const pattern = ctx.createPattern(img, "repeat");
         if (pattern) {
-          ctx.globalAlpha =
-            "opacity" in tape ? (tape as WashiTape).opacity : 0.85;
+          ctx.globalAlpha = "opacity" in tape ? tape.opacity : 0.85;
           ctx.fillStyle = pattern;
           ctx.fillRect(0, -tape.height / 2, length, tape.height);
           ctx.globalAlpha = 1;
@@ -274,6 +275,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         e.preventDefault();
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignore capture failures on unsupported browsers.
+        }
         const point = getCanvasPoint(e);
 
         // Text: click to open text overlay
@@ -370,7 +376,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       ]
     );
 
-    const handlePointerUp = useCallback(() => {
+    const handlePointerUp = useCallback((e?: React.PointerEvent<HTMLCanvasElement>) => {
+      if (e) {
+        try {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        } catch {
+          // Ignore release failures when capture is not active.
+        }
+      }
       isDrawing.current = false;
       lastPoint.current = null;
       washiStartRef.current = null;
@@ -486,30 +499,32 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       : (brushSettings.textFont ?? '"Space Mono", monospace');
 
     return (
-      <div className="relative" style={{ width, height }}>
+      <div className={fillContainer ? "relative h-full w-full" : "relative"} style={fillContainer ? undefined : { width, height }}>
         <canvas
           ref={backgroundCanvasRef}
           width={width}
           height={height}
           className="absolute inset-0"
-          style={{ imageRendering: "crisp-edges" }}
+          style={{ imageRendering: "crisp-edges", width: "100%", height: "100%" }}
         />
         <canvas
           ref={canvasRef}
           width={width}
           height={height}
           className="absolute inset-0"
-          style={{ touchAction: "none", cursor }}
+          style={{ touchAction: "none", cursor, width: "100%", height: "100%" }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         />
         <canvas
           ref={overlayCanvasRef}
           width={width}
           height={height}
           className="pointer-events-none absolute inset-0"
+          style={{ width: "100%", height: "100%" }}
         />
         {textOverlay !== null && (
           <input

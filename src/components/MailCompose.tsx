@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useRef, useState, useCallback } from "react";
+import React, { useRef, useState, useCallback, useEffect } from "react";
 import DrawingCanvas, { DrawingCanvasHandle } from "./DrawingCanvas";
 import StudioToolbar from "./StudioToolbar";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   BrushSettings,
   DELIVERY_SPEEDS,
@@ -50,6 +51,8 @@ export default function MailCompose({
 }: Readonly<MailComposeProps>) {
   const canvasRef = useRef<DrawingCanvasHandle>(null);
   const [receiver, setReceiver] = useState("");
+  const [allUsernames, setAllUsernames] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [speed, setSpeed] = useState<DeliverySpeed>("standard");
   const [stamp, setStamp] = useState(STAMP_STYLES[0]);
   const [selectedAsset, setSelectedAsset] = useState<Sticker | WashiTape | null>(null);
@@ -63,6 +66,24 @@ export default function MailCompose({
     textFont: '"Space Mono", monospace',
   });
   const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    const supabase = createSupabaseBrowserClient();
+    supabase
+      .from("profiles")
+      .select("username")
+      .then(({ data }) => {
+        if (data) {
+          setAllUsernames(data.map((row) => row.username));
+        }
+      });
+  }, []);
+
+  const filteredSuggestions = receiver.trim()
+    ? allUsernames
+        .filter((username) => username.toLowerCase().includes(receiver.trim().toLowerCase()))
+        .slice(0, 8)
+    : [];
 
   const handleSend = useCallback(() => {
     if (!receiver.trim() || !canvasRef.current) return;
@@ -91,7 +112,7 @@ export default function MailCompose({
         width: asset.width,
         height: asset.height,
         type: isWashi ? "washi" : "sticker",
-        opacity: isWashi ? (asset as WashiTape).opacity : 1,
+        opacity: isWashi ? asset.opacity : 1,
       },
     ]);
   }, []);
@@ -123,7 +144,7 @@ export default function MailCompose({
   }
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 animate-fade-in sm:p-5">
+    <div className="flex min-h-0 h-full flex-col gap-4 overflow-y-auto p-4 animate-fade-in sm:p-5">
       {onBack && (
         <button
           onClick={onBack}
@@ -150,23 +171,61 @@ export default function MailCompose({
             <label htmlFor="mail-compose-to" className="mb-1 block text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
               To
             </label>
-            <input
-              id="mail-compose-to"
-              type="text"
-              value={receiver}
-              onChange={(e) => setReceiver(e.target.value)}
-              placeholder="Recipient name..."
-              maxLength={30}
-              className="input-soft px-3 py-2 text-sm outline-none"
-            />
+            <div className="relative">
+              <input
+                id="mail-compose-to"
+                type="text"
+                value={receiver}
+                onChange={(e) => {
+                  setReceiver(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 120)}
+                placeholder="Recipient name..."
+                maxLength={30}
+                autoComplete="off"
+                className="input-soft w-full px-3 py-2 text-sm outline-none"
+              />
+              {showSuggestions && filteredSuggestions.length > 0 && (
+                <div
+                  className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border shadow-xl"
+                  style={{ background: "var(--glass)", borderColor: "var(--border-strong)", backdropFilter: "blur(12px)" }}
+                >
+                  {filteredSuggestions.map((username) => (
+                    <button
+                      key={username}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setReceiver(username);
+                        setShowSuggestions(false);
+                      }}
+                      className="btn-smooth flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm"
+                      style={{ color: "var(--text)" }}
+                    >
+                      <span
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                        style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}
+                      >
+                        {username[0]?.toUpperCase()}
+                      </span>
+                      <span className="font-medium">{username}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Letter canvas + full art toolbar */}
-      <div className="panel p-4">
-        <p className="section-title mb-3">Letter Canvas</p>
-        <div className="panel-soft relative h-72 overflow-hidden rounded-xl">
+      <div className="panel overflow-visible p-0">
+        <div className="px-4 pt-4 pb-3">
+          <p className="section-title">Letter Canvas</p>
+        </div>
+        {/* Canvas — larger 4:3 frame so handwriting feels less cramped */}
+        <div className="panel-soft relative mx-4 mb-3 h-[clamp(240px,44vh,520px)] overflow-hidden rounded-xl sm:h-[clamp(280px,48vh,620px)]" style={{ aspectRatio: "4/3" }}>
           <DrawingCanvas
             ref={canvasRef}
             brushSettings={brushSettings}
@@ -175,11 +234,16 @@ export default function MailCompose({
             selectedPaper={selectedPaper}
             customFonts={customFonts}
             onPlaceAsset={placeItem}
-            width={640}
-            height={360}
+            width={1200}
+            height={900}
+            fillContainer
           />
         </div>
-        <div className="mt-3 overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)" }}>
+        {/* Toolbar — explicit tools block for visibility and reliable layout */}
+        <div className="mx-4 mb-4 rounded-xl border px-2 py-2" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.78)" }}>
+          <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>
+            Edit Tools
+          </p>
           <StudioToolbar
             brushSettings={brushSettings}
             onBrushChange={(update) => setBrushSettings((prev) => ({ ...prev, ...update }))}

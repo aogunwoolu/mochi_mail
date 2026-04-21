@@ -9,6 +9,14 @@ function generateId() {
 
 const STORAGE_KEY = "mochimail_letters";
 
+function normalizeName(user: ViewerIdentity): string {
+  return user.name?.trim() || user.username?.trim() || "Guest";
+}
+
+function safeLower(value: string | undefined): string {
+  return value?.toLowerCase() ?? "";
+}
+
 function loadLetters(): Letter[] {
   if (!globalThis.window) return [];
   try {
@@ -27,6 +35,8 @@ function saveLetters(letters: Letter[]) {
 export function useMail(user: ViewerIdentity) {
   const [letters, setLetters] = useState<Letter[]>([]);
   const [tick, setTick] = useState(0);
+  const viewerName = normalizeName(user);
+  const normalizedUser = { ...user, name: viewerName };
 
   // Load on mount
   useEffect(() => {
@@ -55,7 +65,7 @@ export function useMail(user: ViewerIdentity) {
       const letter: Letter = {
         id: generateId(),
         senderId: user.id,
-        senderName: user.name,
+        senderName: viewerName,
         receiverId: receiverName.toLowerCase().replaceAll(/\s+/g, "_"),
         receiverName,
         imageData,
@@ -72,7 +82,7 @@ export function useMail(user: ViewerIdentity) {
       });
       return letter;
     },
-    [user]
+    [user.id, viewerName]
   );
 
   const isDelivered = useCallback((letter: Letter) => {
@@ -103,11 +113,15 @@ export function useMail(user: ViewerIdentity) {
     });
   }, []);
 
-  const inbox = letters.filter((l) => l.receiverId === user.id || l.receiverName.toLowerCase() === user.name.toLowerCase());
+  const inbox = letters.filter(
+    (letter) =>
+      letter.receiverId === user.id ||
+      safeLower(letter.receiverName) === safeLower(viewerName)
+  );
   const sent = letters.filter((l) => l.senderId === user.id);
 
   return {
-    user,
+    user: normalizedUser,
     letters,
     inbox,
     sent,

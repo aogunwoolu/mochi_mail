@@ -4,19 +4,38 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "@/hooks/useAccount";
 import { useSpaces } from "@/hooks/useSpaces";
 import SpaceStudio from "@/components/SpaceStudio";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function SpacePage() {
   const router = useRouter();
   const account = useAccount();
   const spaces = useSpaces(account.accounts, account.currentAccount);
   const [selectedSpaceId, setSelectedSpaceId] = useState("");
+  const isPreparingSpace = account.hydrated && account.hasSession && !account.currentAccount;
 
-  // Redirect guests to home  they need an account for a space
-  if (account.hydrated && !account.isAuthenticated) {
-    router.replace("/");
-    return null;
+  // Redirect guests to home — they need an account for a space
+  useEffect(() => {
+    if (account.hydrated && !account.hasSession) {
+      router.replace("/");
+    }
+  }, [account.hydrated, account.hasSession, router]);
+
+  if (!account.hydrated || isPreparingSpace) {
+    return (
+      <div className="flex h-dvh items-center justify-center" style={{ background: "var(--bg)" }}>
+        <div className="panel rounded-3xl px-6 py-5 text-center">
+          <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+            Opening your space...
+          </p>
+          <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
+            We&apos;re loading your profile and arranging your page.
+          </p>
+        </div>
+      </div>
+    );
   }
+
+  if (!account.hasSession) return null;
 
   return (
     <div

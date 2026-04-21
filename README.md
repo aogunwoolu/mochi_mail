@@ -1,5 +1,5 @@
 <p align="center">
-	<img src="public/logo.svg" alt="MochiMail logo" width="140" />
+	<img src="public/brand-mark.svg" alt="MochiMail logo" width="72" />
 </p>
 
 # MochiMail

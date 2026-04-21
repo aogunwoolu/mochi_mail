@@ -19,9 +19,9 @@ export const metadata: Metadata = {
   description: "Digital stationery, stickers, and snail mail — reimagined",
   manifest: "/manifest.json",
   icons: {
-    icon: "/logo.svg",
-    shortcut: "/logo.svg",
-    apple: "/logo.svg",
+    icon: "/brand-mark.svg",
+    shortcut: "/brand-mark.svg",
+    apple: "/brand-mark.svg",
   },
   appleWebApp: {
     capable: true,

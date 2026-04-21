@@ -26,6 +26,111 @@ type DragState = {
   originY: number;
 };
 
+const SPACE_ACCENT_PRESETS = [
+  "#ff6b9d",
+  "#67d4f1",
+  "#6ee7b7",
+  "#a78bfa",
+  "#fb923c",
+  "#fbbf24",
+  "#f472b6",
+  "#34d399",
+] as const;
+
+const NOTE_COLOR_PRESETS = ["#ffe08a", "#d9f7ff", "#ffd6ec", "#e4dcff", "#d9f99d", "#ffd7ba"] as const;
+
+const DOODLE_INK_PRESETS = ["#352742", "#ff6b9d", "#7c3aed", "#0f766e", "#ea580c", "#2563eb"] as const;
+
+const SPACE_WALLPAPER_PRESETS = [
+  {
+    id: "petal-blush",
+    name: "Petal Blush",
+    value: "radial-gradient(circle at top left, rgba(255,255,255,0.95), rgba(255,214,236,0.92) 42%, rgba(255,246,251,0.92) 100%)",
+  },
+  {
+    id: "mint-airmail",
+    name: "Mint Airmail",
+    value: "linear-gradient(135deg, rgba(237,247,255,0.95), rgba(203,244,255,0.92), rgba(244,255,252,0.96))",
+  },
+  {
+    id: "apricot-note",
+    name: "Apricot Note",
+    value: "linear-gradient(145deg, rgba(255,248,228,0.96), rgba(255,224,208,0.92), rgba(255,245,236,0.96))",
+  },
+  {
+    id: "lilac-dream",
+    name: "Lilac Dream",
+    value: "linear-gradient(145deg, rgba(246,241,255,0.96), rgba(226,223,255,0.92), rgba(255,245,252,0.96))",
+  },
+  {
+    id: "blue-sky",
+    name: "Blue Sky",
+    value: "linear-gradient(180deg, rgba(223,242,255,0.98), rgba(255,255,255,0.95) 55%, rgba(234,255,246,0.96) 100%)",
+  },
+  {
+    id: "matcha-paper",
+    name: "Matcha Paper",
+    value: "linear-gradient(160deg, rgba(244,255,239,0.97), rgba(221,245,216,0.94), rgba(255,251,235,0.96))",
+  },
+] as const;
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function createUploadedPhotoCard(
+  file: File | null,
+  onAddItemToOwnSpace: (type: SpaceItemType, seed?: Partial<SpaceItem>) => SpaceItem | undefined,
+  onSelectItem: (itemId: string) => void
+) {
+  if (!file) return;
+  const imageUrl = await readFileAsDataUrl(file);
+  if (!imageUrl) return;
+  const item = onAddItemToOwnSpace("image", {
+    imageUrl,
+    title: file.name.replace(/\.[^.]+$/, "") || "Photo card",
+  });
+  if (item) onSelectItem(item.id);
+}
+
+async function replaceSelectedItemImage(
+  file: File | null,
+  spaceId: string,
+  itemId: string,
+  onUpdateSpaceItem: (spaceId: string, itemId: string, patch: Partial<SpaceItem>) => void
+) {
+  if (!file) return;
+  const imageUrl = await readFileAsDataUrl(file);
+  if (!imageUrl) return;
+  onUpdateSpaceItem(spaceId, itemId, { imageUrl });
+}
+
+function SwatchButton({
+  color,
+  active,
+  onClick,
+  label,
+}: Readonly<{ color: string; active: boolean; onClick: () => void; label: string }>) {
+  return (
+    <button
+      onClick={onClick}
+      className="btn-smooth h-9 w-9 rounded-full border-2"
+      style={{
+        background: color,
+        borderColor: active ? "rgba(53,39,66,0.85)" : "rgba(53,39,66,0.12)",
+        boxShadow: active ? "0 0 0 3px rgba(255,255,255,0.92), 0 0 0 5px rgba(53,39,66,0.12)" : "none",
+      }}
+      title={label}
+      aria-label={label}
+    />
+  );
+}
+
 function extractYouTubeId(url: string): string {
   const input = url.trim();
   if (!input) return "";
@@ -104,7 +209,17 @@ function DoodlePad({ onCreate }: Readonly<{ onCreate: (imageUrl: string) => void
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>
           Doodle Pad
         </p>
-        <input type="color" value={ink} onChange={(e) => setInk(e.target.value)} className="h-8 w-8 rounded-lg border-0 bg-transparent p-0" />
+        <div className="flex items-center gap-2">
+          {DOODLE_INK_PRESETS.map((color) => (
+            <SwatchButton
+              key={color}
+              color={color}
+              active={ink === color}
+              onClick={() => setInk(color)}
+              label={`Ink ${color}`}
+            />
+          ))}
+        </div>
       </div>
       <canvas
         ref={canvasRef}
@@ -159,6 +274,320 @@ function DoodlePad({ onCreate }: Readonly<{ onCreate: (imageUrl: string) => void
   );
 }
 
+interface OwnerToolsPanelProps {
+  selectedSpace: UserSpace;
+  selectedWallpaperId: string | null;
+  selectedItemId: string | null;
+  setSelectedItemId: (itemId: string | null) => void;
+  newImageUrl: string;
+  setNewImageUrl: (value: string) => void;
+  onUpdateOwnSpace: (patch: Partial<UserSpace>) => void;
+  onAddItemToOwnSpace: (type: SpaceItemType, seed?: Partial<SpaceItem>) => SpaceItem | undefined;
+  onUpdateSpaceItem: (spaceId: string, itemId: string, patch: Partial<SpaceItem>) => void;
+}
+
+interface ItemInspectorProps {
+  selectedSpace: UserSpace;
+  selectedItem: SpaceItem;
+  isOwner: boolean;
+  onUpdateSpaceItem: (spaceId: string, itemId: string, patch: Partial<SpaceItem>) => void;
+  onRemoveSpaceItem: (spaceId: string, itemId: string) => void;
+}
+
+function OwnerToolsPanel(props: Readonly<OwnerToolsPanelProps>) {
+  return (
+    <>
+      <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+        <p className="section-title mb-2">Space Settings</p>
+        <div className="grid gap-2">
+          <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.72)" }}>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>
+              Accent Color
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {SPACE_ACCENT_PRESETS.map((color) => (
+                <SwatchButton
+                  key={color}
+                  color={color}
+                  active={props.selectedSpace.accentColor === color}
+                  onClick={() => props.onUpdateOwnSpace({ accentColor: color })}
+                  label={`Accent ${color}`}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.72)" }}>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>
+              Wallpaper
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {SPACE_WALLPAPER_PRESETS.map((preset) => {
+                const active = props.selectedWallpaperId === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    onClick={() => props.onUpdateOwnSpace({ wallpaper: preset.value })}
+                    className="btn-smooth overflow-hidden rounded-2xl border text-left"
+                    style={{
+                      borderColor: active ? props.selectedSpace.accentColor : "var(--border)",
+                      background: "rgba(255,255,255,0.88)",
+                    }}
+                  >
+                    <div className="h-16 w-full" style={{ background: preset.value }} />
+                    <div className="px-3 py-2 text-xs font-semibold" style={{ color: "var(--foreground-soft)" }}>
+                      {preset.name}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>🏷️ Space Title</p>
+            <input
+              value={props.selectedSpace.title}
+              onChange={(e) => props.onUpdateOwnSpace({ title: e.target.value })}
+              className="input-soft px-3 py-2 text-sm outline-none"
+              placeholder="My cozy corner"
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>💬 Tagline</p>
+            <input
+              value={props.selectedSpace.tagline}
+              onChange={(e) => props.onUpdateOwnSpace({ tagline: e.target.value })}
+              className="input-soft px-3 py-2 text-sm outline-none"
+              placeholder="A tiny note about your space"
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>📝 About Me</p>
+            <textarea
+              value={props.selectedSpace.aboutMe}
+              onChange={(e) => props.onUpdateOwnSpace({ aboutMe: e.target.value })}
+              rows={3}
+              className="input-soft px-3 py-2 text-sm outline-none"
+              placeholder="Tell visitors what this page is about"
+            />
+          </div>
+          <label
+            className="btn-smooth flex cursor-pointer items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold"
+            style={{ background: "var(--surface)", color: "var(--foreground-soft)", border: "1px solid var(--border)" }}
+          >
+            <span>Upload profile image</span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                if (file) {
+                  void readFileAsDataUrl(file).then((imageUrl) => {
+                    if (imageUrl) props.onUpdateOwnSpace({ avatarUrl: imageUrl });
+                  });
+                }
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>🖼️ Avatar URL</p>
+            <input
+              value={props.selectedSpace.avatarUrl}
+              onChange={(e) => props.onUpdateOwnSpace({ avatarUrl: e.target.value })}
+              className="input-soft px-3 py-2 text-sm outline-none"
+              placeholder="Or paste an avatar image URL"
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>🎵 YouTube Link</p>
+            <input
+              value={props.selectedSpace.youtubeUrl}
+              onChange={(e) => props.onUpdateOwnSpace({ youtubeUrl: e.target.value })}
+              className="input-soft px-3 py-2 text-sm outline-none"
+              placeholder="Paste a YouTube link"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+        <p className="section-title mb-2">Add To Board</p>
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => props.onAddItemToOwnSpace("note")} className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: "#fff0a8" }}>+ Sticky note</button>
+          <button onClick={() => props.onAddItemToOwnSpace("about", { width: 260, height: 220 })} className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: "#d9f7ff" }}>+ About card</button>
+          <button
+            onClick={() => {
+              const item = props.onAddItemToOwnSpace("image", { imageUrl: props.newImageUrl.trim() });
+              if (item) {
+                props.setSelectedItemId(item.id);
+                props.setNewImageUrl("");
+              }
+            }}
+            className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold"
+            style={{ background: "rgba(255,255,255,0.9)" }}
+          >
+            + Photo card
+          </button>
+          <button onClick={() => props.onAddItemToOwnSpace("drawing")} className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: "rgba(255,255,255,0.9)" }}>+ Blank frame</button>
+        </div>
+        <div>
+          <p className="mb-1 mt-2 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>🔗 Photo URL</p>
+          <input
+            value={props.newImageUrl}
+            onChange={(e) => props.setNewImageUrl(e.target.value)}
+            className="input-soft px-3 py-2 text-sm outline-none"
+            placeholder="Paste an image URL for a photo card"
+          />
+        </div>
+        <label
+          className="btn-smooth mt-2 flex cursor-pointer items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold"
+          style={{ background: "var(--surface)", color: "var(--foreground-soft)", border: "1px solid var(--border)" }}
+        >
+          <span>Upload photo card image</span>
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              void createUploadedPhotoCard(e.target.files?.[0] ?? null, props.onAddItemToOwnSpace, props.setSelectedItemId);
+              e.currentTarget.value = "";
+            }}
+          />
+        </label>
+      </div>
+
+      <DoodlePad
+        onCreate={(imageUrl) => {
+          const item = props.onAddItemToOwnSpace("drawing", { imageUrl, title: "Fresh doodle" });
+          if (item) props.setSelectedItemId(item.id);
+        }}
+      />
+    </>
+  );
+}
+
+function ItemInspector(props: Readonly<ItemInspectorProps>) {
+  return (
+    <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="section-title">Item Inspector</p>
+        {props.isOwner ? (
+          <button
+            onClick={() => props.onRemoveSpaceItem(props.selectedSpace.id, props.selectedItem.id)}
+            className="btn-smooth rounded-lg px-2 py-1 text-[10px] font-semibold"
+            style={{ background: "rgba(251,146,60,0.16)", color: "var(--coral)" }}
+          >
+            Remove
+          </button>
+        ) : null}
+      </div>
+      <div className="grid gap-2">
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>🏷️ Item Title</p>
+          <input
+            value={props.selectedItem.title}
+            onChange={(e) => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { title: e.target.value })}
+            className="input-soft px-3 py-2 text-sm outline-none"
+            placeholder="Item title"
+            disabled={!props.isOwner}
+          />
+        </div>
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>📝 Item Text</p>
+          <textarea
+            value={props.selectedItem.content}
+            onChange={(e) => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { content: e.target.value })}
+            rows={props.selectedItem.type === "note" || props.selectedItem.type === "about" ? 5 : 2}
+            className="input-soft px-3 py-2 text-sm outline-none"
+            placeholder="Item text"
+            disabled={!props.isOwner}
+          />
+        </div>
+        {props.selectedItem.type === "image" || props.selectedItem.type === "drawing" ? (
+          <>
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>🖼️ Image URL</p>
+              <input
+                value={props.selectedItem.imageUrl ?? ""}
+                onChange={(e) => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { imageUrl: e.target.value })}
+                className="input-soft px-3 py-2 text-sm outline-none"
+                placeholder="Image URL"
+                disabled={!props.isOwner}
+              />
+            </div>
+            {props.isOwner ? (
+              <label
+                className="btn-smooth flex cursor-pointer items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold"
+                style={{ background: "var(--surface)", color: "var(--foreground-soft)", border: "1px solid var(--border)" }}
+              >
+                <span>Upload replacement image</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    void replaceSelectedItemImage(
+                      e.target.files?.[0] ?? null,
+                      props.selectedSpace.id,
+                      props.selectedItem.id,
+                      props.onUpdateSpaceItem
+                    );
+                    e.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            ) : null}
+          </>
+        ) : null}
+        <div className="rounded-2xl border p-2" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.72)" }}>
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--muted)" }}>📐 Position & Size</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <p className="mb-1 text-[10px]" style={{ color: "var(--muted)" }}>📍 X</p>
+              <input value={String(props.selectedItem.x)} onChange={(e) => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { x: Number(e.target.value) || 0 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="X" disabled={!props.isOwner} />
+            </div>
+            <div>
+              <p className="mb-1 text-[10px]" style={{ color: "var(--muted)" }}>📍 Y</p>
+              <input value={String(props.selectedItem.y)} onChange={(e) => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { y: Number(e.target.value) || 0 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Y" disabled={!props.isOwner} />
+            </div>
+            <div>
+              <p className="mb-1 text-[10px]" style={{ color: "var(--muted)" }}>↔️ Width</p>
+              <input value={String(props.selectedItem.width)} onChange={(e) => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { width: Number(e.target.value) || 120 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Width" disabled={!props.isOwner} />
+            </div>
+            <div>
+              <p className="mb-1 text-[10px]" style={{ color: "var(--muted)" }}>↕️ Height</p>
+              <input value={String(props.selectedItem.height)} onChange={(e) => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { height: Number(e.target.value) || 120 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Height" disabled={!props.isOwner} />
+            </div>
+            <div className="col-span-2">
+              <p className="mb-1 text-[10px]" style={{ color: "var(--muted)" }}>🌀 Rotation</p>
+              <input value={String(props.selectedItem.rotation)} onChange={(e) => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { rotation: Number(e.target.value) || 0 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Rotation" disabled={!props.isOwner} />
+            </div>
+          </div>
+        </div>
+        {props.selectedItem.type === "note" || props.selectedItem.type === "about" ? (
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>
+              Card Color
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {NOTE_COLOR_PRESETS.map((color) => (
+                <SwatchButton
+                  key={color}
+                  color={color}
+                  active={props.selectedItem.color === color}
+                  onClick={() => props.onUpdateSpaceItem(props.selectedSpace.id, props.selectedItem.id, { color })}
+                  label={`Item color ${color}`}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export default function SpaceStudio({
   viewer,
   isAuthenticated,
@@ -186,6 +615,7 @@ export default function SpaceStudio({
   const isOwner = selectedSpace?.id === ownSpace?.id;
   const selectedItem = selectedSpace?.items.find((item) => item.id === selectedItemId) ?? null;
   const youtubeId = extractYouTubeId(selectedSpace?.youtubeUrl ?? "");
+  const selectedWallpaperId = SPACE_WALLPAPER_PRESETS.find((preset) => preset.value === selectedSpace?.wallpaper)?.id ?? null;
 
   useEffect(() => {
     if (!selectedSpace) {
@@ -238,7 +668,7 @@ export default function SpaceStudio({
   }
 
   return (
-    <div className="grid h-full gap-4 overflow-hidden lg:grid-cols-[18rem_minmax(0,1fr)_20rem]">
+    <div className="grid h-full gap-4 overflow-auto lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)_20rem]">
       <aside className="panel flex min-h-0 flex-col overflow-hidden p-3">
         <div className="mb-3">
           <p className="section-title mb-1">Profile Spaces</p>
@@ -372,94 +802,19 @@ export default function SpaceStudio({
         </div>
       </section>
 
-      <aside className="panel flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
+      <aside className="panel flex min-h-0 flex-col gap-3 overflow-y-auto p-3 lg:col-span-2 xl:col-span-1">
         {isOwner ? (
-          <>
-            <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-              <p className="section-title mb-2">Space Settings</p>
-              <div className="grid gap-2">
-                <input
-                  value={selectedSpace.title}
-                  onChange={(e) => onUpdateOwnSpace({ title: e.target.value })}
-                  className="input-soft px-3 py-2 text-sm outline-none"
-                  placeholder="Space title"
-                />
-                <input
-                  value={selectedSpace.tagline}
-                  onChange={(e) => onUpdateOwnSpace({ tagline: e.target.value })}
-                  className="input-soft px-3 py-2 text-sm outline-none"
-                  placeholder="Tagline"
-                />
-                <textarea
-                  value={selectedSpace.aboutMe}
-                  onChange={(e) => onUpdateOwnSpace({ aboutMe: e.target.value })}
-                  rows={3}
-                  className="input-soft px-3 py-2 text-sm outline-none"
-                  placeholder="About me"
-                />
-                <input
-                  value={selectedSpace.avatarUrl}
-                  onChange={(e) => onUpdateOwnSpace({ avatarUrl: e.target.value })}
-                  className="input-soft px-3 py-2 text-sm outline-none"
-                  placeholder="Avatar image URL"
-                />
-                <input
-                  value={selectedSpace.youtubeUrl}
-                  onChange={(e) => onUpdateOwnSpace({ youtubeUrl: e.target.value })}
-                  className="input-soft px-3 py-2 text-sm outline-none"
-                  placeholder="YouTube link"
-                />
-                <input
-                  value={selectedSpace.accentColor}
-                  onChange={(e) => onUpdateOwnSpace({ accentColor: e.target.value })}
-                  className="input-soft px-3 py-2 text-sm outline-none"
-                  placeholder="#ff6b9d"
-                />
-                <textarea
-                  value={selectedSpace.wallpaper}
-                  onChange={(e) => onUpdateOwnSpace({ wallpaper: e.target.value })}
-                  rows={2}
-                  className="input-soft px-3 py-2 text-sm outline-none"
-                  placeholder="CSS wallpaper background"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-              <p className="section-title mb-2">Add To Board</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => onAddItemToOwnSpace("note")} className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: "#fff0a8" }}>+ Sticky note</button>
-                <button onClick={() => onAddItemToOwnSpace("about", { width: 260, height: 220 })} className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: "#d9f7ff" }}>+ About card</button>
-                <button
-                  onClick={() => {
-                    const item = onAddItemToOwnSpace("image", { imageUrl: newImageUrl.trim() });
-                    if (item) {
-                      setSelectedItemId(item.id);
-                      setNewImageUrl("");
-                    }
-                  }}
-                  className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold"
-                  style={{ background: "rgba(255,255,255,0.9)" }}
-                >
-                  + Photo card
-                </button>
-                <button onClick={() => onAddItemToOwnSpace("drawing")} className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: "rgba(255,255,255,0.9)" }}>+ Blank frame</button>
-              </div>
-              <input
-                value={newImageUrl}
-                onChange={(e) => setNewImageUrl(e.target.value)}
-                className="input-soft mt-2 px-3 py-2 text-sm outline-none"
-                placeholder="Image URL for a photo card"
-              />
-            </div>
-
-            <DoodlePad
-              onCreate={(imageUrl) => {
-                const item = onAddItemToOwnSpace("drawing", { imageUrl, title: "Fresh doodle" });
-                if (item) setSelectedItemId(item.id);
-              }}
-            />
-          </>
+          <OwnerToolsPanel
+            selectedSpace={selectedSpace}
+            selectedWallpaperId={selectedWallpaperId}
+            selectedItemId={selectedItemId}
+            setSelectedItemId={setSelectedItemId}
+            newImageUrl={newImageUrl}
+            setNewImageUrl={setNewImageUrl}
+            onUpdateOwnSpace={onUpdateOwnSpace}
+            onAddItemToOwnSpace={onAddItemToOwnSpace}
+            onUpdateSpaceItem={onUpdateSpaceItem}
+          />
         ) : (
           <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
             <p className="section-title mb-2">Leave A Note</p>
@@ -483,56 +838,7 @@ export default function SpaceStudio({
           </div>
         )}
 
-        {selectedItem ? (
-          <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="section-title">Item Inspector</p>
-              {isOwner ? (
-                <button
-                  onClick={() => onRemoveSpaceItem(selectedSpace.id, selectedItem.id)}
-                  className="btn-smooth rounded-lg px-2 py-1 text-[10px] font-semibold"
-                  style={{ background: "rgba(251,146,60,0.16)", color: "var(--coral)" }}
-                >
-                  Remove
-                </button>
-              ) : null}
-            </div>
-            <div className="grid gap-2">
-              <input
-                value={selectedItem.title}
-                onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { title: e.target.value })}
-                className="input-soft px-3 py-2 text-sm outline-none"
-                placeholder="Item title"
-                disabled={!isOwner}
-              />
-              <textarea
-                value={selectedItem.content}
-                onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { content: e.target.value })}
-                rows={selectedItem.type === "note" || selectedItem.type === "about" ? 5 : 2}
-                className="input-soft px-3 py-2 text-sm outline-none"
-                placeholder="Item text"
-                disabled={!isOwner}
-              />
-              {selectedItem.type === "image" || selectedItem.type === "drawing" ? (
-                <input
-                  value={selectedItem.imageUrl ?? ""}
-                  onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { imageUrl: e.target.value })}
-                  className="input-soft px-3 py-2 text-sm outline-none"
-                  placeholder="Image URL"
-                  disabled={!isOwner}
-                />
-              ) : null}
-              <div className="grid grid-cols-2 gap-2">
-                <input value={String(selectedItem.x)} onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { x: Number(e.target.value) || 0 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="X" disabled={!isOwner} />
-                <input value={String(selectedItem.y)} onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { y: Number(e.target.value) || 0 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Y" disabled={!isOwner} />
-                <input value={String(selectedItem.width)} onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { width: Number(e.target.value) || 120 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Width" disabled={!isOwner} />
-                <input value={String(selectedItem.height)} onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { height: Number(e.target.value) || 120 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Height" disabled={!isOwner} />
-                <input value={selectedItem.color} onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { color: e.target.value })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Color" disabled={!isOwner} />
-                <input value={String(selectedItem.rotation)} onChange={(e) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, { rotation: Number(e.target.value) || 0 })} className="input-soft px-3 py-2 text-sm outline-none" placeholder="Rotation" disabled={!isOwner} />
-              </div>
-            </div>
-          </div>
-        ) : null}
+        {selectedItem ? <ItemInspector selectedSpace={selectedSpace} selectedItem={selectedItem} isOwner={isOwner} onUpdateSpaceItem={onUpdateSpaceItem} onRemoveSpaceItem={onRemoveSpaceItem} /> : null}
       </aside>
     </div>
   );

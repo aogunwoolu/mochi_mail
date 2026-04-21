@@ -358,10 +358,9 @@ export default function Home() {
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div
-              className="flex h-10 w-10 items-center justify-center rounded-xl text-lg"
-              style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}
+              className="h-10 w-10 rounded-xl bg-cover bg-center bg-no-repeat"
+              style={{ backgroundImage: "url('/brand-mark.svg')" }}
             >
-              ✦
             </div>
             <div>
               <h1 className="text-base font-bold leading-tight tracking-tight">MochiMail</h1>
@@ -608,10 +607,10 @@ export default function Home() {
 
       {/* Mail */}
       <div
-        className="mx-auto flex w-full max-w-7xl flex-1 flex-col items-center overflow-hidden px-3 pb-3 pt-2 sm:px-4"
+        className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col items-center overflow-hidden px-3 pb-3 pt-2 sm:px-4"
         style={{ display: activeTab === "mail" ? "flex" : "none" }}
       >
-        <div className="panel flex h-full w-full max-w-4xl flex-col overflow-hidden">
+        <div className="panel flex min-h-0 h-full w-full max-w-4xl flex-col overflow-hidden">
           {mailView === "compose" ? (
             <MailCompose
               senderName={mail.user.name}
