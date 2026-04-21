@@ -33,6 +33,11 @@ const GUEST_NAME_KEY = "mochimail_guest_name";
 const GUEST_ID_KEY = "mochimail_guest_id";
 const AUTH_EMAIL_DOMAIN = "mochimail.app";
 
+function isAnonymousUser(user: User | null): boolean {
+  if (!user) return false;
+  return user.identities?.some((identity) => identity.provider === "anonymous") ?? false;
+}
+
 function sanitizeUsername(value: string): string {
   return value.toLowerCase().replaceAll(/[^a-z0-9_]/g, "_").replaceAll(/_+/g, "_").replaceAll(/^_+|_+$/g, "");
 }
@@ -89,13 +94,41 @@ export function useAccount() {
     setGuestId(guest.id);
     setGuestName(guest.name);
 
-    supabase.auth.getSession().then(({ data }) => {
-      setAuthUser(data.session?.user ?? null);
+    supabase.auth.getSession().then(async ({ data }) => {
+      const existingUser = data.session?.user ?? null;
+      if (existingUser) {
+        setAuthUser(existingUser);
+        setHydrated(true);
+        return;
+      }
+
+      const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
+      if (anonError) {
+        console.warn("[Account] Anonymous sign-in disabled or failed:", anonError.message);
+        setAuthUser(null);
+        setHydrated(true);
+        return;
+      }
+
+      setAuthUser(anonData.user ?? null);
       setHydrated(true);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUser(session?.user ?? null);
+      const nextUser = session?.user ?? null;
+      if (nextUser) {
+        setAuthUser(nextUser);
+        return;
+      }
+
+      void supabase.auth.signInAnonymously().then(({ data: anonData, error: anonError }) => {
+        if (anonError) {
+          console.warn("[Account] Could not restore anonymous session:", anonError.message);
+          setAuthUser(null);
+          return;
+        }
+        setAuthUser(anonData.user ?? null);
+      });
     });
 
     return () => subscription.unsubscribe();
@@ -143,6 +176,7 @@ export function useAccount() {
 
   const viewer = useMemo<ViewerIdentity>(() => {
     if (authUser && profile) {
+      const anonymous = isAnonymousUser(authUser);
       return {
         id: authUser.id,
         accountId: authUser.id,
@@ -153,7 +187,7 @@ export function useAccount() {
         accentColor: profile.accent_color ?? undefined,
         wallpaper: profile.wallpaper ?? undefined,
         youtubeUrl: profile.youtube_url ?? undefined,
-        isGuest: false,
+        isGuest: anonymous,
       };
     }
     return { id: guestId, name: guestName, isGuest: true };
@@ -266,7 +300,7 @@ export function useAccount() {
     hasSession: Boolean(authUser),
     isAuthenticated: Boolean(authUser && profile),
     hydrated: hydrated && !profileLoading,
-    accountLabel: authUser ? "Saved account" : "Guest artist",
+    accountLabel: authUser ? (isAnonymousUser(authUser) ? "Anonymous artist" : "Saved account") : "Guest artist",
     signUp,
     logIn,
     logOut,
