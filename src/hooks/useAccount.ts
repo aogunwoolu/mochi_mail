@@ -87,6 +87,7 @@ export function useAccount() {
   const [guestId, setGuestId] = useState("");
   const [guestName, setGuestName] = useState("");
   const [hydrated, setHydrated] = useState(false);
+  const [anonymousAuthWarning, setAnonymousAuthWarning] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -105,11 +106,13 @@ export function useAccount() {
       const { data: anonData, error: anonError } = await supabase.auth.signInAnonymously();
       if (anonError) {
         console.warn("[Account] Anonymous sign-in disabled or failed:", anonError.message);
+        setAnonymousAuthWarning(anonError.message);
         setAuthUser(null);
         setHydrated(true);
         return;
       }
 
+      setAnonymousAuthWarning(null);
       setAuthUser(anonData.user ?? null);
       setHydrated(true);
     });
@@ -117,6 +120,7 @@ export function useAccount() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = session?.user ?? null;
       if (nextUser) {
+        setAnonymousAuthWarning(null);
         setAuthUser(nextUser);
         return;
       }
@@ -124,9 +128,11 @@ export function useAccount() {
       void supabase.auth.signInAnonymously().then(({ data: anonData, error: anonError }) => {
         if (anonError) {
           console.warn("[Account] Could not restore anonymous session:", anonError.message);
+          setAnonymousAuthWarning(anonError.message);
           setAuthUser(null);
           return;
         }
+        setAnonymousAuthWarning(null);
         setAuthUser(anonData.user ?? null);
       });
     });
@@ -293,6 +299,10 @@ export function useAccount() {
     if (data) setProfile(data);
   }, [authUser]);
 
+  const identityMode = authUser
+    ? (isAnonymousUser(authUser) ? "anonymous" : "saved")
+    : "local-guest";
+
   return {
     accounts: [] as never[],
     currentAccount,
@@ -301,6 +311,11 @@ export function useAccount() {
     isAuthenticated: Boolean(authUser && profile),
     hydrated: hydrated && !profileLoading,
     accountLabel: authUser ? (isAnonymousUser(authUser) ? "Anonymous artist" : "Saved account") : "Guest artist",
+    identityMode,
+    identityHelp:
+      identityMode === "local-guest"
+        ? `Local-only guest mode${anonymousAuthWarning ? `: ${anonymousAuthWarning}` : ". Enable Supabase anonymous sign-ins for shared cross-device users."}`
+        : null,
     signUp,
     logIn,
     logOut,

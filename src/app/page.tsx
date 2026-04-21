@@ -445,6 +445,11 @@ export default function Home() {
               <div className="text-[10px]" style={{ color: "var(--muted)" }}>
                 {account.hydrated ? account.accountLabel : ""}
               </div>
+              {account.hydrated && account.identityHelp ? (
+                <div className="max-w-64 text-[9px] leading-relaxed" style={{ color: "var(--coral)" }}>
+                  {account.identityHelp}
+                </div>
+              ) : null}
             </div>
           </button>
         </div>
