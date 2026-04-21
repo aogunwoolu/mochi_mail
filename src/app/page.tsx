@@ -416,7 +416,7 @@ export default function Home() {
   const remoteArtists = artistList.filter((artist) => artist.id !== selfArtistId);
 
   return (
-    <div className="relative z-10 flex h-dvh flex-col overflow-hidden">
+    <div className="relative z-10 flex h-svh flex-col overflow-hidden">
       {/* Header */}
       <header className="glass-strong shrink-0 px-4 py-2.5">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">

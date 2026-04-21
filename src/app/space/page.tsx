@@ -40,7 +40,7 @@ function SpacePageInner() {
 
   if (!account.hydrated || isPreparingSpace) {
     return (
-      <div className="flex h-dvh items-center justify-center" style={{ background: "var(--bg)" }}>
+      <div className="flex h-svh items-center justify-center" style={{ background: "var(--bg)" }}>
         <div className="panel rounded-3xl px-6 py-5 text-center">
           <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
             Opening your space...
@@ -60,7 +60,7 @@ function SpacePageInner() {
 
   return (
     <div
-      className="flex h-dvh flex-col overflow-hidden"
+      className="flex h-svh flex-col overflow-hidden"
       style={
         {
           background: pageWallpaper,

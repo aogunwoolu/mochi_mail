@@ -45,7 +45,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${spaceMono.variable} h-full`}>
-      <body className="relative min-h-dvh font-sans antialiased">
+      <body className="relative min-h-svh font-sans antialiased">
         <ServiceWorkerRegistration />
         {children}
       </body>
