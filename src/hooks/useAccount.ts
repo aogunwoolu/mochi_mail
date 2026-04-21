@@ -302,13 +302,14 @@ export function useAccount() {
   const identityMode = authUser
     ? (isAnonymousUser(authUser) ? "anonymous" : "saved")
     : "local-guest";
+  const hasSavedAccount = Boolean(authUser && profile && !isAnonymousUser(authUser));
 
   return {
     accounts: [] as never[],
     currentAccount,
     viewer,
     hasSession: Boolean(authUser),
-    isAuthenticated: Boolean(authUser && profile),
+    isAuthenticated: hasSavedAccount,
     hydrated: hydrated && !profileLoading,
     accountLabel: authUser ? (isAnonymousUser(authUser) ? "Anonymous artist" : "Saved account") : "Guest artist",
     identityMode,

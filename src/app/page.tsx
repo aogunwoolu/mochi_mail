@@ -10,6 +10,7 @@ import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
 import { FiEdit3, FiMail, FiShoppingBag } from "react-icons/fi";
 import { exportWithDSBorder } from "@/components/ExportUtil";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useAccount } from "@/hooks/useAccount";
 import { useAssets } from "@/hooks/useAssets";
 import { useMail } from "@/hooks/useMail";
@@ -52,6 +53,11 @@ type PresencePayload = {
   username?: string;
 };
 
+type PresenceTransport = {
+  publish: (payload: PresencePayload) => void;
+  close: () => void;
+};
+
 function pruneStaleArtists(
   artists: Record<string, ArtistPresence>,
   selfId: string,
@@ -86,7 +92,7 @@ export default function Home() {
   const hasCenteredRef = useRef(false);
   const selfIdRef = useRef(selfArtistId);
   const selfColorRef = useRef(PRESENCE_COLORS[(selfArtistId.codePointAt(0) ?? 0) % PRESENCE_COLORS.length]);
-  const channelRef = useRef<BroadcastChannel | null>(null);
+  const channelRef = useRef<PresenceTransport | null>(null);
   const lastMouseWorldRef = useRef<{ x: number; y: number } | null>(null);
 
   const CANVAS_W = 6000;
@@ -232,7 +238,7 @@ export default function Home() {
         username: payload.username,
       },
     }));
-    channelRef.current?.postMessage(payload);
+    channelRef.current?.publish(payload);
   }, [getViewportCenterWorld, mail.user.name, account.viewer.avatarUrl, account.viewer.username]);
 
   const jumpToArtist = useCallback(
@@ -338,10 +344,7 @@ export default function Home() {
     selfColorRef.current =
       PRESENCE_COLORS[(id.codePointAt(0) ?? 0) % PRESENCE_COLORS.length];
 
-    const channel = new BroadcastChannel("mochimail-presence");
-    channelRef.current = channel;
-    channel.onmessage = (event: MessageEvent<PresencePayload>) => {
-      const payload = event.data;
+    const handleIncomingPresence = (payload: PresencePayload) => {
       if (!payload?.id || payload.id === selfIdRef.current) return;
       setArtists((prev) => ({
         ...prev,
@@ -358,6 +361,37 @@ export default function Home() {
       }));
     };
 
+    if (account.hasSession) {
+      const supabase = createSupabaseBrowserClient();
+      const realtime = supabase
+        .channel("mochimail-presence", { config: { broadcast: { self: false } } })
+        .on("broadcast", { event: "presence" }, ({ payload }) => {
+          handleIncomingPresence(payload as PresencePayload);
+        });
+
+      void realtime.subscribe((status) => {
+        if (status === "SUBSCRIBED") publishPresence();
+      });
+
+      channelRef.current = {
+        publish: (payload) => {
+          void realtime.send({ type: "broadcast", event: "presence", payload });
+        },
+        close: () => {
+          void supabase.removeChannel(realtime);
+        },
+      };
+    } else {
+      const bc = new BroadcastChannel("mochimail-presence");
+      bc.onmessage = (event: MessageEvent<PresencePayload>) => {
+        handleIncomingPresence(event.data);
+      };
+      channelRef.current = {
+        publish: (payload) => bc.postMessage(payload),
+        close: () => bc.close(),
+      };
+    }
+
     const heartbeat = globalThis.setInterval(() => publishPresence(), 900);
     const cleanup = globalThis.setInterval(() => {
       const cutoff = Date.now() - 4500;
@@ -367,10 +401,10 @@ export default function Home() {
     return () => {
       globalThis.clearInterval(heartbeat);
       globalThis.clearInterval(cleanup);
-      channel.close();
+      channelRef.current?.close();
       channelRef.current = null;
     };
-  }, [publishPresence, selfArtistId]);
+  }, [account.hasSession, publishPresence, selfArtistId]);
 
 
   const artistList = Object.values(artists).sort((a, b) => {
