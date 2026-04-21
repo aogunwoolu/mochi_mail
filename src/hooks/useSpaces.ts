@@ -138,7 +138,7 @@ export function useSpaces(
       const { data: ownSpace } = await supabase
         .from("spaces")
         .select("*")
-        .eq("owner_id", currentAccount.id)
+        .eq("owner_id", currentAccount?.id ?? null)
         .maybeSingle();
 
       if (ownSpace) return ownSpace;
@@ -146,17 +146,17 @@ export function useSpaces(
       const { data: created } = await supabase
         .from("spaces")
         .insert({
-          owner_id: currentAccount.id,
-          title: currentAccount.homeTitle,
+          owner_id: currentAccount?.id ?? null,
+          title: currentAccount?.homeTitle ?? "",
           tagline: "A public creative board full of scraps, sounds, and mood.",
-          about_me: currentAccount.bio,
+          about_me: currentAccount?.bio ?? "",
         })
         .select()
         .single();
 
       if (!created) return null;
 
-      const aboutItem = makeItem("about", { content: currentAccount.bio });
+      const aboutItem = makeItem("about", { content: currentAccount?.bio ?? "" });
       const noteItem = makeItem("note", { color: "#ffe08a", content: "Pin ideas, to-dos, or little moods here." });
 
       await supabase.from("space_items").insert([
