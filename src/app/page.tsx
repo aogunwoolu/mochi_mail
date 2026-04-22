@@ -61,9 +61,11 @@ type PresenceTransport = {
 type BoardSyncPayload = {
   senderId: string;
   ts: number;
-  placedItems: import("@/types").PlacedSticker[];
-  selectedPaper: PaperBackground | null;
-  drawingData: string | null;
+  placedItems?: import("@/types").PlacedSticker[];
+  selectedPaper?: PaperBackground | null;
+  drawingData?: string | null;
+  worldOffsetX: number;
+  worldOffsetY: number;
 };
 
 function pruneStaleArtists(
@@ -101,9 +103,20 @@ export default function Home() {
   const selfIdRef = useRef(selfArtistId);
   const selfColorRef = useRef(PRESENCE_COLORS[(selfArtistId.codePointAt(0) ?? 0) % PRESENCE_COLORS.length]);
   const channelRef = useRef<PresenceTransport | null>(null);
+  const boardChannelRef = useRef<any>(null);
   const lastMouseWorldRef = useRef<{ x: number; y: number } | null>(null);
   const boardSuppressUntilRef = useRef(0);
-  const lastBoardFingerprintRef = useRef("");
+  const lastSyncedItemsFingerprintRef = useRef("");
+  const lastSyncedDrawingRef = useRef<string | null>(null);
+  const placedItemsRef = useRef<import("@/types").PlacedSticker[]>([]);
+  const selectedPaperRef = useRef<PaperBackground | null>(null);
+  const lastAppliedBoardTsRef = useRef(0);
+  const hasRemoteBoardEventRef = useRef(false);
+  const drawingDirtyRef = useRef(false);
+  const persistItemsDirtyRef = useRef(false);
+  const persistDrawingDirtyRef = useRef(false);
+  const lastPersistedDrawingRef = useRef<string | null>(null);
+  const lastPresencePublishAtRef = useRef(0);
 
   const CANVAS_W = 6000;
   const CANVAS_H = 4800;
@@ -155,11 +168,21 @@ export default function Home() {
   const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
   const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
 
+  useEffect(() => {
+    placedItemsRef.current = placedItems;
+    selectedPaperRef.current = selectedPaper ?? null;
+  }, [placedItems, selectedPaper]);
+
   const mail = useMail(account.viewer);
   const store = useStore(account.viewer);
 
   const handleBrushChange = useCallback((update: Partial<BrushSettings>) => {
     setBrushSettings((prev) => ({ ...prev, ...update }));
+  }, []);
+
+  const handleDrawingCommit = useCallback(() => {
+    drawingDirtyRef.current = true;
+    persistDrawingDirtyRef.current = true;
   }, []);
 
   const handleSelectSticker = useCallback(
@@ -224,9 +247,12 @@ export default function Home() {
     };
   }, []);
 
-  const publishPresence = useCallback(() => {
+  const publishPresence = useCallback((force = false) => {
     const id = selfIdRef.current;
     if (!id) return;
+    const now = Date.now();
+    if (!force && now - lastPresencePublishAtRef.current < 45) return;
+    lastPresencePublishAtRef.current = now;
     const pos = lastMouseWorldRef.current ?? getViewportCenterWorld();
     const payload: PresencePayload = {
       id,
@@ -234,7 +260,7 @@ export default function Home() {
       color: selfColorRef.current,
       x: pos.x,
       y: pos.y,
-      ts: Date.now(),
+      ts: now,
       avatarUrl: account.viewer.avatarUrl,
       username: account.viewer.username,
     };
@@ -341,7 +367,7 @@ export default function Home() {
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("mousemove", onMouseMove, { passive: true });
     el.addEventListener("mouseleave", onMouseLeave);
-    publishPresence();
+    publishPresence(true);
 
     return () => {
       ro.disconnect();
@@ -357,6 +383,9 @@ export default function Home() {
       const boardState = await loadBoardState();
       if (!boardState) return;
 
+      // If realtime already delivered fresher shared state, avoid overriding it with late DB load.
+      if (hasRemoteBoardEventRef.current) return;
+
       if (boardState.placedItems.length > 0) {
         applySharedCanvasState({
           placedItems: boardState.placedItems,
@@ -365,7 +394,15 @@ export default function Home() {
       }
       if (boardState.drawingData) {
         canvasRef.current?.setCanvasImageData(boardState.drawingData);
+        lastSyncedDrawingRef.current = boardState.drawingData;
+        lastPersistedDrawingRef.current = boardState.drawingData;
       }
+
+      lastSyncedItemsFingerprintRef.current = JSON.stringify({
+        p: boardState.placedItems,
+        paper: boardState.selectedPaper?.id ?? null,
+      });
+      lastAppliedBoardTsRef.current = Date.now();
     };
 
     void init();
@@ -374,86 +411,153 @@ export default function Home() {
   // Periodically save board state (every 5s)
   useEffect(() => {
     const saveTimer = globalThis.setInterval(async () => {
-      const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
+      if (!persistItemsDirtyRef.current && !persistDrawingDirtyRef.current) return;
+
+      let drawingData = lastPersistedDrawingRef.current;
+      if (persistDrawingDirtyRef.current) {
+        drawingData = canvasRef.current?.getCanvasImageData() ?? null;
+        lastPersistedDrawingRef.current = drawingData;
+        persistDrawingDirtyRef.current = false;
+      }
+
       await saveBoardState(drawingData, placedItems, selectedPaper ?? null);
+      persistItemsDirtyRef.current = false;
     }, 5000);
 
     return () => globalThis.clearInterval(saveTimer);
   }, [placedItems, selectedPaper, saveBoardState]);
 
-  // Broadcast board state changes to other users (event-driven, not interval)
+  useEffect(() => {
+    persistItemsDirtyRef.current = true;
+  }, [placedItems, selectedPaper]);
+
+  // Connect board sync channel once and stream drawing updates only when content changes.
   useEffect(() => {
     if (!account.hasSession) return;
 
     const supabase = createSupabaseBrowserClient();
-    const channelRef = supabase
+    const boardChannel = supabase
       .channel("mochimail-studio-board", { config: { broadcast: { self: false } } })
       .on("broadcast", { event: "board-sync" }, ({ payload }) => {
         const data = payload as BoardSyncPayload;
         if (!data || data.senderId === selfIdRef.current) return;
 
-        // Short suppress window to allow rapid updates
-        boardSuppressUntilRef.current = Date.now() + 400;
-        applySharedCanvasState({
-          placedItems: data.placedItems,
-          selectedPaper: data.selectedPaper,
-        });
-        if (data.drawingData) {
-          canvasRef.current?.setCanvasImageData(data.drawingData);
+        // Ignore out-of-order packets to reduce state flip-flops under network jitter.
+        if (typeof data.ts !== "number" || data.ts <= lastAppliedBoardTsRef.current) return;
+        lastAppliedBoardTsRef.current = data.ts;
+        hasRemoteBoardEventRef.current = true;
+
+        boardSuppressUntilRef.current = Date.now() + 250;
+
+        const hasPlacedItems = Array.isArray(data.placedItems);
+        const hasSelectedPaper = Object.prototype.hasOwnProperty.call(data, "selectedPaper");
+        if (hasPlacedItems || hasSelectedPaper) {
+          const nextPlacedItems = hasPlacedItems ? data.placedItems : placedItemsRef.current;
+          const nextSelectedPaper = hasSelectedPaper ? (data.selectedPaper ?? null) : selectedPaperRef.current;
+
+          const incomingFingerprint = JSON.stringify({
+            p: nextPlacedItems,
+            paper: nextSelectedPaper?.id ?? null,
+          });
+          lastSyncedItemsFingerprintRef.current = incomingFingerprint;
+
+          applySharedCanvasState({
+            ...(hasPlacedItems ? { placedItems: data.placedItems } : {}),
+            ...(hasSelectedPaper ? { selectedPaper: data.selectedPaper ?? null } : {}),
+          });
+        }
+
+        if (Object.prototype.hasOwnProperty.call(data, "drawingData")) {
+          const senderOffsetX = Number.isFinite(data.worldOffsetX) ? data.worldOffsetX : 0;
+          const senderOffsetY = Number.isFinite(data.worldOffsetY) ? data.worldOffsetY : 0;
+          const shiftX = senderOffsetX - worldOffsetRef.current.x;
+          const shiftY = senderOffsetY - worldOffsetRef.current.y;
+          const incomingDrawing = data.drawingData ?? null;
+          canvasRef.current?.setCanvasImageData(incomingDrawing, { shiftX, shiftY });
+          lastSyncedDrawingRef.current = incomingDrawing;
+          lastPersistedDrawingRef.current = incomingDrawing;
+          drawingDirtyRef.current = false;
         }
       });
 
-    void channelRef.subscribe();
+    boardChannelRef.current = boardChannel;
+    void boardChannel.subscribe();
 
-    // Send drawing data every ~5 seconds
+    if (lastSyncedDrawingRef.current === null) {
+      lastSyncedDrawingRef.current = canvasRef.current?.getCanvasImageData() ?? null;
+    }
+    if (!lastSyncedItemsFingerprintRef.current) {
+      lastSyncedItemsFingerprintRef.current = JSON.stringify({
+        p: placedItemsRef.current,
+        paper: selectedPaperRef.current?.id ?? null,
+      });
+    }
+
+    // Send drawing snapshots only after local drawing commits.
     const drawingTimer = globalThis.setInterval(() => {
-      if (Date.now() >= boardSuppressUntilRef.current) {
-        const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
-        const payload: BoardSyncPayload = {
-          senderId: selfIdRef.current,
-          ts: Date.now(),
-          placedItems,
-          selectedPaper: selectedPaper ?? null,
-          drawingData,
-        };
-        void channelRef.send({ type: "broadcast", event: "board-sync", payload });
-        lastBoardFingerprintRef.current = JSON.stringify({ p: payload.placedItems, paper: payload.selectedPaper?.id ?? null });
+      if (!boardChannelRef.current) return;
+      if (Date.now() < boardSuppressUntilRef.current) return;
+      if (!drawingDirtyRef.current) return;
+
+      const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
+      if (drawingData === lastSyncedDrawingRef.current) {
+        drawingDirtyRef.current = false;
+        return;
       }
-    }, 5000);
 
-    // Broadcast placed items/paper changes immediately (debounced)
-    let debounceTimer: NodeJS.Timeout;
-    const broadcastChange = () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        if (Date.now() >= boardSuppressUntilRef.current) {
-          const fingerprint = JSON.stringify({
-            p: placedItems,
-            paper: selectedPaper?.id ?? null,
-          });
-          if (fingerprint === lastBoardFingerprintRef.current) return;
-          lastBoardFingerprintRef.current = fingerprint;
+      const payload: BoardSyncPayload = {
+        senderId: selfIdRef.current,
+        ts: Date.now(),
+        drawingData,
+        worldOffsetX: worldOffsetRef.current.x,
+        worldOffsetY: worldOffsetRef.current.y,
+      };
 
-          const payload: BoardSyncPayload = {
-            senderId: selfIdRef.current,
-            ts: Date.now(),
-            placedItems,
-            selectedPaper: selectedPaper ?? null,
-            drawingData: null, // Don't send drawing on every change
-          };
-          void channelRef.send({ type: "broadcast", event: "board-sync", payload });
-        }
-      }, 200);
-    };
-
-    broadcastChange();
+      void boardChannelRef.current.send({ type: "broadcast", event: "board-sync", payload });
+      lastSyncedDrawingRef.current = drawingData;
+      lastAppliedBoardTsRef.current = payload.ts;
+      drawingDirtyRef.current = false;
+    }, 350);
 
     return () => {
-      clearTimeout(debounceTimer);
       globalThis.clearInterval(drawingTimer);
-      void channelRef.unsubscribe();
+      boardChannelRef.current = null;
+      void boardChannel.unsubscribe();
     };
-  }, [account.hasSession, applySharedCanvasState, placedItems, selectedPaper]);
+  }, [account.hasSession, applySharedCanvasState]);
+
+  // Broadcast item/paper changes only when fingerprint changes.
+  useEffect(() => {
+    if (!account.hasSession) return;
+    if (!boardChannelRef.current) return;
+
+    const fingerprint = JSON.stringify({
+      p: placedItems,
+      paper: selectedPaper?.id ?? null,
+    });
+
+    if (fingerprint === lastSyncedItemsFingerprintRef.current) return;
+
+    const timer = globalThis.setTimeout(() => {
+      if (!boardChannelRef.current) return;
+      if (Date.now() < boardSuppressUntilRef.current) return;
+
+      const payload: BoardSyncPayload = {
+        senderId: selfIdRef.current,
+        ts: Date.now(),
+        placedItems,
+        selectedPaper: selectedPaper ?? null,
+        worldOffsetX: worldOffsetRef.current.x,
+        worldOffsetY: worldOffsetRef.current.y,
+      };
+
+      void boardChannelRef.current.send({ type: "broadcast", event: "board-sync", payload });
+      lastSyncedItemsFingerprintRef.current = fingerprint;
+      lastAppliedBoardTsRef.current = payload.ts;
+    }, 120);
+
+    return () => globalThis.clearTimeout(timer);
+  }, [account.hasSession, placedItems, selectedPaper]);
 
   useEffect(() => {
     const id = selfArtistId;
@@ -487,7 +591,7 @@ export default function Home() {
         });
 
       void realtime.subscribe((status) => {
-        if (status === "SUBSCRIBED") publishPresence();
+        if (status === "SUBSCRIBED") publishPresence(true);
       });
 
       channelRef.current = {
@@ -509,7 +613,7 @@ export default function Home() {
       };
     }
 
-    const heartbeat = globalThis.setInterval(() => publishPresence(), 900);
+    const heartbeat = globalThis.setInterval(() => publishPresence(true), 900);
     const cleanup = globalThis.setInterval(() => {
       const cutoff = Date.now() - 4500;
       setArtists((prev) => pruneStaleArtists(prev, selfIdRef.current, cutoff));
@@ -685,6 +789,7 @@ export default function Home() {
                 selectedAsset={selectedAsset}
                 selectedPaper={selectedPaper}
                 customFonts={customFonts}
+                onDrawingCommit={handleDrawingCommit}
                 onPlaceAsset={(asset, x, y) => placeItem(asset, x, y)}
                 onAddTextItem={(item) => placeTextItem(item.text ?? "Text", item.x, item.y, item.textColor ?? brushSettings.color, item.textSize ?? 32, item.textFont ?? '"Space Mono", monospace')}
                 onUpdatePlacedItem={updatePlacedItem}

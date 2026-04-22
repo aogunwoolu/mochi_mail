@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Sticker, WashiTape, PlacedSticker, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { Json } from "@/types/database";
@@ -306,6 +306,7 @@ export function useAssets(user: ViewerIdentity) {
   const [placedItems, setPlacedItems] = useState<PlacedSticker[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<Sticker | WashiTape | null>(null);
   const [hydratedRemote, setHydratedRemote] = useState(false);
+  const boardPersistenceDisabledRef = useRef(false);
   const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
   const storageKey = useMemo(() => assetStorageKey(user), [user]);
 
@@ -596,7 +597,7 @@ export function useAssets(user: ViewerIdentity) {
   }, []);
 
   const saveBoardState = useCallback(async (drawingData: string | null, currentPlacedItems: PlacedSticker[], currentSelectedPaper: PaperBackground | null) => {
-    if (!user?.id) return;
+    if (!user?.id || user.isGuest || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
     const { error } = await (supabase
       .from("studio_boards") as any)
@@ -607,11 +608,18 @@ export function useAssets(user: ViewerIdentity) {
         selected_paper: currentSelectedPaper,
         updated_at: new Date().toISOString(),
       }, { onConflict: "created_by" });
-    if (error) console.warn("Failed to save board state:", error);
-  }, [user?.id]);
+    if (error) {
+      const message = String(error.message ?? "").toLowerCase();
+      if (message.includes("relation") || message.includes("permission") || message.includes("does not exist")) {
+        boardPersistenceDisabledRef.current = true;
+        return;
+      }
+      console.warn("Failed to save board state:", error);
+    }
+  }, [user?.id, user.isGuest]);
 
   const loadBoardState = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id || user.isGuest || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
     const { data, error } = await (supabase
       .from("studio_boards") as any)
@@ -620,6 +628,11 @@ export function useAssets(user: ViewerIdentity) {
       .single();
 
     if (error && error.code !== "PGRST116") {
+      const message = String(error.message ?? "").toLowerCase();
+      if (message.includes("relation") || message.includes("permission") || message.includes("does not exist")) {
+        boardPersistenceDisabledRef.current = true;
+        return null;
+      }
       console.warn("Failed to load board state:", error);
       return null;
     }
@@ -632,7 +645,7 @@ export function useAssets(user: ViewerIdentity) {
       };
     }
     return null;
-  }, [user?.id]);
+  }, [user?.id, user.isGuest]);
 
   return {
     stickers,

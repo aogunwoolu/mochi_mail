@@ -14,7 +14,7 @@ import { BrushSettings, CustomFont, PaperBackground, PlacedSticker, Sticker, Was
 export interface DrawingCanvasHandle {
   getCanvas: () => HTMLCanvasElement | null;
   getCanvasImageData: () => string | null;
-  setCanvasImageData: (imageData: string | null) => void;
+  setCanvasImageData: (imageData: string | null, options?: { shiftX?: number; shiftY?: number }) => void;
   clearCanvas: () => void;
   undo: () => void;
   redo: () => void;
@@ -37,6 +37,7 @@ interface DrawingCanvasProps {
   height?: number;
   fillContainer?: boolean;
   backgroundMode?: "tile" | "cover";
+  onDrawingCommit?: () => void;
 }
 
 const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
@@ -56,6 +57,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       height = 800,
       fillContainer = false,
       backgroundMode = "tile",
+      onDrawingCommit,
     },
     ref
   ) => {
@@ -67,6 +69,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     // Washi tape drag refs
     const washiStartRef = useRef<{ x: number; y: number } | null>(null);
     const preWashiStateRef = useRef<ImageData | null>(null);
+    const changedDuringPointerRef = useRef(false);
     const [history, setHistory] = useState<ImageData[]>([]);
     const [redoHistory, setRedoHistory] = useState<ImageData[]>([]);
     const [textOverlay, setTextOverlay] = useState<{ id: string; x: number; y: number; value: string } | null>(null);
@@ -432,6 +435,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         // Washi: drag to paint a strip directly onto the canvas
         if (brushSettings.tool === "washi" && selectedAsset) {
           saveToHistory();
+          changedDuringPointerRef.current = false;
           const canvas = canvasRef.current;
           if (!canvas) return;
           const ctx = canvas.getContext("2d");
@@ -449,6 +453,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
         // Normal drawing / erasing
         isDrawing.current = true;
+        changedDuringPointerRef.current = true;
         lastPoint.current = { x: point.x, y: point.y };
         saveToHistory();
         drawLine(
@@ -511,12 +516,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             { x: point.x, y: point.y },
             selectedAsset
           );
+          changedDuringPointerRef.current = true;
           return;
         }
 
         if (!lastPoint.current) return;
         drawLine(lastPoint.current, { x: point.x, y: point.y }, point.pressure);
         lastPoint.current = { x: point.x, y: point.y };
+        changedDuringPointerRef.current = true;
       },
       [
         getCanvasPoint,
@@ -541,7 +548,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       washiStartRef.current = null;
       preWashiStateRef.current = null;
       selectionDragRef.current = null;
-    }, []);
+      if (changedDuringPointerRef.current) {
+        onDrawingCommit?.();
+      }
+      changedDuringPointerRef.current = false;
+    }, [onDrawingCommit]);
 
     const clearCanvas = useCallback(() => {
       const canvas = canvasRef.current;
@@ -550,7 +561,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       if (!ctx) return;
       saveToHistory();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }, [saveToHistory]);
+      onDrawingCommit?.();
+    }, [saveToHistory, onDrawingCommit]);
 
     const undo = useCallback(() => {
       const canvas = canvasRef.current;
@@ -562,7 +574,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       setRedoHistory((prev) => [...prev.slice(-30), ctx.getImageData(0, 0, canvas.width, canvas.height)]);
       ctx.putImageData(previous, 0, 0);
       setHistory((h) => h.slice(0, -1));
-    }, [history]);
+      onDrawingCommit?.();
+    }, [history, onDrawingCommit]);
 
     const redo = useCallback(() => {
       const canvas = canvasRef.current;
@@ -574,7 +587,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       setHistory((prev) => [...prev.slice(-30), ctx.getImageData(0, 0, canvas.width, canvas.height)]);
       ctx.putImageData(next, 0, 0);
       setRedoHistory((prev) => prev.slice(0, -1));
-    }, [redoHistory]);
+      onDrawingCommit?.();
+    }, [redoHistory, onDrawingCommit]);
 
     const commitTextBlock = useCallback((text: string, id: string) => {
       if (!onUpdatePlacedItem) return;
@@ -647,7 +661,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       return canvas.toDataURL("image/png");
     }, []);
 
-    const setCanvasImageData = useCallback((imageData: string | null) => {
+    const setCanvasImageData = useCallback((imageData: string | null, options?: { shiftX?: number; shiftY?: number }) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
@@ -659,7 +673,9 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       const img = new Image();
       img.onload = () => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const shiftX = options?.shiftX ?? 0;
+        const shiftY = options?.shiftY ?? 0;
+        ctx.drawImage(img, shiftX, shiftY, canvas.width, canvas.height);
       };
       img.src = imageData;
     }, []);
