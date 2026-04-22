@@ -38,6 +38,7 @@ interface DrawingCanvasProps {
   fillContainer?: boolean;
   backgroundMode?: "tile" | "cover";
   onDrawingCommit?: () => void;
+  onDrawingProgress?: () => void;
 }
 
 const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
@@ -58,6 +59,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       fillContainer = false,
       backgroundMode = "tile",
       onDrawingCommit,
+      onDrawingProgress,
     },
     ref
   ) => {
@@ -517,6 +519,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             selectedAsset
           );
           changedDuringPointerRef.current = true;
+          onDrawingProgress?.();
           return;
         }
 
@@ -524,6 +527,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         drawLine(lastPoint.current, { x: point.x, y: point.y }, point.pressure);
         lastPoint.current = { x: point.x, y: point.y };
         changedDuringPointerRef.current = true;
+        onDrawingProgress?.();
       },
       [
         getCanvasPoint,
@@ -532,6 +536,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         onUpdatePlacedItem,
         drawLine,
         paintWashiStrip,
+        onDrawingProgress,
       ]
     );
 

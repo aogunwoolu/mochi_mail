@@ -2,16 +2,19 @@
 
 import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { Doc, Map as YMap } from "yjs";
 import AccountPanel from "@/components/AccountPanel";
 import DrawingCanvas, { DrawingCanvasHandle } from "@/components/DrawingCanvas";
 import StudioToolbar from "@/components/StudioToolbar";
 import MailComposePanel from "@/components/MailComposePanel";
 import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
-import { FiEdit3, FiMail, FiShoppingBag } from "react-icons/fi";
+import { FiEdit3, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
 import { exportWithDSBorder } from "@/components/ExportUtil";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { SupabaseYjsProvider } from "@/lib/collab/supabaseYjsProvider";
 import { useAccount } from "@/hooks/useAccount";
+import { useActiveRoomContext } from "@/hooks/useActiveRoomContext";
 import { useAssets } from "@/hooks/useAssets";
 import { useMail } from "@/hooks/useMail";
 import { useStore } from "@/hooks/useStore";
@@ -58,16 +61,6 @@ type PresenceTransport = {
   close: () => void;
 };
 
-type BoardSyncPayload = {
-  senderId: string;
-  ts: number;
-  placedItems?: import("@/types").PlacedSticker[];
-  selectedPaper?: PaperBackground | null;
-  drawingData?: string | null;
-  worldOffsetX: number;
-  worldOffsetY: number;
-};
-
 function pruneStaleArtists(
   artists: Record<string, ArtistPresence>,
   selfId: string,
@@ -80,6 +73,38 @@ function pruneStaleArtists(
     }
   }
   return next;
+}
+
+function RoomModeBanner({
+  activeRoomTitle,
+  roomAccessError,
+  onOpenRooms,
+}: Readonly<{
+  activeRoomTitle: string | null;
+  roomAccessError: string | null;
+  onOpenRooms: () => void;
+}>) {
+  if (!activeRoomTitle && !roomAccessError) return null;
+
+  return (
+    <div className="absolute left-4 right-4 top-3 z-50 flex items-center justify-between rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.9)" }}>
+      <div>
+        {activeRoomTitle ? (
+          <span style={{ color: "var(--muted-strong)" }}>Room mode: <strong>{activeRoomTitle}</strong></span>
+        ) : null}
+        {roomAccessError ? (
+          <span style={{ color: "#b42318" }}>{roomAccessError}</span>
+        ) : null}
+      </div>
+      <button
+        onClick={onOpenRooms}
+        className="btn-smooth rounded-lg px-2 py-1 font-semibold"
+        style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}
+      >
+        Open rooms
+      </button>
+    </div>
+  );
 }
 
 export default function Home() {
@@ -103,9 +128,13 @@ export default function Home() {
   const selfIdRef = useRef(selfArtistId);
   const selfColorRef = useRef(PRESENCE_COLORS[(selfArtistId.codePointAt(0) ?? 0) % PRESENCE_COLORS.length]);
   const channelRef = useRef<PresenceTransport | null>(null);
-  const boardChannelRef = useRef<any>(null);
+  const yProviderRef = useRef<SupabaseYjsProvider | null>(null);
+  const yDocRef = useRef<Doc | null>(null);
+  const yBoardMapRef = useRef<YMap<string> | null>(null);
+  const isApplyingRemoteBoardRef = useRef(false);
+  const isBoardSyncReadyRef = useRef(false);
+  const lastDrawingPublishAtRef = useRef(0);
   const lastMouseWorldRef = useRef<{ x: number; y: number } | null>(null);
-  const boardSuppressUntilRef = useRef(0);
   const lastSyncedItemsFingerprintRef = useRef("");
   const lastSyncedDrawingRef = useRef<string | null>(null);
   const placedItemsRef = useRef<import("@/types").PlacedSticker[]>([]);
@@ -167,6 +196,11 @@ export default function Home() {
   const [artists, setArtists] = useState<Record<string, ArtistPresence>>({});
   const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
   const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
+  const { activeRoomTitle, roomAccessError, collabScope } = useActiveRoomContext(
+    account.hasSession,
+    account.viewer.accountId,
+    selfIdRef.current
+  );
 
   useEffect(() => {
     placedItemsRef.current = placedItems;
@@ -183,6 +217,10 @@ export default function Home() {
   const handleDrawingCommit = useCallback(() => {
     drawingDirtyRef.current = true;
     persistDrawingDirtyRef.current = true;
+  }, []);
+
+  const handleDrawingProgress = useCallback(() => {
+    drawingDirtyRef.current = true;
   }, []);
 
   const handleSelectSticker = useCallback(
@@ -403,10 +441,23 @@ export default function Home() {
         paper: boardState.selectedPaper?.id ?? null,
       });
       lastAppliedBoardTsRef.current = Date.now();
+
+      const boardMap = yBoardMapRef.current;
+      if (account.hasSession && boardMap && !boardMap.has("ts")) {
+        boardMap.doc?.transact(() => {
+          boardMap.set("senderId", selfIdRef.current);
+          boardMap.set("ts", String(Date.now()));
+          boardMap.set("placedItems", JSON.stringify(boardState.placedItems));
+          boardMap.set("selectedPaper", JSON.stringify(boardState.selectedPaper ?? null));
+          boardMap.set("drawingData", boardState.drawingData ?? "");
+          boardMap.set("drawingOffsetX", String(worldOffsetRef.current.x));
+          boardMap.set("drawingOffsetY", String(worldOffsetRef.current.y));
+        }, "seed-from-db");
+      }
     };
 
     void init();
-  }, [loadBoardState, applySharedCanvasState]);
+  }, [account.hasSession, loadBoardState, applySharedCanvasState, collabScope]);
 
   // Periodically save board state (every 5s)
   useEffect(() => {
@@ -431,73 +482,103 @@ export default function Home() {
     persistItemsDirtyRef.current = true;
   }, [placedItems, selectedPaper]);
 
-  // Connect board sync channel once and stream drawing updates only when content changes.
+  // Use a Supabase-private Yjs room for CRDT board sync so channel auth/room rules are enforced.
   useEffect(() => {
-    if (!account.hasSession) return;
+    if (!account.hasSession) {
+      isBoardSyncReadyRef.current = false;
+      yBoardMapRef.current = null;
+      yDocRef.current = null;
+      return;
+    }
 
     const supabase = createSupabaseBrowserClient();
-    const boardChannel = supabase
-      .channel("mochimail-studio-board", { config: { broadcast: { self: false } } })
-      .on("broadcast", { event: "board-sync" }, ({ payload }) => {
-        const data = payload as BoardSyncPayload;
-        if (!data || data.senderId === selfIdRef.current) return;
+    const doc = new Doc();
+    const boardMap = doc.getMap<string>("board");
+    const provider = new SupabaseYjsProvider({
+      supabase,
+      roomName: `mochimail-studio-board:${collabScope}`,
+      doc,
+      senderId: selfIdRef.current,
+    });
 
-        // Ignore out-of-order packets to reduce state flip-flops under network jitter.
-        if (typeof data.ts !== "number" || data.ts <= lastAppliedBoardTsRef.current) return;
-        lastAppliedBoardTsRef.current = data.ts;
-        hasRemoteBoardEventRef.current = true;
+    yDocRef.current = doc;
+    yBoardMapRef.current = boardMap;
+    yProviderRef.current = provider;
+    isBoardSyncReadyRef.current = true;
+    provider.connect();
 
-        boardSuppressUntilRef.current = Date.now() + 250;
+    const parseJson = <T,>(value: string | undefined): T | null => {
+      if (typeof value !== "string") return null;
+      try {
+        return JSON.parse(value) as T;
+      } catch {
+        return null;
+      }
+    };
 
-        const hasPlacedItems = Array.isArray(data.placedItems);
-        const hasSelectedPaper = Object.prototype.hasOwnProperty.call(data, "selectedPaper");
+    const applyRemoteBoardState = () => {
+      const tsRaw = boardMap.get("ts");
+      const incomingTs = Number(tsRaw);
+      if (!Number.isFinite(incomingTs) || incomingTs <= lastAppliedBoardTsRef.current) return;
+
+      const senderId = boardMap.get("senderId");
+      if (senderId === selfIdRef.current) return;
+
+      const placedItemsJson = boardMap.get("placedItems");
+      const selectedPaperJson = boardMap.get("selectedPaper");
+      const drawingDataRaw = boardMap.get("drawingData");
+      const drawingOffsetX = Number(boardMap.get("drawingOffsetX") ?? "0");
+      const drawingOffsetY = Number(boardMap.get("drawingOffsetY") ?? "0");
+
+      const nextPlacedItems = parseJson<import("@/types").PlacedSticker[]>(placedItemsJson);
+      const nextSelectedPaper = parseJson<PaperBackground | null>(selectedPaperJson);
+      const hasPlacedItems = nextPlacedItems !== null;
+      const hasSelectedPaper = nextSelectedPaper !== null;
+      const hasDrawing = typeof drawingDataRaw === "string";
+      if (!hasPlacedItems && !hasSelectedPaper && !hasDrawing) return;
+
+      hasRemoteBoardEventRef.current = true;
+      lastAppliedBoardTsRef.current = incomingTs;
+      isApplyingRemoteBoardRef.current = true;
+
+      try {
         if (hasPlacedItems || hasSelectedPaper) {
-          const nextPlacedItems = hasPlacedItems ? data.placedItems : placedItemsRef.current;
-          const nextSelectedPaper = hasSelectedPaper ? (data.selectedPaper ?? null) : selectedPaperRef.current;
+          const resolvedItems = nextPlacedItems ?? placedItemsRef.current;
+          const resolvedPaper = nextSelectedPaper ?? selectedPaperRef.current;
 
           const incomingFingerprint = JSON.stringify({
-            p: nextPlacedItems,
-            paper: nextSelectedPaper?.id ?? null,
+            p: resolvedItems,
+            paper: resolvedPaper?.id ?? null,
           });
           lastSyncedItemsFingerprintRef.current = incomingFingerprint;
 
           applySharedCanvasState({
-            ...(hasPlacedItems ? { placedItems: data.placedItems } : {}),
-            ...(hasSelectedPaper ? { selectedPaper: data.selectedPaper ?? null } : {}),
+            ...(hasPlacedItems ? { placedItems: resolvedItems } : {}),
+            ...(hasSelectedPaper ? { selectedPaper: resolvedPaper } : {}),
           });
         }
 
-        if (Object.prototype.hasOwnProperty.call(data, "drawingData")) {
-          const senderOffsetX = Number.isFinite(data.worldOffsetX) ? data.worldOffsetX : 0;
-          const senderOffsetY = Number.isFinite(data.worldOffsetY) ? data.worldOffsetY : 0;
-          const shiftX = senderOffsetX - worldOffsetRef.current.x;
-          const shiftY = senderOffsetY - worldOffsetRef.current.y;
-          const incomingDrawing = data.drawingData ?? null;
+        if (hasDrawing) {
+          const incomingDrawing = drawingDataRaw || null;
+          const shiftX = (Number.isFinite(drawingOffsetX) ? drawingOffsetX : 0) - worldOffsetRef.current.x;
+          const shiftY = (Number.isFinite(drawingOffsetY) ? drawingOffsetY : 0) - worldOffsetRef.current.y;
           canvasRef.current?.setCanvasImageData(incomingDrawing, { shiftX, shiftY });
           lastSyncedDrawingRef.current = incomingDrawing;
           lastPersistedDrawingRef.current = incomingDrawing;
           drawingDirtyRef.current = false;
         }
-      });
+      } finally {
+        isApplyingRemoteBoardRef.current = false;
+      }
+    };
 
-    boardChannelRef.current = boardChannel;
-    void boardChannel.subscribe();
+    boardMap.observe(applyRemoteBoardState);
 
-    if (lastSyncedDrawingRef.current === null) {
-      lastSyncedDrawingRef.current = canvasRef.current?.getCanvasImageData() ?? null;
-    }
-    if (!lastSyncedItemsFingerprintRef.current) {
-      lastSyncedItemsFingerprintRef.current = JSON.stringify({
-        p: placedItemsRef.current,
-        paper: selectedPaperRef.current?.id ?? null,
-      });
-    }
-
-    // Send drawing snapshots only after local drawing commits.
     const drawingTimer = globalThis.setInterval(() => {
-      if (!boardChannelRef.current) return;
-      if (Date.now() < boardSuppressUntilRef.current) return;
+      if (!isBoardSyncReadyRef.current || !yBoardMapRef.current) return;
       if (!drawingDirtyRef.current) return;
+      const now = Date.now();
+      if (now - lastDrawingPublishAtRef.current < 160) return;
 
       const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
       if (drawingData === lastSyncedDrawingRef.current) {
@@ -505,31 +586,39 @@ export default function Home() {
         return;
       }
 
-      const payload: BoardSyncPayload = {
-        senderId: selfIdRef.current,
-        ts: Date.now(),
-        drawingData,
-        worldOffsetX: worldOffsetRef.current.x,
-        worldOffsetY: worldOffsetRef.current.y,
-      };
+      const nextTs = Date.now();
+      yBoardMapRef.current.doc?.transact(() => {
+        yBoardMapRef.current?.set("senderId", selfIdRef.current);
+        yBoardMapRef.current?.set("ts", String(nextTs));
+        yBoardMapRef.current?.set("drawingData", drawingData ?? "");
+        yBoardMapRef.current?.set("drawingOffsetX", String(worldOffsetRef.current.x));
+        yBoardMapRef.current?.set("drawingOffsetY", String(worldOffsetRef.current.y));
+      }, "publish-drawing");
 
-      void boardChannelRef.current.send({ type: "broadcast", event: "board-sync", payload });
+      lastDrawingPublishAtRef.current = now;
       lastSyncedDrawingRef.current = drawingData;
-      lastAppliedBoardTsRef.current = payload.ts;
+      lastAppliedBoardTsRef.current = nextTs;
       drawingDirtyRef.current = false;
-    }, 350);
+    }, 120);
 
     return () => {
+      boardMap.unobserve(applyRemoteBoardState);
       globalThis.clearInterval(drawingTimer);
-      boardChannelRef.current = null;
-      void boardChannel.unsubscribe();
+      isBoardSyncReadyRef.current = false;
+      yBoardMapRef.current = null;
+      yDocRef.current = null;
+      const currentProvider = yProviderRef.current;
+      yProviderRef.current = null;
+      void currentProvider?.destroy();
+      doc.destroy();
     };
-  }, [account.hasSession, applySharedCanvasState]);
+  }, [account.hasSession, applySharedCanvasState, collabScope]);
 
-  // Broadcast item/paper changes only when fingerprint changes.
+  // Publish item/paper changes to the CRDT map whenever their fingerprint changes.
   useEffect(() => {
     if (!account.hasSession) return;
-    if (!boardChannelRef.current) return;
+    if (!isBoardSyncReadyRef.current || !yBoardMapRef.current) return;
+    if (isApplyingRemoteBoardRef.current) return;
 
     const fingerprint = JSON.stringify({
       p: placedItems,
@@ -539,21 +628,16 @@ export default function Home() {
     if (fingerprint === lastSyncedItemsFingerprintRef.current) return;
 
     const timer = globalThis.setTimeout(() => {
-      if (!boardChannelRef.current) return;
-      if (Date.now() < boardSuppressUntilRef.current) return;
+      const nextTs = Date.now();
+      yBoardMapRef.current?.doc?.transact(() => {
+        yBoardMapRef.current?.set("senderId", selfIdRef.current);
+        yBoardMapRef.current?.set("ts", String(nextTs));
+        yBoardMapRef.current?.set("placedItems", JSON.stringify(placedItems));
+        yBoardMapRef.current?.set("selectedPaper", JSON.stringify(selectedPaper ?? null));
+      }, "publish-items");
 
-      const payload: BoardSyncPayload = {
-        senderId: selfIdRef.current,
-        ts: Date.now(),
-        placedItems,
-        selectedPaper: selectedPaper ?? null,
-        worldOffsetX: worldOffsetRef.current.x,
-        worldOffsetY: worldOffsetRef.current.y,
-      };
-
-      void boardChannelRef.current.send({ type: "broadcast", event: "board-sync", payload });
       lastSyncedItemsFingerprintRef.current = fingerprint;
-      lastAppliedBoardTsRef.current = payload.ts;
+      lastAppliedBoardTsRef.current = nextTs;
     }, 120);
 
     return () => globalThis.clearTimeout(timer);
@@ -585,12 +669,12 @@ export default function Home() {
     if (account.hasSession) {
       const supabase = createSupabaseBrowserClient();
       const realtime = supabase
-        .channel("mochimail-presence", { config: { broadcast: { self: false } } })
+        .channel(`mochimail-presence:${collabScope}`, { config: { broadcast: { self: false } } })
         .on("broadcast", { event: "presence" }, ({ payload }) => {
           handleIncomingPresence(payload as PresencePayload);
         });
 
-      void realtime.subscribe((status) => {
+      realtime.subscribe((status) => {
         if (status === "SUBSCRIBED") publishPresence(true);
       });
 
@@ -603,7 +687,7 @@ export default function Home() {
         },
       };
     } else {
-      const bc = new BroadcastChannel("mochimail-presence");
+      const bc = new BroadcastChannel(`mochimail-presence:${collabScope}`);
       bc.onmessage = (event: MessageEvent<PresencePayload>) => {
         handleIncomingPresence(event.data);
       };
@@ -625,7 +709,7 @@ export default function Home() {
       channelRef.current?.close();
       channelRef.current = null;
     };
-  }, [account.hasSession, publishPresence, selfArtistId]);
+  }, [account.hasSession, publishPresence, selfArtistId, collabScope]);
 
 
   const artistList = Object.values(artists).sort((a, b) => {
@@ -680,6 +764,18 @@ export default function Home() {
                 )}
               </button>
             ))}
+            <button
+              onClick={() => router.push("/rooms")}
+              className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
+              style={{
+                background: "transparent",
+                color: "var(--muted)",
+              }}
+              aria-label="Rooms"
+            >
+              <span><FiUsers /></span>
+              <span className="hidden sm:inline">Rooms</span>
+            </button>
           </nav>
 
           <button
@@ -730,6 +826,11 @@ export default function Home() {
         className="relative flex-1 overflow-hidden"
         style={{ display: activeTab === "studio" ? "flex" : "none" }}
       >
+        <RoomModeBanner
+          activeRoomTitle={activeRoomTitle}
+          roomAccessError={roomAccessError}
+          onOpenRooms={() => router.push("/rooms")}
+        />
         {/* Edge presence indicators — off-screen remote cursors */}
         {viewSize.w > 0 && remoteArtists.map((artist) => {
             const MARGIN = 32;
@@ -790,6 +891,7 @@ export default function Home() {
                 selectedPaper={selectedPaper}
                 customFonts={customFonts}
                 onDrawingCommit={handleDrawingCommit}
+                onDrawingProgress={handleDrawingProgress}
                 onPlaceAsset={(asset, x, y) => placeItem(asset, x, y)}
                 onAddTextItem={(item) => placeTextItem(item.text ?? "Text", item.x, item.y, item.textColor ?? brushSettings.color, item.textSize ?? 32, item.textFont ?? '"Space Mono", monospace')}
                 onUpdatePlacedItem={updatePlacedItem}

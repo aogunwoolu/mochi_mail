@@ -2,6 +2,7 @@ export type Tool = "pen" | "eraser" | "sticker" | "washi" | "text" | "select";
 export type AppTab = "studio" | "mail" | "store";
 export type DeliverySpeed = "express" | "standard" | "slow";
 export type SpaceItemType = "note" | "about" | "image" | "drawing";
+export type RoomVisibility = "public" | "private";
 
 export interface LetterSendPayload {
   receiverName: string;
@@ -170,6 +171,32 @@ export interface UserSpace {
   wallpaper: string;
   items: SpaceItem[];
   updatedAt: number;
+}
+
+export interface RoomSummary {
+  id: string;
+  ownerId: string;
+  ownerName: string;
+  ownerUsername: string;
+  title: string;
+  description: string;
+  visibility: RoomVisibility;
+  inviteToken: string;
+  hasPassword: boolean;
+  isMember: boolean;
+  isOwner: boolean;
+  updatedAt: number;
+  createdAt: number;
+}
+
+export interface RoomInvitePreview {
+  id: string;
+  title: string;
+  description: string;
+  isPublic: boolean;
+  hasPassword: boolean;
+  ownerName: string;
+  ownerUsername: string;
 }
 
 export interface StoreItem {
