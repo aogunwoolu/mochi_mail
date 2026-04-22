@@ -147,6 +147,8 @@ export default function Home() {
     removeStamp,
     removeEnvelope,
     removeCustomFont,
+    saveBoardState,
+    loadBoardState,
   } = useAssets(account.viewer);
 
   const [artists, setArtists] = useState<Record<string, ArtistPresence>>({});
@@ -350,51 +352,106 @@ export default function Home() {
   }, [activeTab, CANVAS_H, CANVAS_W, publishPresence, shiftPlacedItems]);
 
   useEffect(() => {
+    // Load board state from database on mount
+    const init = async () => {
+      const boardState = await loadBoardState();
+      if (!boardState) return;
+
+      if (boardState.placedItems.length > 0) {
+        applySharedCanvasState({
+          placedItems: boardState.placedItems,
+          selectedPaper: boardState.selectedPaper,
+        });
+      }
+      if (boardState.drawingData) {
+        canvasRef.current?.setCanvasImageData(boardState.drawingData);
+      }
+    };
+
+    void init();
+  }, [loadBoardState, applySharedCanvasState]);
+
+  // Periodically save board state (every 5s)
+  useEffect(() => {
+    const saveTimer = globalThis.setInterval(async () => {
+      const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
+      await saveBoardState(drawingData, placedItems, selectedPaper ?? null);
+    }, 5000);
+
+    return () => globalThis.clearInterval(saveTimer);
+  }, [placedItems, selectedPaper, saveBoardState]);
+
+  // Broadcast board state changes to other users (event-driven, not interval)
+  useEffect(() => {
     if (!account.hasSession) return;
 
     const supabase = createSupabaseBrowserClient();
-    const channel = supabase
+    const channelRef = supabase
       .channel("mochimail-studio-board", { config: { broadcast: { self: false } } })
       .on("broadcast", { event: "board-sync" }, ({ payload }) => {
         const data = payload as BoardSyncPayload;
         if (!data || data.senderId === selfIdRef.current) return;
 
-        boardSuppressUntilRef.current = Date.now() + 1600;
+        // Short suppress window to allow rapid updates
+        boardSuppressUntilRef.current = Date.now() + 400;
         applySharedCanvasState({
           placedItems: data.placedItems,
           selectedPaper: data.selectedPaper,
         });
-        canvasRef.current?.setCanvasImageData(data.drawingData);
+        if (data.drawingData) {
+          canvasRef.current?.setCanvasImageData(data.drawingData);
+        }
       });
 
-    void channel.subscribe();
+    void channelRef.subscribe();
 
-    const syncTimer = globalThis.setInterval(() => {
-      if (Date.now() < boardSuppressUntilRef.current) return;
+    // Send drawing data every ~5 seconds
+    const drawingTimer = globalThis.setInterval(() => {
+      if (Date.now() >= boardSuppressUntilRef.current) {
+        const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
+        const payload: BoardSyncPayload = {
+          senderId: selfIdRef.current,
+          ts: Date.now(),
+          placedItems,
+          selectedPaper: selectedPaper ?? null,
+          drawingData,
+        };
+        void channelRef.send({ type: "broadcast", event: "board-sync", payload });
+        lastBoardFingerprintRef.current = JSON.stringify({ p: payload.placedItems, paper: payload.selectedPaper?.id ?? null });
+      }
+    }, 5000);
 
-      const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
-      const payload: BoardSyncPayload = {
-        senderId: selfIdRef.current,
-        ts: Date.now(),
-        placedItems,
-        selectedPaper: selectedPaper ?? null,
-        drawingData,
-      };
+    // Broadcast placed items/paper changes immediately (debounced)
+    let debounceTimer: NodeJS.Timeout;
+    const broadcastChange = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (Date.now() >= boardSuppressUntilRef.current) {
+          const fingerprint = JSON.stringify({
+            p: placedItems,
+            paper: selectedPaper?.id ?? null,
+          });
+          if (fingerprint === lastBoardFingerprintRef.current) return;
+          lastBoardFingerprintRef.current = fingerprint;
 
-      const fingerprint = JSON.stringify({
-        p: payload.placedItems,
-        paper: payload.selectedPaper?.id ?? null,
-        d: payload.drawingData,
-      });
-      if (fingerprint === lastBoardFingerprintRef.current) return;
-      lastBoardFingerprintRef.current = fingerprint;
+          const payload: BoardSyncPayload = {
+            senderId: selfIdRef.current,
+            ts: Date.now(),
+            placedItems,
+            selectedPaper: selectedPaper ?? null,
+            drawingData: null, // Don't send drawing on every change
+          };
+          void channelRef.send({ type: "broadcast", event: "board-sync", payload });
+        }
+      }, 200);
+    };
 
-      void channel.send({ type: "broadcast", event: "board-sync", payload });
-    }, 1100);
+    broadcastChange();
 
     return () => {
-      globalThis.clearInterval(syncTimer);
-      void supabase.removeChannel(channel);
+      clearTimeout(debounceTimer);
+      globalThis.clearInterval(drawingTimer);
+      void channelRef.unsubscribe();
     };
   }, [account.hasSession, applySharedCanvasState, placedItems, selectedPaper]);
 

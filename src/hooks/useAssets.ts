@@ -585,15 +585,54 @@ export function useAssets(user: ViewerIdentity) {
       setPlacedItems(state.placedItems);
     }
 
-    if (state.selectedPaper) {
-      const selected = state.selectedPaper;
+    if (state.selectedPaper !== null && state.selectedPaper !== undefined) {
+      const selected: PaperBackground = state.selectedPaper;
       setPapers((prev) => {
         if (prev.some((paper) => paper.id === selected.id)) return prev;
-        return [...prev, selected];
+        return [...prev, selected] as PaperBackground[];
       });
       setSelectedPaper(selected);
     }
   }, []);
+
+  const saveBoardState = useCallback(async (drawingData: string | null, currentPlacedItems: PlacedSticker[], currentSelectedPaper: PaperBackground | null) => {
+    if (!user?.id) return;
+    const supabase = createSupabaseBrowserClient();
+    const { error } = await (supabase
+      .from("studio_boards") as any)
+      .upsert({
+        created_by: user.id,
+        drawing_data: drawingData,
+        placed_items: currentPlacedItems,
+        selected_paper: currentSelectedPaper,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "created_by" });
+    if (error) console.warn("Failed to save board state:", error);
+  }, [user?.id]);
+
+  const loadBoardState = useCallback(async () => {
+    if (!user?.id) return;
+    const supabase = createSupabaseBrowserClient();
+    const { data, error } = await (supabase
+      .from("studio_boards") as any)
+      .select("drawing_data, placed_items, selected_paper")
+      .eq("created_by", user.id)
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      console.warn("Failed to load board state:", error);
+      return null;
+    }
+
+    if (data) {
+      return {
+        drawingData: (data as any).drawing_data as string | null,
+        placedItems: ((data as any).placed_items ?? []) as PlacedSticker[],
+        selectedPaper: ((data as any).selected_paper ?? null) as PaperBackground | null,
+      };
+    }
+    return null;
+  }, [user?.id]);
 
   return {
     stickers,
@@ -625,5 +664,7 @@ export function useAssets(user: ViewerIdentity) {
     removeCustomFont,
     undoLastPlacement,
     applySharedCanvasState,
+    saveBoardState,
+    loadBoardState,
   };
 }
