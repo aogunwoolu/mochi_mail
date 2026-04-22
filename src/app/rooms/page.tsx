@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useRef, useMemo, useState } from "react";
+import { ReactNode, useEffect, useRef, useMemo, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAccount } from "@/hooks/useAccount";
 import { useRooms } from "@/hooks/useRooms";
@@ -41,6 +41,14 @@ function RoomCard({
 }
 
 export default function RoomsPage() {
+  return (
+    <Suspense fallback={<div className="flex h-svh items-center justify-center">Loading rooms...</div>}>
+      <RoomsPageInner />
+    </Suspense>
+  );
+}
+
+function RoomsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const inviteFromUrl = searchParams.get("invite")?.trim() ?? "";
