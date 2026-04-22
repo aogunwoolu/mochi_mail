@@ -1413,7 +1413,13 @@ export default function StudioToolbar({
         </RoundIconButton>
       </div>
 
-      <div className="pointer-events-auto absolute right-4 top-4 z-30 flex gap-2">
+      <div
+        className="pointer-events-auto absolute z-30 flex gap-2"
+        style={{
+          right: "calc(1rem + env(safe-area-inset-right, 0px))",
+          top: "calc(1rem + env(safe-area-inset-top, 0px))",
+        }}
+      >
         {shownCollaborators.map((artist) => {
           const isSelf = artist.id === selfCollaboratorId;
           const initials = artist.name
@@ -1504,7 +1510,13 @@ export default function StudioToolbar({
         })}
       </div>
 
-      <div className="pointer-events-auto absolute bottom-4 right-4 z-30 flex flex-col gap-2.5">
+      <div
+        className="pointer-events-auto absolute z-30 flex flex-col gap-2.5"
+        style={{
+          right: "calc(1rem + env(safe-area-inset-right, 0px))",
+          bottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
         {toolbarControls.some((control) => control.id === "undo" && control.enabled) ? (
           <button
             onClick={onUndo}
