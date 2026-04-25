@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Space_Mono } from "next/font/google";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import { MochiProvider } from "@/context/MochiContext";
 import "./globals.css";
 
 const inter = Inter({
@@ -47,7 +48,7 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${spaceMono.variable} h-full`}>
       <body className="relative min-h-svh font-sans antialiased">
         <ServiceWorkerRegistration />
-        {children}
+        <MochiProvider>{children}</MochiProvider>
       </body>
     </html>
   );

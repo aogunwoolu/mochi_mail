@@ -162,16 +162,28 @@ function RoomsPageInner() {
   const getInviteLink = (room: RoomSummary) => `${globalThis.location.origin}/rooms/${room.inviteToken}`;
 
   const handleJoin = async () => {
-    if (!joinToken.trim()) { flash("Paste an invite link or token first.", true); return; }
+    const raw = joinToken.trim();
+    if (!raw) { flash("Enter a room code or paste an invite link.", true); return; }
     setError(null);
     try {
-      const token = joinToken.includes("/") ? joinToken.split("/").pop() ?? "" : joinToken;
-      const joined = await rooms.joinByInviteToken(token.trim(), joinPassword);
+      // 6-char alphanumeric code (with optional dash) → join by code
+      const codeOnly = raw.replace(/-/g, "").toUpperCase();
+      if (/^[A-Z0-9]{6}$/.test(codeOnly)) {
+        const joined = await rooms.joinByCode(codeOnly, joinPassword);
+        router.push(`/?room=${encodeURIComponent(joined.room_id)}`);
+        return;
+      }
+      // Otherwise treat as invite link or raw token
+      const token = raw.includes("/") ? raw.split("/").pop() ?? "" : raw;
+      const joined = await rooms.joinByInviteToken(token, joinPassword);
       router.push(`/?room=${encodeURIComponent(joined.room_id)}`);
     } catch (err) {
       flash(errMsg(err, "Unable to join room."), true);
     }
   };
+
+  const formatCode = (code: string) =>
+    code.length === 6 ? `${code.slice(0, 3)}-${code.slice(3)}` : code;
 
   const handleCreate = async () => {
     setError(null);
@@ -216,15 +228,27 @@ function RoomsPageInner() {
         <section className="rounded-2xl border p-5 flex flex-col gap-4" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="flex items-center gap-2 mb-0.5">
+              <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                 <h2 className="text-base font-bold">{primaryRoom.title}</h2>
                 <span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}>
                   {primaryRoom.visibility === "public" ? <FiGlobe size={10} /> : <FiLock size={10} />}
                   {primaryRoom.visibility}
                 </span>
               </div>
+              {primaryRoom.roomCode ? (
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="text-[10px] font-medium" style={{ color: "var(--muted)" }}>Room code</span>
+                  <span
+                    className="rounded-lg px-2.5 py-1 font-mono text-sm font-bold tracking-widest"
+                    style={{ background: "linear-gradient(135deg, rgba(255,107,157,0.12), rgba(167,139,250,0.12))", color: "var(--foreground)", border: "1px solid rgba(167,139,250,0.25)" }}
+                  >
+                    {formatCode(primaryRoom.roomCode)}
+                  </span>
+                  <CopyButton text={primaryRoom.roomCode} label="Copy code" />
+                </div>
+              ) : null}
               {primaryRoom.description ? (
-                <p className="text-xs" style={{ color: "var(--muted)" }}>{primaryRoom.description}</p>
+                <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>{primaryRoom.description}</p>
               ) : null}
             </div>
             <button
@@ -305,14 +329,18 @@ function RoomsPageInner() {
         <h2 className="mb-3 text-sm font-semibold">Join a room</h2>
         <div className="flex flex-col gap-3">
           <div>
-            <FieldLabel>Invite link or token</FieldLabel>
+            <FieldLabel>Room code or invite link</FieldLabel>
             <input
               value={joinToken}
-              onChange={(e) => setJoinToken(e.target.value)}
+              onChange={(e) => setJoinToken(e.target.value.toUpperCase())}
               onKeyDown={(e) => { if (e.key === "Enter") void handleJoin(); }}
-              className="input-soft w-full px-3 py-2 text-sm outline-none"
-              placeholder="https://… or paste the token directly"
+              className="input-soft w-full px-3 py-2 font-mono text-sm outline-none"
+              placeholder="ABC-123  or  https://…"
+              maxLength={120}
             />
+            <p className="mt-1 text-[11px]" style={{ color: "var(--muted)" }}>
+              Enter the 6-character code (e.g. <strong>ABC-123</strong>) or paste a full invite link.
+            </p>
           </div>
           <div>
             <FieldLabel>Password <span className="font-normal" style={{ color: "var(--muted)" }}>— only if the room requires one</span></FieldLabel>

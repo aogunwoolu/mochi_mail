@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
+import { useState, useRef, useCallback, useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Doc, Map as YMap } from "yjs";
 import AccountPanel from "@/components/AccountPanel";
@@ -15,11 +15,9 @@ import { getStroke } from "perfect-freehand";
 import { strokeToPath2D } from "@/lib/canvas/strokeUtils";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { SupabaseYjsProvider } from "@/lib/collab/supabaseYjsProvider";
-import { useAccount } from "@/hooks/useAccount";
-import { useActiveRoomContext } from "@/hooks/useActiveRoomContext";
-import { useAssets } from "@/hooks/useAssets";
-import { useMail } from "@/hooks/useMail";
-import { useStore } from "@/hooks/useStore";
+import { useRoom } from "@/hooks/useRoom";
+import type { RoomMember, RoomPhase } from "@/hooks/useRoom";
+import { useMochi } from "@/context/MochiContext";
 import { AppTab, BrushSettings, CustomFont, EnvelopeStyle, MailStamp, PaperBackground, Sticker, WashiTape, StoreItem } from "@/types";
 
 const TABS: { id: AppTab; label: string; icon: string }[] = [
@@ -32,30 +30,6 @@ const TAB_ICONS: Record<string, ReactNode> = {
   edit: <FiEdit3 />,
   mail: <FiMail />,
   shop: <FiShoppingBag />,
-};
-
-const PRESENCE_COLORS = ["#ff6b9d", "#67d4f1", "#6ee7b7", "#a78bfa", "#fb923c", "#fbbf24"];
-
-type ArtistPresence = {
-  id: string;
-  name: string;
-  color: string;
-  x: number;
-  y: number;
-  lastSeen: number;
-  avatarUrl?: string;
-  username?: string;
-};
-
-type PresencePayload = {
-  id: string;
-  name: string;
-  color: string;
-  x: number;
-  y: number;
-  ts: number;
-  avatarUrl?: string;
-  username?: string;
 };
 
 type StrokePayload = {
@@ -74,67 +48,107 @@ type RemoteActiveStroke = {
   size: number;
 };
 
-type PresenceTransport = {
-  publish: (payload: PresencePayload) => void;
-  close: () => void;
-};
-
-function pruneStaleArtists(
-  artists: Record<string, ArtistPresence>,
-  selfId: string,
-  cutoff: number
-): Record<string, ArtistPresence> {
-  const next: Record<string, ArtistPresence> = {};
-  for (const artist of Object.values(artists)) {
-    if (artist.id === selfId || artist.lastSeen > cutoff) {
-      next[artist.id] = artist;
-    }
-  }
-  return next;
-}
-
 function RoomModeBanner({
+  phase,
+  activeRoomId,
   activeRoomTitle,
-  activeRoomInviteToken,
-  roomAccessError,
+  onJoinWithToken,
   onOpenRooms,
 }: Readonly<{
+  phase: RoomPhase;
+  activeRoomId: string | null;
   activeRoomTitle: string | null;
-  activeRoomInviteToken: string | null;
-  roomAccessError: string | null;
+  onJoinWithToken: (token: string, password?: string) => Promise<string | null>;
   onOpenRooms: () => void;
 }>) {
   const [copied, setCopied] = useState(false);
-  if (!activeRoomTitle && !roomAccessError) return null;
+  const [token, setToken] = useState("");
+  const [password, setPassword] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
-  const inviteLink = activeRoomInviteToken
-    ? `${globalThis.location?.origin}/rooms/${activeRoomInviteToken}`
+  // "join-required" = private room, full-screen overlay prompt
+  if (phase === "join-required") {
+    return (
+      <div className="absolute inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(255,248,255,0.88)", backdropFilter: "blur(12px)" }}>
+        <div className="panel w-full max-w-sm rounded-2xl p-5 flex flex-col gap-4">
+          <div>
+            <p className="text-sm font-bold">Private room</p>
+            <p className="mt-0.5 text-xs" style={{ color: "var(--muted)" }}>
+              Paste the invite link you received to join.
+            </p>
+          </div>
+          <input
+            value={token}
+            onChange={(e) => { setToken(e.target.value); setJoinError(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") void handleJoin(); }}
+            className="input-soft w-full px-3 py-2 text-sm outline-none"
+            placeholder="https://… or paste token"
+            autoFocus
+          />
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            className="input-soft w-full px-3 py-2 text-sm outline-none"
+            placeholder="Password (if required)"
+          />
+          {joinError ? <p className="text-xs" style={{ color: "#b42318" }}>{joinError}</p> : null}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleJoin}
+              disabled={joining || !token.trim()}
+              className="btn-smooth flex-1 rounded-xl py-2 text-xs font-semibold text-white"
+              style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))", opacity: joining ? 0.7 : 1 }}
+            >
+              {joining ? "Joining…" : "Join room"}
+            </button>
+            <button
+              onClick={onOpenRooms}
+              className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold"
+              style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}
+            >
+              My rooms
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // "joining" = auto-joining a public room
+  if (phase === "joining") {
+    return (
+      <div className="absolute left-4 right-4 top-3 z-50 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)" }}>
+        <span style={{ color: "var(--muted)" }}>Joining room…</span>
+      </div>
+    );
+  }
+
+  // In a room — show title + share button that copies the canvas URL
+  if (!activeRoomTitle) return null;
+
+  const canvasUrl = activeRoomId
+    ? `${globalThis.location?.origin}/?room=${encodeURIComponent(activeRoomId)}`
     : null;
 
   return (
     <div className="absolute left-4 right-4 top-3 z-50 flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)" }}>
-      <div className="flex items-center gap-2 min-w-0">
-        {activeRoomTitle ? (
-          <span className="truncate" style={{ color: "var(--muted-strong)" }}>
-            <strong>{activeRoomTitle}</strong>
-          </span>
-        ) : null}
-        {roomAccessError ? (
-          <span style={{ color: "#b42318" }}>{roomAccessError}</span>
-        ) : null}
-      </div>
+      <span className="truncate font-semibold" style={{ color: "var(--muted-strong)" }}>
+        {activeRoomTitle}
+      </span>
       <div className="flex shrink-0 items-center gap-1.5">
-        {inviteLink ? (
+        {canvasUrl ? (
           <button
             onClick={async () => {
-              await navigator.clipboard.writeText(inviteLink);
+              await navigator.clipboard.writeText(canvasUrl);
               setCopied(true);
               setTimeout(() => setCopied(false), 2000);
             }}
             className="btn-smooth rounded-lg px-2 py-1 font-semibold text-white"
             style={{ background: copied ? "rgba(52,211,153,0.85)" : "linear-gradient(135deg, var(--pink), var(--lavender))" }}
           >
-            {copied ? "Copied!" : "Share room"}
+            {copied ? "Copied!" : "Share link"}
           </button>
         ) : null}
         <button
@@ -147,6 +161,15 @@ function RoomModeBanner({
       </div>
     </div>
   );
+
+  async function handleJoin() {
+    if (!token.trim()) return;
+    setJoining(true);
+    setJoinError(null);
+    const err = await onJoinWithToken(token.trim(), password.trim() || undefined);
+    setJoining(false);
+    if (err) setJoinError(err);
+  }
 }
 
 export default function Home() {
@@ -154,6 +177,14 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<AppTab>("studio");
   const [mailView, setMailView] = useState<"inbox" | "compose">("inbox");
   const [accountOpen, setAccountOpen] = useState(false);
+  // useSyncExternalStore returns false on the server and true on the client,
+  // with no setState-in-effect anti-pattern. Used to gate the self collaborator
+  // entry so SSR HTML matches the client's initial render.
+  const mounted = useSyncExternalStore(
+    () => () => {},  // subscribe: no external store to listen to
+    () => true,      // client snapshot
+    () => false,     // server snapshot
+  );
   const [selfArtistId] = useState(() => {
     if (!globalThis.window) return "";
     const saved = sessionStorage.getItem("mochimail_artist_id");
@@ -168,8 +199,6 @@ export default function Home() {
   const [worldOffset, setWorldOffset] = useState({ x: 0, y: 0 });
   const hasCenteredRef = useRef(false);
   const selfIdRef = useRef(selfArtistId);
-  const selfColorRef = useRef(PRESENCE_COLORS[(selfArtistId.codePointAt(0) ?? 0) % PRESENCE_COLORS.length]);
-  const channelRef = useRef<PresenceTransport | null>(null);
   const remoteStrokeCanvasRef = useRef<HTMLCanvasElement>(null);
   const remoteActiveStrokesRef = useRef<Map<string, RemoteActiveStroke>>(new Map());
   const strokeChannelRef = useRef<ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]> | null>(null);
@@ -192,7 +221,6 @@ export default function Home() {
   const persistItemsDirtyRef = useRef(false);
   const persistDrawingDirtyRef = useRef(false);
   const lastPersistedDrawingRef = useRef<string | null>(null);
-  const lastPresencePublishAtRef = useRef(0);
 
   const CANVAS_W = 6000;
   const CANVAS_H = 4800;
@@ -205,7 +233,7 @@ export default function Home() {
     textFont: '"Space Mono", monospace',
   });
 
-  const account = useAccount();
+  const { account, assets, mail, store } = useMochi();
 
   const {
     stickers,
@@ -238,24 +266,33 @@ export default function Home() {
     removeCustomFont,
     saveBoardState,
     loadBoardState,
-  } = useAssets(account.viewer);
+    equipFromStore,
+  } = assets;
 
-  const [artists, setArtists] = useState<Record<string, ArtistPresence>>({});
   const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
   const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
-  const { activeRoomTitle, activeRoomInviteToken, roomAccessError, collabScope } = useActiveRoomContext(
-    account.hasSession,
-    account.viewer.accountId,
-    selfIdRef.current
-  );
+  const {
+    phase: roomPhase,
+    activeRoomId: activeRoomId,
+    activeRoomTitle,
+    collabScope,
+    members: roomMembers,
+    trackCursor,
+    selfColor,
+    joinWithToken,
+  } = useRoom({
+    hasSession: account.hasSession,
+    selfId: selfArtistId,
+    selfName: mail.user.name,
+    viewerAccountId: account.viewer.accountId,
+    selfAvatarUrl: account.viewer.avatarUrl,
+    selfUsername: account.viewer.username,
+  });
 
   useEffect(() => {
     placedItemsRef.current = placedItems;
     selectedPaperRef.current = selectedPaper ?? null;
   }, [placedItems, selectedPaper]);
-
-  const mail = useMail(account.viewer);
-  const store = useStore(account.viewer);
 
   const handleBrushChange = useCallback((update: Partial<BrushSettings>) => {
     setBrushSettings((prev) => ({ ...prev, ...update }));
@@ -270,34 +307,38 @@ export default function Home() {
     drawingDirtyRef.current = true;
   }, []);
 
-  const renderRemoteStrokes = useCallback(() => {
-    const canvas = remoteStrokeCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    for (const stroke of remoteActiveStrokesRef.current.values()) {
-      const outline = getStroke(stroke.pts, {
-        size: stroke.size,
-        thinning: 0.5,
-        smoothing: 0.5,
-        streamline: 0.4,
-        simulatePressure: false,
-      });
-      if (!outline.length) continue;
-      const path = strokeToPath2D(outline);
-      ctx.save();
-      ctx.fillStyle = stroke.color;
-      ctx.fill(path);
-      ctx.restore();
-    }
-
-    if (remoteActiveStrokesRef.current.size > 0) {
-      strokeRafRef.current = requestAnimationFrame(renderRemoteStrokes);
-    } else {
-      strokeRafRef.current = null;
-    }
+  const renderRemoteStrokesRef = useRef<() => void>(() => undefined);
+  // Stable wrapper — callers (RAF, stroke channel) hold this reference.
+  const renderRemoteStrokes = useCallback(() => { renderRemoteStrokesRef.current(); }, []);
+  useEffect(() => {
+    // Only reads other refs so an empty dep array is correct here.
+    renderRemoteStrokesRef.current = () => {
+      const canvas = remoteStrokeCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const stroke of remoteActiveStrokesRef.current.values()) {
+        const outline = getStroke(stroke.pts, {
+          size: stroke.size,
+          thinning: 0.5,
+          smoothing: 0.5,
+          streamline: 0.4,
+          simulatePressure: false,
+        });
+        if (!outline.length) continue;
+        const path = strokeToPath2D(outline);
+        ctx.save();
+        ctx.fillStyle = stroke.color;
+        ctx.fill(path);
+        ctx.restore();
+      }
+      if (remoteActiveStrokesRef.current.size > 0) {
+        strokeRafRef.current = requestAnimationFrame(renderRemoteStrokesRef.current);
+      } else {
+        strokeRafRef.current = null;
+      }
+    };
   }, []);
 
   const handleStrokeUpdate = useCallback(
@@ -385,45 +426,12 @@ export default function Home() {
     };
   }, []);
 
-  const publishPresence = useCallback((force = false) => {
-    const id = selfIdRef.current;
-    if (!id) return;
-    const now = Date.now();
-    if (!force && now - lastPresencePublishAtRef.current < 45) return;
-    lastPresencePublishAtRef.current = now;
-    const pos = lastMouseWorldRef.current ?? getViewportCenterWorld();
-    const payload: PresencePayload = {
-      id,
-      name: mail.user.name,
-      color: selfColorRef.current,
-      x: pos.x,
-      y: pos.y,
-      ts: now,
-      avatarUrl: account.viewer.avatarUrl,
-      username: account.viewer.username,
-    };
-    setArtists((prev) => ({
-      ...prev,
-      [id]: {
-        id: payload.id,
-        name: payload.name,
-        color: payload.color,
-        x: payload.x,
-        y: payload.y,
-        lastSeen: payload.ts,
-        avatarUrl: payload.avatarUrl,
-        username: payload.username,
-      },
-    }));
-    channelRef.current?.publish(payload);
-  }, [getViewportCenterWorld, mail.user.name, account.viewer.avatarUrl, account.viewer.username]);
-
-  const jumpToArtist = useCallback(
-    (artist: ArtistPresence) => {
+  const jumpToMember = useCallback(
+    (member: RoomMember) => {
       const el = studioScrollRef.current;
       if (!el) return;
-      const canvasX = artist.x - worldOffsetRef.current.x;
-      const canvasY = artist.y - worldOffsetRef.current.y;
+      const canvasX = member.x - worldOffsetRef.current.x;
+      const canvasY = member.y - worldOffsetRef.current.y;
       const maxLeft = Math.max(0, CANVAS_W - el.clientWidth);
       const maxTop = Math.max(0, CANVAS_H - el.clientHeight);
       const nextLeft = Math.max(0, Math.min(maxLeft, canvasX - el.clientWidth / 2));
@@ -477,7 +485,7 @@ export default function Home() {
       }
 
       setScrollPos({ left: el.scrollLeft, top: el.scrollTop });
-      publishPresence();
+      trackCursor(lastMouseWorldRef.current ?? getViewportCenterWorld());
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -488,7 +496,7 @@ export default function Home() {
         x: canvasX + worldOffsetRef.current.x,
         y: canvasY + worldOffsetRef.current.y,
       };
-      publishPresence();
+      trackCursor(lastMouseWorldRef.current);
     };
 
     const onMouseLeave = () => {
@@ -505,7 +513,6 @@ export default function Home() {
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("mousemove", onMouseMove, { passive: true });
     el.addEventListener("mouseleave", onMouseLeave);
-    publishPresence(true);
 
     return () => {
       ro.disconnect();
@@ -513,7 +520,7 @@ export default function Home() {
       el.removeEventListener("mousemove", onMouseMove);
       el.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, [activeTab, CANVAS_H, CANVAS_W, publishPresence, shiftPlacedItems]);
+  }, [activeTab, CANVAS_H, CANVAS_W, trackCursor, shiftPlacedItems, getViewportCenterWorld]);
 
   useEffect(() => {
     // Load board state from database on mount
@@ -743,73 +750,10 @@ export default function Home() {
     return () => globalThis.clearTimeout(timer);
   }, [account.hasSession, placedItems, selectedPaper]);
 
+  // Keep selfIdRef in sync so stroke channel closures always see current value.
   useEffect(() => {
-    const id = selfArtistId;
-    selfIdRef.current = id;
-    selfColorRef.current =
-      PRESENCE_COLORS[(id.codePointAt(0) ?? 0) % PRESENCE_COLORS.length];
-
-    const handleIncomingPresence = (payload: PresencePayload) => {
-      if (!payload?.id || payload.id === selfIdRef.current) return;
-      setArtists((prev) => ({
-        ...prev,
-        [payload.id]: {
-          id: payload.id,
-          name: payload.name,
-          color: payload.color,
-          x: payload.x,
-          y: payload.y,
-          lastSeen: payload.ts,
-          avatarUrl: payload.avatarUrl,
-          username: payload.username,
-        },
-      }));
-    };
-
-    if (account.hasSession) {
-      const supabase = createSupabaseBrowserClient();
-      const realtime = supabase
-        .channel(`mochimail-presence:${collabScope}`, { config: { broadcast: { self: false } } })
-        .on("broadcast", { event: "presence" }, ({ payload }) => {
-          handleIncomingPresence(payload as PresencePayload);
-        });
-
-      realtime.subscribe((status) => {
-        if (status === "SUBSCRIBED") publishPresence(true);
-      });
-
-      channelRef.current = {
-        publish: (payload) => {
-          void realtime.send({ type: "broadcast", event: "presence", payload });
-        },
-        close: () => {
-          void supabase.removeChannel(realtime);
-        },
-      };
-    } else {
-      const bc = new BroadcastChannel(`mochimail-presence:${collabScope}`);
-      bc.onmessage = (event: MessageEvent<PresencePayload>) => {
-        handleIncomingPresence(event.data);
-      };
-      channelRef.current = {
-        publish: (payload) => bc.postMessage(payload),
-        close: () => bc.close(),
-      };
-    }
-
-    const heartbeat = globalThis.setInterval(() => publishPresence(true), 900);
-    const cleanup = globalThis.setInterval(() => {
-      const cutoff = Date.now() - 4500;
-      setArtists((prev) => pruneStaleArtists(prev, selfIdRef.current, cutoff));
-    }, 1500);
-
-    return () => {
-      globalThis.clearInterval(heartbeat);
-      globalThis.clearInterval(cleanup);
-      channelRef.current?.close();
-      channelRef.current = null;
-    };
-  }, [account.hasSession, publishPresence, selfArtistId, collabScope]);
+    selfIdRef.current = selfArtistId;
+  }, [selfArtistId]);
 
   useEffect(() => {
     if (!account.hasSession) return;
@@ -869,13 +813,32 @@ export default function Home() {
     };
   }, [account.hasSession, collabScope, renderRemoteStrokes]);
 
-  const artistList = Object.values(artists).sort((a, b) => {
-    if (a.id === selfArtistId) return -1;
-    if (b.id === selfArtistId) return 1;
-    return b.lastSeen - a.lastSeen;
-  });
+  const remoteArtists = roomMembers.filter((m) => m.presenceKey !== selfArtistId);
 
-  const remoteArtists = artistList.filter((artist) => artist.id !== selfArtistId);
+  // selfArtistId is "" on the server but has a real value on the client's first
+  // render (sessionStorage). Skip the self entry until mounted so SSR HTML matches.
+  const artistList = mounted
+    ? [
+        {
+          id: selfArtistId,
+          name: mail.user.name,
+          color: selfColor,
+          avatarUrl: account.viewer.avatarUrl,
+          username: account.viewer.username,
+          x: 0,
+          y: 0,
+        },
+        ...remoteArtists.map((m) => ({
+          id: m.presenceKey,
+          name: m.name,
+          color: m.color,
+          avatarUrl: m.avatarUrl,
+          username: m.username,
+          x: m.x,
+          y: m.y,
+        })),
+      ]
+    : [];
 
   return (
     <div className="relative z-10 flex h-svh flex-col overflow-hidden">
@@ -984,16 +947,17 @@ export default function Home() {
         style={{ display: activeTab === "studio" ? "flex" : "none" }}
       >
         <RoomModeBanner
+          phase={roomPhase}
+          activeRoomId={activeRoomId}
           activeRoomTitle={activeRoomTitle}
-          activeRoomInviteToken={activeRoomInviteToken}
-          roomAccessError={roomAccessError}
+          onJoinWithToken={joinWithToken}
           onOpenRooms={() => router.push("/rooms")}
         />
         {/* Edge presence indicators — off-screen remote cursors */}
-        {viewSize.w > 0 && remoteArtists.map((artist) => {
+        {viewSize.w > 0 && remoteArtists.map((member) => {
             const MARGIN = 32;
-            const canvasX = artist.x - worldOffset.x;
-            const canvasY = artist.y - worldOffset.y;
+            const canvasX = member.x - worldOffset.x;
+            const canvasY = member.y - worldOffset.y;
             const vx = canvasX - scrollPos.left;
             const vy = canvasY - scrollPos.top;
             const isVisible = vx >= -16 && vx <= viewSize.w + 16 && vy >= -16 && vy <= viewSize.h + 16;
@@ -1015,21 +979,21 @@ export default function Home() {
             const angleDeg = (angle * 180) / Math.PI;
             return (
               <button
-                key={artist.id}
-                onClick={() => jumpToArtist(artist)}
+                key={member.presenceKey}
+                onClick={() => jumpToMember(member)}
                 className="btn-smooth absolute z-50 flex flex-col items-center gap-0.5"
                 style={{ left: ex, top: ey, transform: "translate(-50%, -50%)" }}
-                title={`Jump to ${artist.name}`}
+                title={`Jump to ${member.name}`}
               >
                 <span
                   className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-semibold text-white"
-                  style={{ background: artist.color, boxShadow: "0 2px 6px rgba(0,0,0,0.18)" }}
+                  style={{ background: member.color, boxShadow: "0 2px 6px rgba(0,0,0,0.18)" }}
                 >
-                  {artist.name}
+                  {member.name}
                 </span>
                 <div
                   className="flex h-5 w-5 items-center justify-center rounded-full"
-                  style={{ background: artist.color, transform: `rotate(${angleDeg}deg)`, boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}
+                  style={{ background: member.color, transform: `rotate(${angleDeg}deg)`, boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}
                 >
                   <svg width="9" height="9" viewBox="-5 -5 10 10" fill="none">
                     <polygon points="5,0 -3.5,-3.5 -3.5,3.5" fill="white" />
@@ -1046,7 +1010,7 @@ export default function Home() {
                 brushSettings={brushSettings}
                 placedItems={placedItems}
                 selectedAsset={selectedAsset}
-                selectedPaper={selectedPaper}
+                selectedPaper={selectedPaper ?? null}
                 customFonts={customFonts}
                 onDrawingCommit={handleDrawingCommit}
                 onDrawingProgress={handleDrawingProgress}
@@ -1066,22 +1030,22 @@ export default function Home() {
                 className="pointer-events-none absolute inset-0"
                 style={{ width: "100%", height: "100%" }}
               />
-              {remoteArtists.map((artist) => {
-                const x = artist.x - worldOffset.x;
-                const y = artist.y - worldOffset.y;
+              {remoteArtists.map((member) => {
+                const x = member.x - worldOffset.x;
+                const y = member.y - worldOffset.y;
                 if (x < -80 || y < -80 || x > CANVAS_W + 80 || y > CANVAS_H + 80) {
                   return null;
                 }
                 return (
                   <div
-                    key={artist.id}
+                    key={member.presenceKey}
                     className="pointer-events-none absolute"
                     style={{ left: x, top: y }}
                   >
                     <svg width="14" height="18" viewBox="0 0 14 18" fill="none" style={{ display: "block" }}>
                       <path
                         d="M1 1L1 14.5L4.2 10.8L6.6 17L8.8 16.1L6.3 9.8L11.2 9.8Z"
-                        fill={artist.color}
+                        fill={member.color}
                         stroke="white"
                         strokeWidth="1.5"
                         strokeLinejoin="round"
@@ -1090,9 +1054,9 @@ export default function Home() {
                     </svg>
                     <span
                       className="absolute left-4 top-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-                      style={{ background: artist.color, boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}
+                      style={{ background: member.color, boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}
                     >
-                      {artist.name}
+                      {member.name}
                     </span>
                   </div>
                 );
@@ -1111,7 +1075,7 @@ export default function Home() {
           papers={papers}
           customFonts={customFonts}
           selectedAsset={selectedAsset}
-          selectedPaper={selectedPaper}
+          selectedPaper={selectedPaper ?? null}
           onSelectSticker={handleSelectSticker}
           onSelectWashi={handleSelectWashi}
           onSelectPaper={setSelectedPaper}
@@ -1132,8 +1096,8 @@ export default function Home() {
           }))}
           selfCollaboratorId={selfArtistId}
           onJumpToCollaborator={(artistId) => {
-            const artist = artistList.find((item) => item.id === artistId);
-            if (artist) jumpToArtist(artist);
+            const member = roomMembers.find((m) => m.presenceKey === artistId);
+            if (member) jumpToMember(member);
           }}
         />
       </div>

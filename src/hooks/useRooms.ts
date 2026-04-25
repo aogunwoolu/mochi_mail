@@ -32,6 +32,8 @@ function mapRoom(
     description: room.description,
     visibility: room.is_public ? "public" : "private",
     inviteToken: room.invite_token,
+    // room_code added in migration 0007 — safe cast until DB types are regenerated
+    roomCode: (room as Record<string, unknown>).room_code as string ?? "",
     hasPassword: Boolean(room.password_hash),
     isMember: memberRoomIds.has(room.id) || isOwner,
     isOwner,
@@ -197,6 +199,26 @@ export function useRooms(currentAccount: AccountIdentity) {
     [refresh]
   );
 
+  const joinByCode = useCallback(
+    async (code: string, password?: string) => {
+      const supabase = createSupabaseBrowserClient();
+      // join_room_by_code added in migration 0007 — cast until DB types are regenerated
+      const { data, error: joinError } = await (supabase as unknown as { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }> })
+        .rpc("join_room_by_code", {
+          p_code: code.toUpperCase().trim(),
+          p_password: password?.trim() ? password : null,
+        });
+
+      if (joinError) throw joinError;
+      const rows = data as Array<{ room_id: string; room_title: string; room_code: string }> | null;
+      const joined = rows?.[0];
+      if (!joined) throw new Error("Unable to join this room.");
+      await refresh();
+      return joined;
+    },
+    [refresh]
+  );
+
   return {
     rooms,
     myRooms,
@@ -209,5 +231,6 @@ export function useRooms(currentAccount: AccountIdentity) {
     rotateRoomInviteToken,
     getInvitePreview,
     joinByInviteToken,
+    joinByCode,
   };
 }

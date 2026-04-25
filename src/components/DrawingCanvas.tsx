@@ -565,7 +565,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         onDrawingProgress?.();
 
         const now = performance.now();
-        if (now - lastStrokeBroadcastAtRef.current >= 20) {
+        if (now - lastStrokeBroadcastAtRef.current >= 16) {
           lastStrokeBroadcastAtRef.current = now;
           onStrokeUpdate?.(
             activeStrokePointsRef.current,

@@ -182,6 +182,8 @@ export interface RoomSummary {
   description: string;
   visibility: RoomVisibility;
   inviteToken: string;
+  /** Short 6-char code (e.g. "ABC123"). Display with dash: "ABC-123". */
+  roomCode: string;
   hasPassword: boolean;
   isMember: boolean;
   isOwner: boolean;
