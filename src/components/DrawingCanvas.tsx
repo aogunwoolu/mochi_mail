@@ -68,6 +68,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
     const isDrawing = useRef(false);
     const lastPoint = useRef<{ x: number; y: number } | null>(null);
+    const strokePointsRef = useRef<{ x: number; y: number }[]>([]);
+    const lastPressureRef = useRef(0.5);
     // Washi tape drag refs
     const washiStartRef = useRef<{ x: number; y: number } | null>(null);
     const preWashiStateRef = useRef<ImageData | null>(null);
@@ -79,6 +81,44 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const selectionDragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
     const assetImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const paperImageRef = useRef<HTMLImageElement | null>(null);
+
+    const drawSmoothSegment = useCallback(
+      (
+        start: { x: number; y: number },
+        control: { x: number; y: number },
+        end: { x: number; y: number },
+        pressure: number
+      ) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        const { tool, color, size } = brushSettings;
+        const smoothedPressure = lastPressureRef.current * 0.7 + pressure * 0.3;
+        lastPressureRef.current = smoothedPressure;
+
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+
+        if (tool === "eraser") {
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.strokeStyle = "rgba(0,0,0,1)";
+        } else {
+          ctx.globalCompositeOperation = "source-over";
+          ctx.strokeStyle = color;
+        }
+
+        ctx.lineWidth = size * (0.6 + smoothedPressure * 0.6);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.stroke();
+        ctx.globalCompositeOperation = "source-over";
+      },
+      [brushSettings]
+    );
 
     // Preload images for placed items
     useEffect(() => {
@@ -454,11 +494,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         }
 
         // Normal drawing / erasing
+        // Normal drawing / erasing
         isDrawing.current = true;
         changedDuringPointerRef.current = true;
         lastPoint.current = { x: point.x, y: point.y };
+        strokePointsRef.current = [{ x: point.x, y: point.y }];
+        lastPressureRef.current = point.pressure;
         saveToHistory();
-        drawLine(
+        drawSmoothSegment(
+          { x: point.x, y: point.y },
           { x: point.x, y: point.y },
           { x: point.x, y: point.y },
           point.pressure
@@ -523,10 +567,51 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           return;
         }
 
-        if (!lastPoint.current) return;
-        drawLine(lastPoint.current, { x: point.x, y: point.y }, point.pressure);
-        lastPoint.current = { x: point.x, y: point.y };
-        changedDuringPointerRef.current = true;
+        const events =
+          typeof e.nativeEvent.getCoalescedEvents === "function"
+            ? e.nativeEvent.getCoalescedEvents()
+            : [e.nativeEvent];
+
+        for (const event of events) {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const sample = {
+            x: (event.clientX - rect.left) * (width / rect.width),
+            y: (event.clientY - rect.top) * (height / rect.height),
+            pressure: event.pressure || 0.5,
+          };
+
+          strokePointsRef.current.push({ x: sample.x, y: sample.y });
+
+          if (strokePointsRef.current.length < 3) {
+            const previous = strokePointsRef.current[0];
+            if (previous) {
+              drawSmoothSegment(
+                previous,
+                previous,
+                { x: sample.x, y: sample.y },
+                sample.pressure
+              );
+            }
+          } else {
+            const points = strokePointsRef.current;
+            const p0 = points[points.length - 3];
+            const p1 = points[points.length - 2];
+            const p2 = points[points.length - 1];
+
+            const start = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+            const end = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+            drawSmoothSegment(start, p1, end, sample.pressure);
+
+            if (strokePointsRef.current.length > 4) {
+              strokePointsRef.current.shift();
+            }
+          }
+
+          lastPoint.current = { x: sample.x, y: sample.y };
+          changedDuringPointerRef.current = true;
+        }
+
         onDrawingProgress?.();
       },
       [
@@ -550,6 +635,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       }
       isDrawing.current = false;
       lastPoint.current = null;
+      strokePointsRef.current = [];
+      lastPressureRef.current = 0.5;
       washiStartRef.current = null;
       preWashiStateRef.current = null;
       selectionDragRef.current = null;
