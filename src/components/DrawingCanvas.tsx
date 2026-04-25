@@ -88,6 +88,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const selectionDragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
     const assetImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const paperImageRef = useRef<HTMLImageElement | null>(null);
+    const pendingPointsRef = useRef<StrokeSample[]>([]);
+    const rafIdRef = useRef<number | null>(null);
 
     const drawSmoothSegment = useCallback(
       (
@@ -119,7 +121,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           ctx.strokeStyle = color;
         }
 
-        ctx.lineWidth = size * (0.6 + smoothedPressure * 0.6);
+        ctx.lineWidth = size * (0.3 + smoothedPressure * 1.0);
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         ctx.stroke();
@@ -186,6 +188,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       },
       [brushSettings.size]
     );
+
+    const renderLoop = useCallback(() => {
+      const pending = pendingPointsRef.current.splice(0);
+      for (const s of pending) appendStrokeSample(s);
+      rafIdRef.current = requestAnimationFrame(renderLoop);
+    }, [appendStrokeSample]);
 
     // Preload images for placed items
     useEffect(() => {
@@ -531,8 +539,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         }
 
         // Normal drawing / erasing
-        // Normal drawing / erasing
         isDrawing.current = true;
+        pendingPointsRef.current = [];
+        if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = requestAnimationFrame(renderLoop);
         changedDuringPointerRef.current = true;
         lastPoint.current = { x: point.x, y: point.y, pressure: point.pressure };
         lastRawPoint.current = { x: point.x, y: point.y, pressure: point.pressure };
@@ -560,6 +570,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         onPlaceAsset,
         saveToHistory,
         drawSmoothSegment,
+        renderLoop,
       ]
     );
 
@@ -622,7 +633,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
           const previousRawPoint = lastRawPoint.current;
           if (!previousRawPoint) {
-            appendStrokeSample(smoothStrokeSample(sample));
+            pendingPointsRef.current.push(smoothStrokeSample(sample));
             lastRawPoint.current = sample;
             continue;
           }
@@ -638,7 +649,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               y: previousRawPoint.y + (sample.y - previousRawPoint.y) * progress,
               pressure: previousRawPoint.pressure + (sample.pressure - previousRawPoint.pressure) * progress,
             };
-            appendStrokeSample(smoothStrokeSample(rawInterpolatedSample));
+            pendingPointsRef.current.push(smoothStrokeSample(rawInterpolatedSample));
           }
 
           lastRawPoint.current = sample;
@@ -656,6 +667,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         paintWashiStrip,
         onDrawingProgress,
         smoothStrokeSample,
+        renderLoop,
       ]
     );
 
@@ -667,6 +679,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           // Ignore release failures when capture is not active.
         }
       }
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+      const remaining = pendingPointsRef.current.splice(0);
+      for (const s of remaining) appendStrokeSample(s);
       isDrawing.current = false;
       lastPoint.current = null;
       lastRawPoint.current = null;
@@ -679,7 +697,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         onDrawingCommit?.();
       }
       changedDuringPointerRef.current = false;
-    }, [onDrawingCommit]);
+    }, [onDrawingCommit, appendStrokeSample]);
 
     const clearCanvas = useCallback(() => {
       const canvas = canvasRef.current;
