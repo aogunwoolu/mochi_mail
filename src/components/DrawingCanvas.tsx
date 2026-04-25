@@ -380,6 +380,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
+        // Palm rejection: only pen and mouse draw. Touch is fingers/palm — block on all drawing tools.
+        const isDrawingTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
+        if (isDrawingTool && e.pointerType === "touch") return;
+
         e.preventDefault();
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -500,6 +504,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const handlePointerMove = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         if (!isDrawing.current) return;
+        const isDrawingTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
+        if (isDrawingTool && e.pointerType === "touch") return;
         e.preventDefault();
         const point = getCanvasPoint(e);
 

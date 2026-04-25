@@ -65,7 +65,7 @@ export class SupabaseYjsProvider {
     if (this.channel) return;
 
     const channel = this.supabase
-      .channel(this.roomName, { config: { private: true, broadcast: { self: false } } })
+      .channel(this.roomName, { config: { broadcast: { self: false } } })
       .on("broadcast", { event: "y-update" }, ({ payload }) => {
         const data = payload as SyncEnvelope;
         if (!data?.update || data.senderId === this.senderId) return;

@@ -95,32 +95,56 @@ function pruneStaleArtists(
 
 function RoomModeBanner({
   activeRoomTitle,
+  activeRoomInviteToken,
   roomAccessError,
   onOpenRooms,
 }: Readonly<{
   activeRoomTitle: string | null;
+  activeRoomInviteToken: string | null;
   roomAccessError: string | null;
   onOpenRooms: () => void;
 }>) {
+  const [copied, setCopied] = useState(false);
   if (!activeRoomTitle && !roomAccessError) return null;
 
+  const inviteLink = activeRoomInviteToken
+    ? `${globalThis.location?.origin}/rooms/${activeRoomInviteToken}`
+    : null;
+
   return (
-    <div className="absolute left-4 right-4 top-3 z-50 flex items-center justify-between rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.9)" }}>
-      <div>
+    <div className="absolute left-4 right-4 top-3 z-50 flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)" }}>
+      <div className="flex items-center gap-2 min-w-0">
         {activeRoomTitle ? (
-          <span style={{ color: "var(--muted-strong)" }}>Room mode: <strong>{activeRoomTitle}</strong></span>
+          <span className="truncate" style={{ color: "var(--muted-strong)" }}>
+            <strong>{activeRoomTitle}</strong>
+          </span>
         ) : null}
         {roomAccessError ? (
           <span style={{ color: "#b42318" }}>{roomAccessError}</span>
         ) : null}
       </div>
-      <button
-        onClick={onOpenRooms}
-        className="btn-smooth rounded-lg px-2 py-1 font-semibold"
-        style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}
-      >
-        Open rooms
-      </button>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {inviteLink ? (
+          <button
+            onClick={async () => {
+              await navigator.clipboard.writeText(inviteLink);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }}
+            className="btn-smooth rounded-lg px-2 py-1 font-semibold text-white"
+            style={{ background: copied ? "rgba(52,211,153,0.85)" : "linear-gradient(135deg, var(--pink), var(--lavender))" }}
+          >
+            {copied ? "Copied!" : "Share room"}
+          </button>
+        ) : null}
+        <button
+          onClick={onOpenRooms}
+          className="btn-smooth rounded-lg px-2 py-1 font-semibold"
+          style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}
+        >
+          Rooms
+        </button>
+      </div>
     </div>
   );
 }
@@ -219,7 +243,7 @@ export default function Home() {
   const [artists, setArtists] = useState<Record<string, ArtistPresence>>({});
   const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
   const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
-  const { activeRoomTitle, roomAccessError, collabScope } = useActiveRoomContext(
+  const { activeRoomTitle, activeRoomInviteToken, roomAccessError, collabScope } = useActiveRoomContext(
     account.hasSession,
     account.viewer.accountId,
     selfIdRef.current
@@ -961,6 +985,7 @@ export default function Home() {
       >
         <RoomModeBanner
           activeRoomTitle={activeRoomTitle}
+          activeRoomInviteToken={activeRoomInviteToken}
           roomAccessError={roomAccessError}
           onOpenRooms={() => router.push("/rooms")}
         />

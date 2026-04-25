@@ -10,12 +10,14 @@ export function useActiveRoomContext(
 ) {
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [activeRoomTitle, setActiveRoomTitle] = useState<string | null>(null);
+  const [activeRoomInviteToken, setActiveRoomInviteToken] = useState<string | null>(null);
   const [roomAccessError, setRoomAccessError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasSession) {
       setActiveRoomId(null);
       setActiveRoomTitle(null);
+      setActiveRoomInviteToken(null);
       setRoomAccessError(null);
       return;
     }
@@ -25,6 +27,7 @@ export function useActiveRoomContext(
     if (!roomId) {
       setActiveRoomId(null);
       setActiveRoomTitle(null);
+      setActiveRoomInviteToken(null);
       setRoomAccessError(null);
       return;
     }
@@ -35,7 +38,7 @@ export function useActiveRoomContext(
     const verifyAccess = async () => {
       const { data, error } = await supabase
         .from("rooms")
-        .select("id,title")
+        .select("id,title,invite_token")
         .eq("id", roomId)
         .maybeSingle();
 
@@ -44,12 +47,14 @@ export function useActiveRoomContext(
       if (error || !data) {
         setActiveRoomId(null);
         setActiveRoomTitle(null);
+        setActiveRoomInviteToken(null);
         setRoomAccessError("You do not have access to this room. Join through an invite link.");
         return;
       }
 
       setActiveRoomId(data.id);
       setActiveRoomTitle(data.title);
+      setActiveRoomInviteToken(data.invite_token);
       setRoomAccessError(null);
     };
 
@@ -67,6 +72,7 @@ export function useActiveRoomContext(
   return {
     activeRoomId,
     activeRoomTitle,
+    activeRoomInviteToken,
     roomAccessError,
     collabScope,
   };

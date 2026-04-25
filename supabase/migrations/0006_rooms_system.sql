@@ -1,4 +1,4 @@
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 create table if not exists public.rooms (
   id uuid primary key default gen_random_uuid(),
@@ -80,7 +80,7 @@ create or replace function public.create_room(
 returns table (id uuid, invite_token text)
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   v_owner uuid := auth.uid();
@@ -193,7 +193,7 @@ create or replace function public.update_room_security(
 returns void
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   update public.rooms
