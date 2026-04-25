@@ -11,6 +11,8 @@ import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
 import { FiEdit3, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
 import { exportWithDSBorder } from "@/components/ExportUtil";
+import { getStroke } from "perfect-freehand";
+import { strokeToPath2D } from "@/lib/canvas/strokeUtils";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { SupabaseYjsProvider } from "@/lib/collab/supabaseYjsProvider";
 import { useAccount } from "@/hooks/useAccount";
@@ -54,6 +56,22 @@ type PresencePayload = {
   ts: number;
   avatarUrl?: string;
   username?: string;
+};
+
+type StrokePayload = {
+  artistId: string;
+  strokeId: string;
+  pts: [number, number, number][];
+  color: string;
+  size: number;
+  isLast: boolean;
+};
+
+type RemoteActiveStroke = {
+  strokeId: string;
+  pts: [number, number, number][];
+  color: string;
+  size: number;
 };
 
 type PresenceTransport = {
@@ -128,6 +146,11 @@ export default function Home() {
   const selfIdRef = useRef(selfArtistId);
   const selfColorRef = useRef(PRESENCE_COLORS[(selfArtistId.codePointAt(0) ?? 0) % PRESENCE_COLORS.length]);
   const channelRef = useRef<PresenceTransport | null>(null);
+  const remoteStrokeCanvasRef = useRef<HTMLCanvasElement>(null);
+  const remoteActiveStrokesRef = useRef<Map<string, RemoteActiveStroke>>(new Map());
+  const strokeChannelRef = useRef<ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]> | null>(null);
+  const strokeRafRef = useRef<number | null>(null);
+  const currentStrokeIdRef = useRef("");
   const yProviderRef = useRef<SupabaseYjsProvider | null>(null);
   const yDocRef = useRef<Doc | null>(null);
   const yBoardMapRef = useRef<YMap<string> | null>(null);
@@ -222,6 +245,59 @@ export default function Home() {
   const handleDrawingProgress = useCallback(() => {
     drawingDirtyRef.current = true;
   }, []);
+
+  const renderRemoteStrokes = useCallback(() => {
+    const canvas = remoteStrokeCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (const stroke of remoteActiveStrokesRef.current.values()) {
+      const outline = getStroke(stroke.pts, {
+        size: stroke.size,
+        thinning: 0.5,
+        smoothing: 0.5,
+        streamline: 0.4,
+        simulatePressure: false,
+      });
+      if (!outline.length) continue;
+      const path = strokeToPath2D(outline);
+      ctx.save();
+      ctx.fillStyle = stroke.color;
+      ctx.fill(path);
+      ctx.restore();
+    }
+
+    if (remoteActiveStrokesRef.current.size > 0) {
+      strokeRafRef.current = requestAnimationFrame(renderRemoteStrokes);
+    } else {
+      strokeRafRef.current = null;
+    }
+  }, []);
+
+  const handleStrokeUpdate = useCallback(
+    (pts: [number, number, number][], color: string, size: number, isLast: boolean) => {
+      if (!strokeChannelRef.current) return;
+      if (!currentStrokeIdRef.current) {
+        currentStrokeIdRef.current = `${selfIdRef.current}-${Date.now().toString(36)}`;
+      }
+      void strokeChannelRef.current.send({
+        type: "broadcast",
+        event: "stroke",
+        payload: {
+          artistId: selfIdRef.current,
+          strokeId: currentStrokeIdRef.current,
+          pts,
+          color,
+          size,
+          isLast,
+        } satisfies StrokePayload,
+      });
+      if (isLast) currentStrokeIdRef.current = "";
+    },
+    []
+  );
 
   const handleSelectSticker = useCallback(
     (s: Sticker) => {
@@ -711,6 +787,63 @@ export default function Home() {
     };
   }, [account.hasSession, publishPresence, selfArtistId, collabScope]);
 
+  useEffect(() => {
+    if (!account.hasSession) return;
+    const supabase = createSupabaseBrowserClient();
+    const ch = supabase
+      .channel(`mochimail-strokes:${collabScope}`, {
+        config: { broadcast: { self: false } },
+      })
+      .on("broadcast", { event: "stroke" }, ({ payload }) => {
+        const data = payload as StrokePayload;
+        if (!data?.artistId || data.artistId === selfIdRef.current) return;
+
+        if (data.isLast) {
+          remoteActiveStrokesRef.current.delete(data.artistId);
+          const drawingCanvas = canvasRef.current?.getCanvas();
+          if (drawingCanvas) {
+            const ctx = drawingCanvas.getContext("2d");
+            if (ctx) {
+              const outline = getStroke(data.pts, {
+                size: data.size,
+                thinning: 0.5,
+                smoothing: 0.5,
+                streamline: 0.4,
+                simulatePressure: false,
+              });
+              const path = strokeToPath2D(outline);
+              ctx.save();
+              ctx.fillStyle = data.color;
+              ctx.fill(path);
+              ctx.restore();
+            }
+          }
+        } else {
+          remoteActiveStrokesRef.current.set(data.artistId, {
+            strokeId: data.strokeId,
+            pts: data.pts,
+            color: data.color,
+            size: data.size,
+          });
+          if (!strokeRafRef.current) {
+            strokeRafRef.current = requestAnimationFrame(renderRemoteStrokes);
+          }
+        }
+      });
+
+    ch.subscribe();
+    strokeChannelRef.current = ch;
+
+    return () => {
+      if (strokeRafRef.current) {
+        cancelAnimationFrame(strokeRafRef.current);
+        strokeRafRef.current = null;
+      }
+      remoteActiveStrokesRef.current.clear();
+      void supabase.removeChannel(ch);
+      strokeChannelRef.current = null;
+    };
+  }, [account.hasSession, collabScope, renderRemoteStrokes]);
 
   const artistList = Object.values(artists).sort((a, b) => {
     if (a.id === selfArtistId) return -1;
@@ -892,6 +1025,7 @@ export default function Home() {
                 customFonts={customFonts}
                 onDrawingCommit={handleDrawingCommit}
                 onDrawingProgress={handleDrawingProgress}
+                onStrokeUpdate={handleStrokeUpdate}
                 onPlaceAsset={(asset, x, y) => placeItem(asset, x, y)}
                 onAddTextItem={(item) => placeTextItem(item.text ?? "Text", item.x, item.y, item.textColor ?? brushSettings.color, item.textSize ?? 32, item.textFont ?? '"Space Mono", monospace')}
                 onUpdatePlacedItem={updatePlacedItem}
@@ -899,6 +1033,13 @@ export default function Home() {
                 backgroundOffsetY={worldOffset.y}
                 width={CANVAS_W}
                 height={CANVAS_H}
+              />
+              <canvas
+                ref={remoteStrokeCanvasRef}
+                width={CANVAS_W}
+                height={CANVAS_H}
+                className="pointer-events-none absolute inset-0"
+                style={{ width: "100%", height: "100%" }}
               />
               {remoteArtists.map((artist) => {
                 const x = artist.x - worldOffset.x;
