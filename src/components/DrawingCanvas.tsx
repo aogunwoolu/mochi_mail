@@ -116,7 +116,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       ctx.save();
       ctx.globalCompositeOperation = isEraser ? "destination-out" : "source-over";
       ctx.fillStyle = isEraser ? "rgba(0,0,0,1)" : color;
-      ctx.fill(path, "evenodd");
+      ctx.fill(path);
       ctx.restore();
     }, [brushSettings]);
 
@@ -380,13 +380,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
-        // Stroke tools (pen/eraser/washi) block touch so the scroll container can
-        // still pan the infinite canvas with a finger. iOS handles Apple Pencil palm
-        // rejection at the OS level — blocking touch here doesn't affect Pencil.
-        // Sticker, text, and select stay touch-friendly for tap interactions.
-        const isStrokeTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
-        if (isStrokeTool && e.pointerType === "touch") return;
-
         e.preventDefault();
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -507,8 +500,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const handlePointerMove = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         if (!isDrawing.current) return;
-        const isStrokeTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
-        if (isStrokeTool && e.pointerType === "touch") return;
         // On iPadOS, pointerup can fail to fire when Apple Pencil transitions from
         // touching to hovering. Detect hover (pen with no buttons pressed) and end
         // the stroke to prevent ghost lines connecting separate strokes.
