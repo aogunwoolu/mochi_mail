@@ -155,7 +155,7 @@ function RoomsPageInner() {
   }
 
   const primaryRoom = rooms.myRooms.find((r) => r.isOwner) ?? rooms.myRooms[0] ?? null;
-  const otherRooms = rooms.myRooms.filter((r) => r.id !== primaryRoom?.id);
+  const otherRooms = rooms.publicRooms.filter((r) => r.id !== primaryRoom?.id);
 
   // Stable room link uses room ID — the invite token can be rotated separately
   const getRoomLink = (room: RoomSummary) => `${globalThis.location.origin}/rooms/${room.id}`;
@@ -332,11 +332,11 @@ function RoomsPageInner() {
             <FieldLabel>Room code or invite link</FieldLabel>
             <input
               value={joinToken}
-              onChange={(e) => setJoinToken(e.target.value.toUpperCase())}
+              onChange={(e) => setJoinToken(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void handleJoin(); }}
               className="input-soft w-full px-3 py-2 font-mono text-sm outline-none"
               placeholder="ABC-123  or  https://…"
-              maxLength={120}
+              maxLength={200}
             />
             <p className="mt-1 text-[11px]" style={{ color: "var(--muted)" }}>
               Enter the 6-character code (e.g. <strong>ABC-123</strong>) or paste a full invite link.
@@ -365,7 +365,7 @@ function RoomsPageInner() {
       {/* Other rooms */}
       {otherRooms.length > 0 ? (
         <section>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>Other rooms</h2>
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>Public rooms</h2>
           <div className="flex flex-col gap-2">
             {otherRooms.map((room) => (
               <RoomRow

@@ -380,9 +380,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
-        // Palm rejection: only pen and mouse draw. Touch is fingers/palm — block on all drawing tools.
-        const isDrawingTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
-        if (isDrawingTool && e.pointerType === "touch") return;
+        // Stroke tools (pen/eraser/washi) block touch so the scroll container can
+        // still pan the infinite canvas with a finger. iOS handles Apple Pencil palm
+        // rejection at the OS level — blocking touch here doesn't affect Pencil.
+        // Sticker, text, and select stay touch-friendly for tap interactions.
+        const isStrokeTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
+        if (isStrokeTool && e.pointerType === "touch") return;
 
         e.preventDefault();
         try {
@@ -504,8 +507,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const handlePointerMove = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         if (!isDrawing.current) return;
-        const isDrawingTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
-        if (isDrawingTool && e.pointerType === "touch") return;
+        const isStrokeTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
+        if (isStrokeTool && e.pointerType === "touch") return;
         e.preventDefault();
         const point = getCanvasPoint(e);
 
@@ -550,15 +553,19 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             ? e.nativeEvent.getCoalescedEvents()
             : [e.nativeEvent];
 
-        for (const ev of events) {
-          const canvas = canvasRef.current;
-          if (!canvas) break;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          // Hoist getBoundingClientRect out of the loop — one layout read per move event.
           const rect = canvas.getBoundingClientRect();
-          activeStrokePointsRef.current.push([
-            (ev.clientX - rect.left) * (canvas.width / rect.width),
-            (ev.clientY - rect.top) * (canvas.height / rect.height),
-            ev.pressure || 0.5,
-          ]);
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          for (const ev of events) {
+            activeStrokePointsRef.current.push([
+              (ev.clientX - rect.left) * scaleX,
+              (ev.clientY - rect.top) * scaleY,
+              ev.pressure || 0.5,
+            ]);
+          }
         }
 
         changedDuringPointerRef.current = true;

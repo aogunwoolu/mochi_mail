@@ -9,7 +9,7 @@ import StudioToolbar from "@/components/StudioToolbar";
 import MailComposePanel from "@/components/MailComposePanel";
 import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
-import { FiEdit3, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
+import { FiEdit3, FiMail, FiShoppingBag, FiUsers, FiShare2, FiCheck } from "react-icons/fi";
 import { exportWithDSBorder } from "@/components/ExportUtil";
 import { getStroke } from "perfect-freehand";
 import { strokeToPath2D } from "@/lib/canvas/strokeUtils";
@@ -129,7 +129,7 @@ function RoomModeBanner({
   if (!activeRoomTitle) return null;
 
   const canvasUrl = activeRoomId
-    ? `${globalThis.location?.origin}/?room=${encodeURIComponent(activeRoomId)}`
+    ? `${globalThis.location?.origin}/rooms/${activeRoomId}`
     : null;
 
   return (
@@ -177,6 +177,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<AppTab>("studio");
   const [mailView, setMailView] = useState<"inbox" | "compose">("inbox");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [headerCopied, setHeaderCopied] = useState(false);
   // useSyncExternalStore returns false on the server and true on the client,
   // with no setState-in-effect anti-pattern. Used to gate the self collaborator
   // entry so SSR HTML matches the client's initial render.
@@ -896,6 +897,26 @@ export default function Home() {
               <span><FiUsers /></span>
               <span className="hidden sm:inline">Rooms</span>
             </button>
+            {activeRoomId ? (
+              <button
+                onClick={async () => {
+                  const shareUrl = `${globalThis.location.origin}/rooms/${activeRoomId}`;
+                  await navigator.clipboard.writeText(shareUrl);
+                  setHeaderCopied(true);
+                  setTimeout(() => setHeaderCopied(false), 2000);
+                }}
+                className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
+                style={{
+                  background: headerCopied ? "rgba(52,211,153,0.15)" : "transparent",
+                  color: headerCopied ? "#065f46" : "var(--muted)",
+                }}
+                aria-label="Share room link"
+                title={`Share: ${globalThis.location?.origin}/rooms/${activeRoomId}`}
+              >
+                <span>{headerCopied ? <FiCheck /> : <FiShare2 />}</span>
+                <span className="hidden sm:inline">{headerCopied ? "Copied!" : "Share"}</span>
+              </button>
+            ) : null}
           </nav>
 
           <button
