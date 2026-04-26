@@ -116,7 +116,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       ctx.save();
       ctx.globalCompositeOperation = isEraser ? "destination-out" : "source-over";
       ctx.fillStyle = isEraser ? "rgba(0,0,0,1)" : color;
-      ctx.fill(path);
+      ctx.fill(path, "evenodd");
       ctx.restore();
     }, [brushSettings]);
 
