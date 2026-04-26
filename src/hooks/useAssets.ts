@@ -622,12 +622,17 @@ export function useAssets(user: ViewerIdentity) {
   const loadBoardState = useCallback(async (roomId?: string | null) => {
     if (!user?.id || user.isGuest || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
-    const { data, error } = await (supabase
-      .from("studio_boards") as any)
+    // For shared rooms load the most recently updated board from any participant;
+    // for personal boards restrict to the owner.
+    const isSharedRoom = !!roomId;
+    const baseQuery = (supabase.from("studio_boards") as any)
       .select("drawing_data, placed_items, selected_paper")
-      .eq("created_by", user.id)
-      .eq("room_id", roomId ?? "personal")
-      .single();
+      .eq("room_id", roomId ?? "personal");
+    const { data, error } = await (
+      isSharedRoom
+        ? baseQuery.order("updated_at", { ascending: false }).limit(1).single()
+        : baseQuery.eq("created_by", user.id).single()
+    );
 
     if (error && error.code !== "PGRST116") {
       const message = String(error.message ?? "").toLowerCase();

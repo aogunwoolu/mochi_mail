@@ -197,6 +197,11 @@ export function useBoardSync({
           lastSyncedDrawingRef.current = incomingDrawing;
           lastPersistedDrawingRef.current = incomingDrawing;
           drawingDirtyRef.current = false;
+          // Re-persist the merged state so latecomers load an up-to-date board.
+          persistDrawingDirtyRef.current = true;
+        }
+        if (hasPlacedItems || hasSelectedPaper) {
+          persistItemsDirtyRef.current = true;
         }
       } finally {
         isApplyingRemoteBoardRef.current = false;
