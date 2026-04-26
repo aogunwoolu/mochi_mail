@@ -509,6 +509,13 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (!isDrawing.current) return;
         const isStrokeTool = brushSettings.tool === "pen" || brushSettings.tool === "eraser" || brushSettings.tool === "washi";
         if (isStrokeTool && e.pointerType === "touch") return;
+        // On iPadOS, pointerup can fail to fire when Apple Pencil transitions from
+        // touching to hovering. Detect hover (pen with no buttons pressed) and end
+        // the stroke to prevent ghost lines connecting separate strokes.
+        if (e.pointerType === "pen" && e.buttons === 0) {
+          handlePointerUp(e);
+          return;
+        }
         e.preventDefault();
         const point = getCanvasPoint(e);
 
