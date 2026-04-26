@@ -50,8 +50,8 @@ interface MochiAssets {
   removeStamp: (id: string) => void;
   removeEnvelope: (id: string) => void;
   removeCustomFont: (id: string) => void;
-  saveBoardState: (drawingData: string | null, items: PlacedSticker[], paper: PaperBackground | null) => Promise<void>;
-  loadBoardState: () => Promise<{ drawingData: string; placedItems: PlacedSticker[]; selectedPaper: PaperBackground | null } | null>;
+  saveBoardState: (drawingData: string | null, items: PlacedSticker[], paper: PaperBackground | null, roomId?: string | null) => Promise<void>;
+  loadBoardState: (roomId?: string | null) => Promise<{ drawingData: string; placedItems: PlacedSticker[]; selectedPaper: PaperBackground | null } | null>;
   /** Add a store item directly into the asset library. */
   equipFromStore: (item: StoreItem) => void;
 }

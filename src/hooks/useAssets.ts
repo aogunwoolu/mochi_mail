@@ -596,18 +596,19 @@ export function useAssets(user: ViewerIdentity) {
     }
   }, []);
 
-  const saveBoardState = useCallback(async (drawingData: string | null, currentPlacedItems: PlacedSticker[], currentSelectedPaper: PaperBackground | null) => {
+  const saveBoardState = useCallback(async (drawingData: string | null, currentPlacedItems: PlacedSticker[], currentSelectedPaper: PaperBackground | null, roomId?: string | null) => {
     if (!user?.id || user.isGuest || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
     const { error } = await (supabase
       .from("studio_boards") as any)
       .upsert({
         created_by: user.id,
+        room_id: roomId ?? "personal",
         drawing_data: drawingData,
         placed_items: currentPlacedItems,
         selected_paper: currentSelectedPaper,
         updated_at: new Date().toISOString(),
-      }, { onConflict: "created_by" });
+      }, { onConflict: "created_by,room_id" });
     if (error) {
       const message = String(error.message ?? "").toLowerCase();
       if (message.includes("relation") || message.includes("permission") || message.includes("does not exist")) {
@@ -618,13 +619,14 @@ export function useAssets(user: ViewerIdentity) {
     }
   }, [user?.id, user.isGuest]);
 
-  const loadBoardState = useCallback(async () => {
+  const loadBoardState = useCallback(async (roomId?: string | null) => {
     if (!user?.id || user.isGuest || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
     const { data, error } = await (supabase
       .from("studio_boards") as any)
       .select("drawing_data, placed_items, selected_paper")
       .eq("created_by", user.id)
+      .eq("room_id", roomId ?? "personal")
       .single();
 
     if (error && error.code !== "PGRST116") {

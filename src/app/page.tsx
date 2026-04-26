@@ -1,176 +1,31 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useState, useRef, useCallback, useEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { Doc, Map as YMap } from "yjs";
 import AccountPanel from "@/components/AccountPanel";
 import DrawingCanvas, { DrawingCanvasHandle } from "@/components/DrawingCanvas";
 import StudioToolbar from "@/components/StudioToolbar";
 import MailComposePanel from "@/components/MailComposePanel";
 import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
+import RoomModeBanner from "@/components/RoomModeBanner";
 import { FiEdit3, FiMail, FiShoppingBag, FiUsers, FiShare2, FiCheck } from "react-icons/fi";
 import { exportWithDSBorder } from "@/components/ExportUtil";
-import { getStroke } from "perfect-freehand";
-import { strokeToPath2D } from "@/lib/canvas/strokeUtils";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { SupabaseYjsProvider } from "@/lib/collab/supabaseYjsProvider";
 import { useRoom } from "@/hooks/useRoom";
-import type { RoomMember, RoomPhase } from "@/hooks/useRoom";
+import type { RoomMember } from "@/hooks/useRoom";
+import { useBoardSync } from "@/hooks/useBoardSync";
+import { useStrokeChannel } from "@/hooks/useStrokeChannel";
 import { useMochi } from "@/context/MochiContext";
 import { AppTab, BrushSettings, CustomFont, EnvelopeStyle, MailStamp, PaperBackground, Sticker, WashiTape, StoreItem } from "@/types";
 
-const TABS: { id: AppTab; label: string; icon: string }[] = [
-  { id: "studio", label: "Canvas", icon: "edit" },
-  { id: "mail", label: "Mail", icon: "mail" },
-  { id: "store", label: "Shop", icon: "shop" },
+const CANVAS_W = 6000;
+const CANVAS_H = 4800;
+
+const TABS: { id: AppTab; label: string; icon: React.ReactNode }[] = [
+  { id: "studio", label: "Canvas", icon: <FiEdit3 /> },
+  { id: "mail", label: "Mail", icon: <FiMail /> },
+  { id: "store", label: "Shop", icon: <FiShoppingBag /> },
 ];
-
-const TAB_ICONS: Record<string, ReactNode> = {
-  edit: <FiEdit3 />,
-  mail: <FiMail />,
-  shop: <FiShoppingBag />,
-};
-
-type StrokePayload = {
-  artistId: string;
-  strokeId: string;
-  pts: [number, number, number][];
-  color: string;
-  size: number;
-  isLast: boolean;
-};
-
-type RemoteActiveStroke = {
-  strokeId: string;
-  pts: [number, number, number][];
-  color: string;
-  size: number;
-};
-
-function RoomModeBanner({
-  phase,
-  activeRoomId,
-  activeRoomTitle,
-  onJoinWithToken,
-  onOpenRooms,
-}: Readonly<{
-  phase: RoomPhase;
-  activeRoomId: string | null;
-  activeRoomTitle: string | null;
-  onJoinWithToken: (token: string, password?: string) => Promise<string | null>;
-  onOpenRooms: () => void;
-}>) {
-  const [copied, setCopied] = useState(false);
-  const [token, setToken] = useState("");
-  const [password, setPassword] = useState("");
-  const [joining, setJoining] = useState(false);
-  const [joinError, setJoinError] = useState<string | null>(null);
-
-  // "join-required" = private room, full-screen overlay prompt
-  if (phase === "join-required") {
-    return (
-      <div className="absolute inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(255,248,255,0.88)", backdropFilter: "blur(12px)" }}>
-        <div className="panel w-full max-w-sm rounded-2xl p-5 flex flex-col gap-4">
-          <div>
-            <p className="text-sm font-bold">Private room</p>
-            <p className="mt-0.5 text-xs" style={{ color: "var(--muted)" }}>
-              Paste the invite link you received to join.
-            </p>
-          </div>
-          <input
-            value={token}
-            onChange={(e) => { setToken(e.target.value); setJoinError(null); }}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleJoin(); }}
-            className="input-soft w-full px-3 py-2 text-sm outline-none"
-            placeholder="https://… or paste token"
-            autoFocus
-          />
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            className="input-soft w-full px-3 py-2 text-sm outline-none"
-            placeholder="Password (if required)"
-          />
-          {joinError ? <p className="text-xs" style={{ color: "#b42318" }}>{joinError}</p> : null}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleJoin}
-              disabled={joining || !token.trim()}
-              className="btn-smooth flex-1 rounded-xl py-2 text-xs font-semibold text-white"
-              style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))", opacity: joining ? 0.7 : 1 }}
-            >
-              {joining ? "Joining…" : "Join room"}
-            </button>
-            <button
-              onClick={onOpenRooms}
-              className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold"
-              style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}
-            >
-              My rooms
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // "joining" = auto-joining a public room
-  if (phase === "joining") {
-    return (
-      <div className="absolute left-4 right-4 top-3 z-50 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)" }}>
-        <span style={{ color: "var(--muted)" }}>Joining room…</span>
-      </div>
-    );
-  }
-
-  // In a room — show title + share button that copies the canvas URL
-  if (!activeRoomTitle) return null;
-
-  const canvasUrl = activeRoomId
-    ? `${globalThis.location?.origin}/rooms/${activeRoomId}`
-    : null;
-
-  return (
-    <div className="absolute left-4 right-4 top-3 z-50 flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.92)", backdropFilter: "blur(8px)" }}>
-      <span className="truncate font-semibold" style={{ color: "var(--muted-strong)" }}>
-        {activeRoomTitle}
-      </span>
-      <div className="flex shrink-0 items-center gap-1.5">
-        {canvasUrl ? (
-          <button
-            onClick={async () => {
-              await navigator.clipboard.writeText(canvasUrl);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            }}
-            className="btn-smooth rounded-lg px-2 py-1 font-semibold text-white"
-            style={{ background: copied ? "rgba(52,211,153,0.85)" : "linear-gradient(135deg, var(--pink), var(--lavender))" }}
-          >
-            {copied ? "Copied!" : "Share link"}
-          </button>
-        ) : null}
-        <button
-          onClick={onOpenRooms}
-          className="btn-smooth rounded-lg px-2 py-1 font-semibold"
-          style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}
-        >
-          Rooms
-        </button>
-      </div>
-    </div>
-  );
-
-  async function handleJoin() {
-    if (!token.trim()) return;
-    setJoining(true);
-    setJoinError(null);
-    const err = await onJoinWithToken(token.trim(), password.trim() || undefined);
-    setJoining(false);
-    if (err) setJoinError(err);
-  }
-}
 
 export default function Home() {
   const router = useRouter();
@@ -178,14 +33,7 @@ export default function Home() {
   const [mailView, setMailView] = useState<"inbox" | "compose">("inbox");
   const [accountOpen, setAccountOpen] = useState(false);
   const [headerCopied, setHeaderCopied] = useState(false);
-  // useSyncExternalStore returns false on the server and true on the client,
-  // with no setState-in-effect anti-pattern. Used to gate the self collaborator
-  // entry so SSR HTML matches the client's initial render.
-  const mounted = useSyncExternalStore(
-    () => () => {},  // subscribe: no external store to listen to
-    () => true,      // client snapshot
-    () => false,     // server snapshot
-  );
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
   const [selfArtistId] = useState(() => {
     if (!globalThis.window) return "";
     const saved = sessionStorage.getItem("mochimail_artist_id");
@@ -201,30 +49,8 @@ export default function Home() {
   const hasCenteredRef = useRef(false);
   const selfIdRef = useRef(selfArtistId);
   const remoteStrokeCanvasRef = useRef<HTMLCanvasElement>(null);
-  const remoteActiveStrokesRef = useRef<Map<string, RemoteActiveStroke>>(new Map());
-  const strokeChannelRef = useRef<ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]> | null>(null);
-  const strokeRafRef = useRef<number | null>(null);
   const currentStrokeIdRef = useRef("");
-  const yProviderRef = useRef<SupabaseYjsProvider | null>(null);
-  const yDocRef = useRef<Doc | null>(null);
-  const yBoardMapRef = useRef<YMap<string> | null>(null);
-  const isApplyingRemoteBoardRef = useRef(false);
-  const isBoardSyncReadyRef = useRef(false);
-  const lastDrawingPublishAtRef = useRef(0);
   const lastMouseWorldRef = useRef<{ x: number; y: number } | null>(null);
-  const lastSyncedItemsFingerprintRef = useRef("");
-  const lastSyncedDrawingRef = useRef<string | null>(null);
-  const placedItemsRef = useRef<import("@/types").PlacedSticker[]>([]);
-  const selectedPaperRef = useRef<PaperBackground | null>(null);
-  const lastAppliedBoardTsRef = useRef(0);
-  const hasRemoteBoardEventRef = useRef(false);
-  const drawingDirtyRef = useRef(false);
-  const persistItemsDirtyRef = useRef(false);
-  const persistDrawingDirtyRef = useRef(false);
-  const lastPersistedDrawingRef = useRef<string | null>(null);
-
-  const CANVAS_W = 6000;
-  const CANVAS_H = 4800;
 
   const [brushSettings, setBrushSettings] = useState<BrushSettings>({
     color: "#1e1e2e",
@@ -235,46 +61,23 @@ export default function Home() {
   });
 
   const { account, assets, mail, store } = useMochi();
-
   const {
-    stickers,
-    washiTapes,
-    papers,
-    stamps,
-    envelopes,
-    customFonts,
-    selectedPaper,
-    placedItems,
-    selectedAsset,
-    setSelectedPaper,
-    setSelectedAsset,
-    addSticker,
-    addWashiTape,
-    addPaper,
-    addStamp,
-    addEnvelope,
-    addCustomFont,
-    placeItem,
-    placeTextItem,
-    applySharedCanvasState,
-    shiftPlacedItems,
-    updatePlacedItem,
-    removeSticker,
-    removeWashiTape,
-    removePaper,
-    removeStamp,
-    removeEnvelope,
-    removeCustomFont,
-    saveBoardState,
-    loadBoardState,
-    equipFromStore,
+    stickers, washiTapes, papers, stamps, envelopes, customFonts,
+    selectedPaper, placedItems, selectedAsset,
+    setSelectedPaper, setSelectedAsset,
+    addSticker, addWashiTape, addPaper, addStamp, addEnvelope, addCustomFont,
+    placeItem, placeTextItem, applySharedCanvasState, shiftPlacedItems,
+    updatePlacedItem, removeSticker, removeWashiTape, removePaper,
+    removeStamp, removeEnvelope, removeCustomFont,
+    saveBoardState, loadBoardState, equipFromStore,
   } = assets;
 
   const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
   const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
+
   const {
     phase: roomPhase,
-    activeRoomId: activeRoomId,
+    activeRoomId,
     activeRoomTitle,
     collabScope,
     members: roomMembers,
@@ -290,57 +93,38 @@ export default function Home() {
     selfUsername: account.viewer.username,
   });
 
-  useEffect(() => {
-    placedItemsRef.current = placedItems;
-    selectedPaperRef.current = selectedPaper ?? null;
-  }, [placedItems, selectedPaper]);
+  useEffect(() => { selfIdRef.current = selfArtistId; }, [selfArtistId]);
+
+  // Board sync: Yjs real-time collab + DB persistence
+  const { markDrawingDirty, markDrawingProgress } = useBoardSync({
+    hasSession: account.hasSession,
+    collabScope,
+    activeRoomId,
+    selfIdRef,
+    canvasRef,
+    worldOffsetRef,
+    placedItems,
+    selectedPaper,
+    applySharedCanvasState,
+    saveBoardState,
+    loadBoardState,
+  });
+
+  // Stroke channel: live brush broadcast to collaborators
+  const { strokeChannelRef } = useStrokeChannel({
+    hasSession: account.hasSession,
+    collabScope,
+    selfIdRef,
+    canvasRef,
+    remoteStrokeCanvasRef,
+  });
 
   const handleBrushChange = useCallback((update: Partial<BrushSettings>) => {
     setBrushSettings((prev) => ({ ...prev, ...update }));
   }, []);
 
-  const handleDrawingCommit = useCallback(() => {
-    drawingDirtyRef.current = true;
-    persistDrawingDirtyRef.current = true;
-  }, []);
-
-  const handleDrawingProgress = useCallback(() => {
-    drawingDirtyRef.current = true;
-  }, []);
-
-  const renderRemoteStrokesRef = useRef<() => void>(() => undefined);
-  // Stable wrapper — callers (RAF, stroke channel) hold this reference.
-  const renderRemoteStrokes = useCallback(() => { renderRemoteStrokesRef.current(); }, []);
-  useEffect(() => {
-    // Only reads other refs so an empty dep array is correct here.
-    renderRemoteStrokesRef.current = () => {
-      const canvas = remoteStrokeCanvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (const stroke of remoteActiveStrokesRef.current.values()) {
-        const outline = getStroke(stroke.pts, {
-          size: stroke.size,
-          thinning: 0.5,
-          smoothing: 0.5,
-          streamline: 0.4,
-          simulatePressure: false,
-        });
-        if (!outline.length) continue;
-        const path = strokeToPath2D(outline);
-        ctx.save();
-        ctx.fillStyle = stroke.color;
-        ctx.fill(path);
-        ctx.restore();
-      }
-      if (remoteActiveStrokesRef.current.size > 0) {
-        strokeRafRef.current = requestAnimationFrame(renderRemoteStrokesRef.current);
-      } else {
-        strokeRafRef.current = null;
-      }
-    };
-  }, []);
+  const handleDrawingCommit = useCallback(() => markDrawingDirty(), [markDrawingDirty]);
+  const handleDrawingProgress = useCallback(() => markDrawingProgress(), [markDrawingProgress]);
 
   const handleStrokeUpdate = useCallback(
     (pts: [number, number, number][], color: string, size: number, isLast: boolean) => {
@@ -351,63 +135,37 @@ export default function Home() {
       void strokeChannelRef.current.send({
         type: "broadcast",
         event: "stroke",
-        payload: {
-          artistId: selfIdRef.current,
-          strokeId: currentStrokeIdRef.current,
-          pts,
-          color,
-          size,
-          isLast,
-        } satisfies StrokePayload,
+        payload: { artistId: selfIdRef.current, strokeId: currentStrokeIdRef.current, pts, color, size, isLast },
       });
       if (isLast) currentStrokeIdRef.current = "";
     },
     []
   );
 
-  const handleSelectSticker = useCallback(
-    (s: Sticker) => {
-      setSelectedAsset(s);
-      setBrushSettings((prev) => ({ ...prev, tool: "sticker" }));
-    },
-    [setSelectedAsset]
-  );
-
-  const handleSelectWashi = useCallback(
-    (w: WashiTape) => {
-      setSelectedAsset(w);
-      setBrushSettings((prev) => ({ ...prev, tool: "washi" }));
-    },
-    [setSelectedAsset]
-  );
-
-  const handleDeselectAsset = useCallback(() => {
-    setSelectedAsset(null);
+  const handleSelectSticker = useCallback((s: Sticker) => {
+    setSelectedAsset(s);
+    setBrushSettings((prev) => ({ ...prev, tool: "sticker" }));
   }, [setSelectedAsset]);
+
+  const handleSelectWashi = useCallback((w: WashiTape) => {
+    setSelectedAsset(w);
+    setBrushSettings((prev) => ({ ...prev, tool: "washi" }));
+  }, [setSelectedAsset]);
+
+  const handleDeselectAsset = useCallback(() => setSelectedAsset(null), [setSelectedAsset]);
 
   const handleExport = useCallback(() => {
     if (canvasRef.current) exportWithDSBorder(canvasRef.current, "mochimail_letter");
   }, []);
 
-  const handleStoreAddToAssets = useCallback(
-    (item: StoreItem) => {
-      if (item.type === "sticker") {
-        addSticker(item.name, item.imageData, item.width, item.height);
-      } else if (item.type === "washi") {
-        addWashiTape(item.name, item.imageData, item.opacity ?? 0.7, item.width, item.height);
-      } else if (item.type === "background") {
-        const paper = addPaper(item.name, item.imageData, item.width, item.height);
-        setSelectedPaper(paper);
-      } else if (item.type === "stamp") {
-        addStamp(item.name, item.imageData, item.width, item.height);
-      } else if (item.type === "envelope") {
-        addEnvelope(item.name, item.imageData, item.width, item.height);
-      } else if (item.type === "font" && item.fontData) {
-        addCustomFont(item.fontData.name, item.fontData.glyphs, item.fontData.glyphWidth, item.fontData.glyphHeight);
-      }
-    },
-    [addSticker, addWashiTape, addPaper, addStamp, addEnvelope, addCustomFont, setSelectedPaper]
-  );
+  const handleStoreAddToAssets = useCallback((item: StoreItem) => {
+    if (item.type === "sticker") addSticker(item.name, item.imageData, item.width, item.height);
+    else if (item.type === "washi") addWashiTape(item.name, item.imageData, item.opacity ?? 0.7, item.width, item.height);
+    else if (item.type === "background") { const paper = addPaper(item.name, item.imageData, item.width, item.height); setSelectedPaper(paper); }
+    else if (item.type === "stamp") addStamp(item.name, item.imageData, item.width, item.height);
+    else if (item.type === "envelope") addEnvelope(item.name, item.imageData, item.width, item.height);
+    else if (item.type === "font" && item.fontData) addCustomFont(item.fontData.name, item.fontData.glyphs, item.fontData.glyphWidth, item.fontData.glyphHeight);
+  }, [addSticker, addWashiTape, addPaper, addStamp, addEnvelope, addCustomFont, setSelectedPaper]);
 
   const handleStorePublish = useCallback(
     (item: Sticker | WashiTape | PaperBackground | CustomFont | MailStamp | EnvelopeStyle, itemType: StoreItem["type"], tags: string[]) => {
@@ -427,30 +185,26 @@ export default function Home() {
     };
   }, []);
 
-  const jumpToMember = useCallback(
-    (member: RoomMember) => {
-      const el = studioScrollRef.current;
-      if (!el) return;
-      const canvasX = member.x - worldOffsetRef.current.x;
-      const canvasY = member.y - worldOffsetRef.current.y;
-      const maxLeft = Math.max(0, CANVAS_W - el.clientWidth);
-      const maxTop = Math.max(0, CANVAS_H - el.clientHeight);
-      const nextLeft = Math.max(0, Math.min(maxLeft, canvasX - el.clientWidth / 2));
-      const nextTop = Math.max(0, Math.min(maxTop, canvasY - el.clientHeight / 2));
-      el.scrollTo({ left: nextLeft, top: nextTop, behavior: "smooth" });
-    },
-    [CANVAS_H, CANVAS_W]
-  );
+  const jumpToMember = useCallback((member: RoomMember) => {
+    const el = studioScrollRef.current;
+    if (!el) return;
+    const maxLeft = Math.max(0, CANVAS_W - el.clientWidth);
+    const maxTop = Math.max(0, CANVAS_H - el.clientHeight);
+    el.scrollTo({
+      left: Math.max(0, Math.min(maxLeft, member.x - worldOffsetRef.current.x - el.clientWidth / 2)),
+      top: Math.max(0, Math.min(maxTop, member.y - worldOffsetRef.current.y - el.clientHeight / 2)),
+      behavior: "smooth",
+    });
+  }, []);
 
+  // Canvas scroll: infinite scroll by recentering when near an edge.
   useEffect(() => {
     if (activeTab !== "studio") return;
     const el = studioScrollRef.current;
     if (!el) return;
 
     if (!hasCenteredRef.current) {
-      const left = Math.max(0, Math.floor((CANVAS_W - el.clientWidth) / 2));
-      const top = Math.max(0, Math.floor((CANVAS_H - el.clientHeight) / 2));
-      el.scrollTo({ left, top, behavior: "auto" });
+      el.scrollTo({ left: Math.max(0, Math.floor((CANVAS_W - el.clientWidth) / 2)), top: Math.max(0, Math.floor((CANVAS_H - el.clientHeight) / 2)), behavior: "auto" });
       hasCenteredRef.current = true;
     }
 
@@ -464,21 +218,13 @@ export default function Home() {
       const maxTop = Math.max(0, CANVAS_H - el.clientHeight);
       let dx = 0;
       let dy = 0;
-
-      if (el.scrollLeft < thresholdX || el.scrollLeft > maxLeft - thresholdX) {
-        dx = centerLeft - el.scrollLeft;
-      }
-      if (el.scrollTop < thresholdY || el.scrollTop > maxTop - thresholdY) {
-        dy = centerTop - el.scrollTop;
-      }
+      if (el.scrollLeft < thresholdX || el.scrollLeft > maxLeft - thresholdX) dx = centerLeft - el.scrollLeft;
+      if (el.scrollTop < thresholdY || el.scrollTop > maxTop - thresholdY) dy = centerTop - el.scrollTop;
 
       if (dx !== 0 || dy !== 0) {
         canvasRef.current?.shiftContent(dx, dy);
         shiftPlacedItems(dx, dy);
-        const nextOffset = {
-          x: worldOffsetRef.current.x - dx,
-          y: worldOffsetRef.current.y - dy,
-        };
+        const nextOffset = { x: worldOffsetRef.current.x - dx, y: worldOffsetRef.current.y - dy };
         worldOffsetRef.current = nextOffset;
         setWorldOffset(nextOffset);
         el.scrollLeft += dx;
@@ -491,17 +237,11 @@ export default function Home() {
 
     const onMouseMove = (e: MouseEvent) => {
       const rect = el.getBoundingClientRect();
-      const canvasX = el.scrollLeft + e.clientX - rect.left;
-      const canvasY = el.scrollTop + e.clientY - rect.top;
       lastMouseWorldRef.current = {
-        x: canvasX + worldOffsetRef.current.x,
-        y: canvasY + worldOffsetRef.current.y,
+        x: el.scrollLeft + e.clientX - rect.left + worldOffsetRef.current.x,
+        y: el.scrollTop + e.clientY - rect.top + worldOffsetRef.current.y,
       };
       trackCursor(lastMouseWorldRef.current);
-    };
-
-    const onMouseLeave = () => {
-      lastMouseWorldRef.current = null;
     };
 
     const updateViewSize = () => setViewSize({ w: el.clientWidth, h: el.clientHeight });
@@ -510,334 +250,22 @@ export default function Home() {
 
     const ro = new ResizeObserver(updateViewSize);
     ro.observe(el);
-
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("mousemove", onMouseMove, { passive: true });
-    el.addEventListener("mouseleave", onMouseLeave);
+    el.addEventListener("mouseleave", () => { lastMouseWorldRef.current = null; });
 
     return () => {
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("mousemove", onMouseMove);
-      el.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, [activeTab, CANVAS_H, CANVAS_W, trackCursor, shiftPlacedItems, getViewportCenterWorld]);
-
-  useEffect(() => {
-    // Load board state from database on mount
-    const init = async () => {
-      const boardState = await loadBoardState();
-      if (!boardState) return;
-
-      // If realtime already delivered fresher shared state, avoid overriding it with late DB load.
-      if (hasRemoteBoardEventRef.current) return;
-
-      if (boardState.placedItems.length > 0) {
-        applySharedCanvasState({
-          placedItems: boardState.placedItems,
-          selectedPaper: boardState.selectedPaper,
-        });
-      }
-      if (boardState.drawingData) {
-        canvasRef.current?.setCanvasImageData(boardState.drawingData);
-        lastSyncedDrawingRef.current = boardState.drawingData;
-        lastPersistedDrawingRef.current = boardState.drawingData;
-      }
-
-      lastSyncedItemsFingerprintRef.current = JSON.stringify({
-        p: boardState.placedItems,
-        paper: boardState.selectedPaper?.id ?? null,
-      });
-      lastAppliedBoardTsRef.current = Date.now();
-
-      const boardMap = yBoardMapRef.current;
-      if (account.hasSession && boardMap && !boardMap.has("ts")) {
-        boardMap.doc?.transact(() => {
-          boardMap.set("senderId", selfIdRef.current);
-          boardMap.set("ts", String(Date.now()));
-          boardMap.set("placedItems", JSON.stringify(boardState.placedItems));
-          boardMap.set("selectedPaper", JSON.stringify(boardState.selectedPaper ?? null));
-          boardMap.set("drawingData", boardState.drawingData ?? "");
-          boardMap.set("drawingOffsetX", String(worldOffsetRef.current.x));
-          boardMap.set("drawingOffsetY", String(worldOffsetRef.current.y));
-        }, "seed-from-db");
-      }
-    };
-
-    void init();
-  }, [account.hasSession, loadBoardState, applySharedCanvasState, collabScope]);
-
-  // Periodically save board state (every 5s)
-  useEffect(() => {
-    const saveTimer = globalThis.setInterval(async () => {
-      if (!persistItemsDirtyRef.current && !persistDrawingDirtyRef.current) return;
-
-      let drawingData = lastPersistedDrawingRef.current;
-      if (persistDrawingDirtyRef.current) {
-        drawingData = canvasRef.current?.getCanvasImageData() ?? null;
-        lastPersistedDrawingRef.current = drawingData;
-        persistDrawingDirtyRef.current = false;
-      }
-
-      await saveBoardState(drawingData, placedItems, selectedPaper ?? null);
-      persistItemsDirtyRef.current = false;
-    }, 5000);
-
-    return () => globalThis.clearInterval(saveTimer);
-  }, [placedItems, selectedPaper, saveBoardState]);
-
-  useEffect(() => {
-    persistItemsDirtyRef.current = true;
-  }, [placedItems, selectedPaper]);
-
-  // Use a Supabase-private Yjs room for CRDT board sync so channel auth/room rules are enforced.
-  useEffect(() => {
-    if (!account.hasSession) {
-      isBoardSyncReadyRef.current = false;
-      yBoardMapRef.current = null;
-      yDocRef.current = null;
-      return;
-    }
-
-    const supabase = createSupabaseBrowserClient();
-    const doc = new Doc();
-    const boardMap = doc.getMap<string>("board");
-    const provider = new SupabaseYjsProvider({
-      supabase,
-      roomName: `mochimail-studio-board:${collabScope}`,
-      doc,
-      senderId: selfIdRef.current,
-    });
-
-    yDocRef.current = doc;
-    yBoardMapRef.current = boardMap;
-    yProviderRef.current = provider;
-    isBoardSyncReadyRef.current = true;
-    provider.connect();
-
-    const parseJson = <T,>(value: string | undefined): T | null => {
-      if (typeof value !== "string") return null;
-      try {
-        return JSON.parse(value) as T;
-      } catch {
-        return null;
-      }
-    };
-
-    const applyRemoteBoardState = () => {
-      const tsRaw = boardMap.get("ts");
-      const incomingTs = Number(tsRaw);
-      if (!Number.isFinite(incomingTs) || incomingTs <= lastAppliedBoardTsRef.current) return;
-
-      const senderId = boardMap.get("senderId");
-      if (senderId === selfIdRef.current) return;
-
-      const placedItemsJson = boardMap.get("placedItems");
-      const selectedPaperJson = boardMap.get("selectedPaper");
-      const drawingDataRaw = boardMap.get("drawingData");
-      const drawingOffsetX = Number(boardMap.get("drawingOffsetX") ?? "0");
-      const drawingOffsetY = Number(boardMap.get("drawingOffsetY") ?? "0");
-
-      const nextPlacedItems = parseJson<import("@/types").PlacedSticker[]>(placedItemsJson);
-      const nextSelectedPaper = parseJson<PaperBackground | null>(selectedPaperJson);
-      const hasPlacedItems = nextPlacedItems !== null;
-      const hasSelectedPaper = nextSelectedPaper !== null;
-      const hasDrawing = typeof drawingDataRaw === "string";
-      if (!hasPlacedItems && !hasSelectedPaper && !hasDrawing) return;
-
-      hasRemoteBoardEventRef.current = true;
-      lastAppliedBoardTsRef.current = incomingTs;
-      isApplyingRemoteBoardRef.current = true;
-
-      try {
-        if (hasPlacedItems || hasSelectedPaper) {
-          const resolvedItems = nextPlacedItems ?? placedItemsRef.current;
-          const resolvedPaper = nextSelectedPaper ?? selectedPaperRef.current;
-
-          const incomingFingerprint = JSON.stringify({
-            p: resolvedItems,
-            paper: resolvedPaper?.id ?? null,
-          });
-          lastSyncedItemsFingerprintRef.current = incomingFingerprint;
-
-          applySharedCanvasState({
-            ...(hasPlacedItems ? { placedItems: resolvedItems } : {}),
-            ...(hasSelectedPaper ? { selectedPaper: resolvedPaper } : {}),
-          });
-        }
-
-        if (hasDrawing) {
-          const incomingDrawing = drawingDataRaw || null;
-          const shiftX = (Number.isFinite(drawingOffsetX) ? drawingOffsetX : 0) - worldOffsetRef.current.x;
-          const shiftY = (Number.isFinite(drawingOffsetY) ? drawingOffsetY : 0) - worldOffsetRef.current.y;
-          canvasRef.current?.setCanvasImageData(incomingDrawing, { shiftX, shiftY });
-          lastSyncedDrawingRef.current = incomingDrawing;
-          lastPersistedDrawingRef.current = incomingDrawing;
-          drawingDirtyRef.current = false;
-        }
-      } finally {
-        isApplyingRemoteBoardRef.current = false;
-      }
-    };
-
-    boardMap.observe(applyRemoteBoardState);
-
-    const drawingTimer = globalThis.setInterval(() => {
-      if (!isBoardSyncReadyRef.current || !yBoardMapRef.current) return;
-      if (!drawingDirtyRef.current) return;
-      const now = Date.now();
-      if (now - lastDrawingPublishAtRef.current < 160) return;
-
-      const drawingData = canvasRef.current?.getCanvasImageData() ?? null;
-      if (drawingData === lastSyncedDrawingRef.current) {
-        drawingDirtyRef.current = false;
-        return;
-      }
-
-      const nextTs = Date.now();
-      yBoardMapRef.current.doc?.transact(() => {
-        yBoardMapRef.current?.set("senderId", selfIdRef.current);
-        yBoardMapRef.current?.set("ts", String(nextTs));
-        yBoardMapRef.current?.set("drawingData", drawingData ?? "");
-        yBoardMapRef.current?.set("drawingOffsetX", String(worldOffsetRef.current.x));
-        yBoardMapRef.current?.set("drawingOffsetY", String(worldOffsetRef.current.y));
-      }, "publish-drawing");
-
-      lastDrawingPublishAtRef.current = now;
-      lastSyncedDrawingRef.current = drawingData;
-      lastAppliedBoardTsRef.current = nextTs;
-      drawingDirtyRef.current = false;
-    }, 120);
-
-    return () => {
-      boardMap.unobserve(applyRemoteBoardState);
-      globalThis.clearInterval(drawingTimer);
-      isBoardSyncReadyRef.current = false;
-      yBoardMapRef.current = null;
-      yDocRef.current = null;
-      const currentProvider = yProviderRef.current;
-      yProviderRef.current = null;
-      void currentProvider?.destroy();
-      doc.destroy();
-    };
-  }, [account.hasSession, applySharedCanvasState, collabScope]);
-
-  // Publish item/paper changes to the CRDT map whenever their fingerprint changes.
-  useEffect(() => {
-    if (!account.hasSession) return;
-    if (!isBoardSyncReadyRef.current || !yBoardMapRef.current) return;
-    if (isApplyingRemoteBoardRef.current) return;
-
-    const fingerprint = JSON.stringify({
-      p: placedItems,
-      paper: selectedPaper?.id ?? null,
-    });
-
-    if (fingerprint === lastSyncedItemsFingerprintRef.current) return;
-
-    const timer = globalThis.setTimeout(() => {
-      const nextTs = Date.now();
-      yBoardMapRef.current?.doc?.transact(() => {
-        yBoardMapRef.current?.set("senderId", selfIdRef.current);
-        yBoardMapRef.current?.set("ts", String(nextTs));
-        yBoardMapRef.current?.set("placedItems", JSON.stringify(placedItems));
-        yBoardMapRef.current?.set("selectedPaper", JSON.stringify(selectedPaper ?? null));
-      }, "publish-items");
-
-      lastSyncedItemsFingerprintRef.current = fingerprint;
-      lastAppliedBoardTsRef.current = nextTs;
-    }, 120);
-
-    return () => globalThis.clearTimeout(timer);
-  }, [account.hasSession, placedItems, selectedPaper]);
-
-  // Keep selfIdRef in sync so stroke channel closures always see current value.
-  useEffect(() => {
-    selfIdRef.current = selfArtistId;
-  }, [selfArtistId]);
-
-  useEffect(() => {
-    if (!account.hasSession) return;
-    const supabase = createSupabaseBrowserClient();
-    const ch = supabase
-      .channel(`mochimail-strokes:${collabScope}`, {
-        config: { broadcast: { self: false } },
-      })
-      .on("broadcast", { event: "stroke" }, ({ payload }) => {
-        const data = payload as StrokePayload;
-        if (!data?.artistId || data.artistId === selfIdRef.current) return;
-
-        if (data.isLast) {
-          remoteActiveStrokesRef.current.delete(data.artistId);
-          const drawingCanvas = canvasRef.current?.getCanvas();
-          if (drawingCanvas) {
-            const ctx = drawingCanvas.getContext("2d");
-            if (ctx) {
-              const outline = getStroke(data.pts, {
-                size: data.size,
-                thinning: 0.5,
-                smoothing: 0.5,
-                streamline: 0.4,
-                simulatePressure: false,
-              });
-              const path = strokeToPath2D(outline);
-              ctx.save();
-              ctx.fillStyle = data.color;
-              ctx.fill(path);
-              ctx.restore();
-            }
-          }
-        } else {
-          remoteActiveStrokesRef.current.set(data.artistId, {
-            strokeId: data.strokeId,
-            pts: data.pts,
-            color: data.color,
-            size: data.size,
-          });
-          if (!strokeRafRef.current) {
-            strokeRafRef.current = requestAnimationFrame(renderRemoteStrokes);
-          }
-        }
-      });
-
-    ch.subscribe();
-    strokeChannelRef.current = ch;
-
-    return () => {
-      if (strokeRafRef.current) {
-        cancelAnimationFrame(strokeRafRef.current);
-        strokeRafRef.current = null;
-      }
-      remoteActiveStrokesRef.current.clear();
-      void supabase.removeChannel(ch);
-      strokeChannelRef.current = null;
-    };
-  }, [account.hasSession, collabScope, renderRemoteStrokes]);
+  }, [activeTab, trackCursor, shiftPlacedItems, getViewportCenterWorld]);
 
   const remoteArtists = roomMembers.filter((m) => m.presenceKey !== selfArtistId);
-
-  // selfArtistId is "" on the server but has a real value on the client's first
-  // render (sessionStorage). Skip the self entry until mounted so SSR HTML matches.
   const artistList = mounted
     ? [
-        {
-          id: selfArtistId,
-          name: mail.user.name,
-          color: selfColor,
-          avatarUrl: account.viewer.avatarUrl,
-          username: account.viewer.username,
-          x: 0,
-          y: 0,
-        },
-        ...remoteArtists.map((m) => ({
-          id: m.presenceKey,
-          name: m.name,
-          color: m.color,
-          avatarUrl: m.avatarUrl,
-          username: m.username,
-          x: m.x,
-          y: m.y,
-        })),
+        { id: selfArtistId, name: mail.user.name, color: selfColor, avatarUrl: account.viewer.avatarUrl, username: account.viewer.username, x: 0, y: 0 },
+        ...remoteArtists.map((m) => ({ id: m.presenceKey, name: m.name, color: m.color, avatarUrl: m.avatarUrl, username: m.username, x: m.x, y: m.y })),
       ]
     : [];
 
@@ -847,16 +275,10 @@ export default function Home() {
       <header className="glass-strong shrink-0 px-4 py-2.5">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div
-              className="h-10 w-10 rounded-xl bg-cover bg-center bg-no-repeat"
-              style={{ backgroundImage: "url('/brand-mark.svg')" }}
-            >
-            </div>
+            <div className="h-10 w-10 rounded-xl bg-cover bg-center bg-no-repeat" style={{ backgroundImage: "url('/brand-mark.svg')" }} />
             <div>
               <h1 className="text-base font-bold leading-tight tracking-tight">MochiMail</h1>
-              <p className="hidden text-[10px] tracking-widest sm:block" style={{ color: "var(--muted)" }}>
-                DIGITAL STATIONERY
-              </p>
+              <p className="hidden text-[10px] tracking-widest sm:block" style={{ color: "var(--muted)" }}>DIGITAL STATIONERY</p>
             </div>
           </div>
 
@@ -866,20 +288,14 @@ export default function Home() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
-                style={{
-                  background: activeTab === tab.id ? "var(--surface-hover)" : "transparent",
-                  color: activeTab === tab.id ? "var(--foreground)" : "var(--muted)",
-                }}
+                style={{ background: activeTab === tab.id ? "var(--surface-hover)" : "transparent", color: activeTab === tab.id ? "var(--foreground)" : "var(--muted)" }}
                 aria-current={activeTab === tab.id ? "page" : undefined}
                 aria-label={tab.label}
               >
-                <span>{TAB_ICONS[tab.icon]}</span>
+                <span>{tab.icon}</span>
                 <span className="hidden sm:inline">{tab.label}</span>
                 {tab.id === "mail" && unreadCount > 0 && (
-                  <span
-                    className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
-                    style={{ background: "var(--pink)" }}
-                  >
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white" style={{ background: "var(--pink)" }}>
                     {unreadCount}
                   </span>
                 )}
@@ -888,10 +304,7 @@ export default function Home() {
             <button
               onClick={() => router.push("/rooms")}
               className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
-              style={{
-                background: "transparent",
-                color: "var(--muted)",
-              }}
+              style={{ background: "transparent", color: "var(--muted)" }}
               aria-label="Rooms"
             >
               <span><FiUsers /></span>
@@ -900,16 +313,12 @@ export default function Home() {
             {activeRoomId ? (
               <button
                 onClick={async () => {
-                  const shareUrl = `${globalThis.location.origin}/rooms/${activeRoomId}`;
-                  await navigator.clipboard.writeText(shareUrl);
+                  await navigator.clipboard.writeText(`${globalThis.location.origin}/rooms/${activeRoomId}`);
                   setHeaderCopied(true);
                   setTimeout(() => setHeaderCopied(false), 2000);
                 }}
                 className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
-                style={{
-                  background: headerCopied ? "rgba(52,211,153,0.15)" : "transparent",
-                  color: headerCopied ? "#065f46" : "var(--muted)",
-                }}
+                style={{ background: headerCopied ? "rgba(52,211,153,0.15)" : "transparent", color: headerCopied ? "#065f46" : "var(--muted)" }}
                 aria-label="Share room link"
                 title={`Share: ${globalThis.location?.origin}/rooms/${activeRoomId}`}
               >
@@ -926,7 +335,7 @@ export default function Home() {
           >
             <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)", background: account.viewer.accentColor ?? "rgba(255,255,255,0.92)" }}>
               {account.viewer.avatarUrl ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
+                // eslint-disable-next-line @next/next/no-img-element
                 <img src={account.viewer.avatarUrl} alt={account.viewer.name} className="h-full w-full object-cover" />
               ) : (
                 <span className="text-xs font-bold">{account.hydrated ? account.viewer.name.slice(0, 2).toUpperCase() : "…"}</span>
@@ -934,13 +343,9 @@ export default function Home() {
             </span>
             <div className="hidden text-left sm:block">
               <div className="text-xs font-semibold">{account.hydrated ? account.viewer.name : ""}</div>
-              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
-                {account.hydrated ? account.accountLabel : ""}
-              </div>
+              <div className="text-[10px]" style={{ color: "var(--muted)" }}>{account.hydrated ? account.accountLabel : ""}</div>
               {account.hydrated && account.identityHelp ? (
-                <div className="max-w-64 text-[9px] leading-relaxed" style={{ color: "var(--coral)" }}>
-                  {account.identityHelp}
-                </div>
+                <div className="max-w-64 text-[9px] leading-relaxed" style={{ color: "var(--coral)" }}>{account.identityHelp}</div>
               ) : null}
             </div>
           </button>
@@ -962,11 +367,8 @@ export default function Home() {
         />
       ) : null}
 
-      {/* Studio — stays mounted for canvas persistence */}
-      <div
-        className="relative flex-1 overflow-hidden"
-        style={{ display: activeTab === "studio" ? "flex" : "none" }}
-      >
+      {/* Studio — stays mounted so the canvas is never destroyed */}
+      <div className="relative flex-1 overflow-hidden" style={{ display: activeTab === "studio" ? "flex" : "none" }}>
         <RoomModeBanner
           phase={roomPhase}
           activeRoomId={activeRoomId}
@@ -974,116 +376,88 @@ export default function Home() {
           onJoinWithToken={joinWithToken}
           onOpenRooms={() => router.push("/rooms")}
         />
-        {/* Edge presence indicators — off-screen remote cursors */}
+
+        {/* Edge indicators for off-screen collaborators */}
         {viewSize.w > 0 && remoteArtists.map((member) => {
-            const MARGIN = 32;
-            const canvasX = member.x - worldOffset.x;
-            const canvasY = member.y - worldOffset.y;
-            const vx = canvasX - scrollPos.left;
-            const vy = canvasY - scrollPos.top;
-            const isVisible = vx >= -16 && vx <= viewSize.w + 16 && vy >= -16 && vy <= viewSize.h + 16;
-            if (isVisible) return null;
-            const cx = viewSize.w / 2;
-            const cy = viewSize.h / 2;
-            const dx = vx - cx;
-            const dy = vy - cy;
-            const angle = Math.atan2(dy, dx);
-            let tx = Infinity;
-            if (dx > 0) tx = (viewSize.w - MARGIN - cx) / dx;
-            else if (dx < 0) tx = (MARGIN - cx) / dx;
-            let ty = Infinity;
-            if (dy > 0) ty = (viewSize.h - MARGIN - cy) / dy;
-            else if (dy < 0) ty = (MARGIN - cy) / dy;
-            const t = Math.min(tx, ty);
-            const ex = cx + dx * t;
-            const ey = cy + dy * t;
-            const angleDeg = (angle * 180) / Math.PI;
-            return (
-              <button
-                key={member.presenceKey}
-                onClick={() => jumpToMember(member)}
-                className="btn-smooth absolute z-50 flex flex-col items-center gap-0.5"
-                style={{ left: ex, top: ey, transform: "translate(-50%, -50%)" }}
-                title={`Jump to ${member.name}`}
-              >
-                <span
-                  className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-semibold text-white"
-                  style={{ background: member.color, boxShadow: "0 2px 6px rgba(0,0,0,0.18)" }}
-                >
-                  {member.name}
-                </span>
-                <div
-                  className="flex h-5 w-5 items-center justify-center rounded-full"
-                  style={{ background: member.color, transform: `rotate(${angleDeg}deg)`, boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}
-                >
-                  <svg width="9" height="9" viewBox="-5 -5 10 10" fill="none">
-                    <polygon points="5,0 -3.5,-3.5 -3.5,3.5" fill="white" />
+          const MARGIN = 32;
+          const vx = member.x - worldOffset.x - scrollPos.left;
+          const vy = member.y - worldOffset.y - scrollPos.top;
+          const isVisible = vx >= -16 && vx <= viewSize.w + 16 && vy >= -16 && vy <= viewSize.h + 16;
+          if (isVisible) return null;
+          const cx = viewSize.w / 2;
+          const cy = viewSize.h / 2;
+          const dx = vx - cx;
+          const dy = vy - cy;
+          const angle = Math.atan2(dy, dx);
+          const tx = dx > 0 ? (viewSize.w - MARGIN - cx) / dx : dx < 0 ? (MARGIN - cx) / dx : Infinity;
+          const ty = dy > 0 ? (viewSize.h - MARGIN - cy) / dy : dy < 0 ? (MARGIN - cy) / dy : Infinity;
+          const t = Math.min(tx, ty);
+          return (
+            <button
+              key={member.presenceKey}
+              onClick={() => jumpToMember(member)}
+              className="btn-smooth absolute z-50 flex flex-col items-center gap-0.5"
+              style={{ left: cx + dx * t, top: cy + dy * t, transform: "translate(-50%, -50%)" }}
+              title={`Jump to ${member.name}`}
+            >
+              <span className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-semibold text-white" style={{ background: member.color, boxShadow: "0 2px 6px rgba(0,0,0,0.18)" }}>
+                {member.name}
+              </span>
+              <div className="flex h-5 w-5 items-center justify-center rounded-full" style={{ background: member.color, transform: `rotate(${(angle * 180) / Math.PI}deg)`, boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}>
+                <svg width="9" height="9" viewBox="-5 -5 10 10" fill="none">
+                  <polygon points="5,0 -3.5,-3.5 -3.5,3.5" fill="white" />
+                </svg>
+              </div>
+            </button>
+          );
+        })}
+
+        {/* Scrollable infinite canvas */}
+        <div ref={studioScrollRef} className="h-full w-full overflow-auto">
+          <div className="relative" style={{ width: CANVAS_W, height: CANVAS_H }}>
+            <DrawingCanvas
+              ref={canvasRef}
+              brushSettings={brushSettings}
+              placedItems={placedItems}
+              selectedAsset={selectedAsset}
+              selectedPaper={selectedPaper ?? null}
+              customFonts={customFonts}
+              onDrawingCommit={handleDrawingCommit}
+              onDrawingProgress={handleDrawingProgress}
+              onStrokeUpdate={handleStrokeUpdate}
+              onPlaceAsset={(asset, x, y) => placeItem(asset, x, y)}
+              onAddTextItem={(item) => placeTextItem(item.text ?? "Text", item.x, item.y, item.textColor ?? brushSettings.color, item.textSize ?? 32, item.textFont ?? '"Space Mono", monospace')}
+              onUpdatePlacedItem={updatePlacedItem}
+              backgroundOffsetX={worldOffset.x}
+              backgroundOffsetY={worldOffset.y}
+              width={CANVAS_W}
+              height={CANVAS_H}
+            />
+            <canvas
+              ref={remoteStrokeCanvasRef}
+              width={CANVAS_W}
+              height={CANVAS_H}
+              className="pointer-events-none absolute inset-0"
+              style={{ width: "100%", height: "100%" }}
+            />
+            {remoteArtists.map((member) => {
+              const x = member.x - worldOffset.x;
+              const y = member.y - worldOffset.y;
+              if (x < -80 || y < -80 || x > CANVAS_W + 80 || y > CANVAS_H + 80) return null;
+              return (
+                <div key={member.presenceKey} className="pointer-events-none absolute" style={{ left: x, top: y }}>
+                  <svg width="14" height="18" viewBox="0 0 14 18" fill="none" style={{ display: "block" }}>
+                    <path d="M1 1L1 14.5L4.2 10.8L6.6 17L8.8 16.1L6.3 9.8L11.2 9.8Z" fill={member.color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
                   </svg>
+                  <span className="absolute left-4 top-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: member.color, boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}>
+                    {member.name}
+                  </span>
                 </div>
-              </button>
-            );
-          })}
-          {/* Scrollable canvas area */}
-          <div ref={studioScrollRef} className="h-full w-full overflow-auto">
-            <div className="relative" style={{ width: CANVAS_W, height: CANVAS_H }}>
-              <DrawingCanvas
-                ref={canvasRef}
-                brushSettings={brushSettings}
-                placedItems={placedItems}
-                selectedAsset={selectedAsset}
-                selectedPaper={selectedPaper ?? null}
-                customFonts={customFonts}
-                onDrawingCommit={handleDrawingCommit}
-                onDrawingProgress={handleDrawingProgress}
-                onStrokeUpdate={handleStrokeUpdate}
-                onPlaceAsset={(asset, x, y) => placeItem(asset, x, y)}
-                onAddTextItem={(item) => placeTextItem(item.text ?? "Text", item.x, item.y, item.textColor ?? brushSettings.color, item.textSize ?? 32, item.textFont ?? '"Space Mono", monospace')}
-                onUpdatePlacedItem={updatePlacedItem}
-                backgroundOffsetX={worldOffset.x}
-                backgroundOffsetY={worldOffset.y}
-                width={CANVAS_W}
-                height={CANVAS_H}
-              />
-              <canvas
-                ref={remoteStrokeCanvasRef}
-                width={CANVAS_W}
-                height={CANVAS_H}
-                className="pointer-events-none absolute inset-0"
-                style={{ width: "100%", height: "100%" }}
-              />
-              {remoteArtists.map((member) => {
-                const x = member.x - worldOffset.x;
-                const y = member.y - worldOffset.y;
-                if (x < -80 || y < -80 || x > CANVAS_W + 80 || y > CANVAS_H + 80) {
-                  return null;
-                }
-                return (
-                  <div
-                    key={member.presenceKey}
-                    className="pointer-events-none absolute"
-                    style={{ left: x, top: y }}
-                  >
-                    <svg width="14" height="18" viewBox="0 0 14 18" fill="none" style={{ display: "block" }}>
-                      <path
-                        d="M1 1L1 14.5L4.2 10.8L6.6 17L8.8 16.1L6.3 9.8L11.2 9.8Z"
-                        fill={member.color}
-                        stroke="white"
-                        strokeWidth="1.5"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <span
-                      className="absolute left-4 top-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-                      style={{ background: member.color, boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}
-                    >
-                      {member.name}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+              );
+            })}
           </div>
+        </div>
+
         <StudioToolbar
           brushSettings={brushSettings}
           onBrushChange={handleBrushChange}
@@ -1108,13 +482,7 @@ export default function Home() {
           onSaveSticker={addSticker}
           onSaveWashi={addWashiTape}
           onSaveCustomFont={addCustomFont}
-          collaborators={artistList.map((artist) => ({
-            id: artist.id,
-            name: artist.name,
-            color: artist.color,
-            avatarUrl: artist.avatarUrl,
-            username: artist.username,
-          }))}
+          collaborators={artistList.map((a) => ({ id: a.id, name: a.name, color: a.color, avatarUrl: a.avatarUrl, username: a.username }))}
           selfCollaboratorId={selfArtistId}
           onJumpToCollaborator={(artistId) => {
             const member = roomMembers.find((m) => m.presenceKey === artistId);
@@ -1132,71 +500,35 @@ export default function Home() {
           {mailView === "compose" ? (
             <MailComposePanel
               senderName={mail.user.name}
-              stickers={stickers}
-              washiTapes={washiTapes}
-              papers={papers}
-              stamps={stamps}
-              envelopes={envelopes}
-              customFonts={customFonts}
-              onSaveSticker={addSticker}
-              onSaveWashi={addWashiTape}
-              onSavePaper={addPaper}
-              onSaveStamp={addStamp}
-              onSaveEnvelope={addEnvelope}
-              onSaveCustomFont={addCustomFont}
-              onDeleteSticker={removeSticker}
-              onDeleteWashi={removeWashiTape}
-              onDeletePaper={removePaper}
-              onDeleteStamp={removeStamp}
-              onDeleteEnvelope={removeEnvelope}
-              onDeleteCustomFont={removeCustomFont}
+              stickers={stickers} washiTapes={washiTapes} papers={papers} stamps={stamps} envelopes={envelopes} customFonts={customFonts}
+              onSaveSticker={addSticker} onSaveWashi={addWashiTape} onSavePaper={addPaper} onSaveStamp={addStamp} onSaveEnvelope={addEnvelope} onSaveCustomFont={addCustomFont}
+              onDeleteSticker={removeSticker} onDeleteWashi={removeWashiTape} onDeletePaper={removePaper} onDeleteStamp={removeStamp} onDeleteEnvelope={removeEnvelope} onDeleteCustomFont={removeCustomFont}
               onBack={() => setMailView("inbox")}
-              onSend={(payload) => {
-                mail.sendLetter(payload);
-              }}
+              onSend={(payload) => { mail.sendLetter(payload); }}
             />
           ) : (
             <MailboxPanel
-              inbox={mail.inbox}
-              sent={mail.sent}
-              userId={mail.user.id}
-              isDelivered={mail.isDelivered}
-              getDeliveryProgress={mail.getDeliveryProgress}
-              getTimeRemaining={mail.getTimeRemaining}
-              markAsRead={mail.markAsRead}
-              onCompose={() => setMailView("compose")}
+              inbox={mail.inbox} sent={mail.sent} userId={mail.user.id}
+              isDelivered={mail.isDelivered} getDeliveryProgress={mail.getDeliveryProgress} getTimeRemaining={mail.getTimeRemaining}
+              markAsRead={mail.markAsRead} onCompose={() => setMailView("compose")}
             />
           )}
         </div>
       </div>
 
       {/* Store */}
-      <div
-        className="flex-1 overflow-y-auto"
-        style={{ display: activeTab === "store" ? "block" : "none" }}
-      >
+      <div className="flex-1 overflow-y-auto" style={{ display: activeTab === "store" ? "block" : "none" }}>
         <div className="mx-auto max-w-7xl p-3 sm:p-4">
           <StoreView
-            storeItems={store.storeItems}
-            filterType={store.filterType}
-            setFilterType={store.setFilterType}
-            searchQuery={store.searchQuery}
-            setSearchQuery={store.setSearchQuery}
-            isInCollection={store.isInCollection}
-            addToCollection={store.addToCollection}
-            removeFromCollection={store.removeFromCollection}
+            storeItems={store.storeItems} filterType={store.filterType} setFilterType={store.setFilterType}
+            searchQuery={store.searchQuery} setSearchQuery={store.setSearchQuery}
+            isInCollection={store.isInCollection} addToCollection={store.addToCollection} removeFromCollection={store.removeFromCollection}
             onAddToAssets={handleStoreAddToAssets}
-            userStickers={stickers}
-            userWashiTapes={washiTapes}
-            userPapers={papers}
-            userStamps={stamps}
-            userEnvelopes={envelopes}
-            userFonts={customFonts}
+            userStickers={stickers} userWashiTapes={washiTapes} userPapers={papers} userStamps={stamps} userEnvelopes={envelopes} userFonts={customFonts}
             onPublish={handleStorePublish}
           />
         </div>
       </div>
-
     </div>
   );
 }
