@@ -33,10 +33,7 @@ const BUILTIN_TEXT_FONTS = [
   { value: '"Brush Script MT", cursive', label: "Brush Script" },
 ] as const;
 
-const GIF_PROVIDER = (process.env.NEXT_PUBLIC_GIF_PROVIDER ?? "giphy").toLowerCase();
-const GIFAPI_BASE_URL = process.env.NEXT_PUBLIC_GIFAPI_BASE_URL ?? "https://api.gifapi.com/v1";
-const GIFAPI_KEY = process.env.NEXT_PUBLIC_GIFAPI_KEY ?? "";
-const GIPHY_KEY = process.env.GIPHY_API_KEY ?? "";
+const GIF_SEARCH_URL = "/api/gifs/search";
 
 type ComposeSurface = "letter" | "envelope";
 type ToolDrawer = "stickers" | "washi" | "paper" | "envelopes" | "stamps" | "gifs" | "create" | null;
@@ -286,33 +283,22 @@ export default function MailComposePanel({
   }, [activeCanvasRef, setActivePlacedItems]);
 
   const searchGifs = useCallback(async () => {
-    const query = gifQuery.trim();
-    if (!query) {
-      setGifError("Enter a search term first.");
-      return;
-    }
-    if (GIF_PROVIDER === "giphy" && !GIPHY_KEY) {
-      setGifError("Missing GIPHY_API_KEY.");
-      return;
-    }
-    if (GIF_PROVIDER !== "giphy" && !GIFAPI_KEY) {
-      setGifError("Missing GIFAPI_KEY.");
-      return;
-    }
-
+    const q = gifQuery.trim();
+    if (!q) { setGifResults([]); return; }
     setGifLoading(true);
     setGifError(null);
     try {
-      const url = GIF_PROVIDER === "giphy"
-        ? `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(GIPHY_KEY)}&q=${encodeURIComponent(query)}&limit=18&rating=pg`
-        : `${GIFAPI_BASE_URL}/gifs/search?api_key=${encodeURIComponent(GIFAPI_KEY)}&q=${encodeURIComponent(query)}&limit=18`;
-      const response = await fetch(url);
-      const payload = await response.json();
-      const results = normalizeGifResults(payload);
-      setGifResults(results);
-      if (results.length === 0) setGifError("No GIFs found for that search.");
-    } catch {
-      setGifError("Could not fetch GIFs right now.");
+      const res = await fetch(`${GIF_SEARCH_URL}?q=${encodeURIComponent(q)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error((json as { error?: string }).error ?? "search_failed");
+      const mapped = normalizeGifResults(json);
+      setGifResults(mapped);
+      if (mapped.length === 0) setGifError("No GIFs found. Try a different search term.");
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "unknown";
+      if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY not set on the server.");
+      else if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY not set on the server.");
+      else setGifError("GIF search failed.");
     } finally {
       setGifLoading(false);
     }
