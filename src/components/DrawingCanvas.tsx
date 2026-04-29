@@ -11,18 +11,44 @@ import React, {
 } from "react";
 import { getStroke } from "perfect-freehand";
 import { strokeToPath2D } from "@/lib/canvas/strokeUtils";
-import { BrushSettings, CustomFont, PaperBackground, PlacedSticker, Sticker, WashiTape } from "@/types";
+import {
+  BrushSettings,
+  CustomFont,
+  PaperBackground,
+  PlacedSticker,
+  Sticker,
+  WashiTape,
+} from "@/types";
+
+// ─── Public handle (exposed via ref) ─────────────────────────────────────────
 
 export interface DrawingCanvasHandle {
   getCanvas: () => HTMLCanvasElement | null;
   getCanvasImageData: () => string | null;
-  setCanvasImageData: (imageData: string | null, options?: { shiftX?: number; shiftY?: number }) => void;
+  setCanvasImageData: (
+    imageData: string | null,
+    options?: { shiftX?: number; shiftY?: number },
+  ) => void;
   clearCanvas: () => void;
   undo: () => void;
   redo: () => void;
   getCompositeCanvas: () => HTMLCanvasElement;
   shiftContent: (dx: number, dy: number) => void;
+  /** Called after the initial stroke replay so undo has a clean baseline. */
+  setSessionBase?: () => void;
 }
+
+// ─── Local stroke entry (lightweight — no pixel data) ────────────────────────
+
+type LocalStrokeEntry = {
+  id: string;
+  pts: [number, number, number][];
+  color: string;
+  size: number;
+  tool: "pen" | "eraser";
+};
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface DrawingCanvasProps {
   brushSettings: BrushSettings;
@@ -39,11 +65,36 @@ interface DrawingCanvasProps {
   height?: number;
   fillContainer?: boolean;
   backgroundMode?: "tile" | "cover";
-  onDrawingCommit?: () => void;
-  onDrawingProgress?: () => void;
-  onStrokeUpdate?: (pts: [number, number, number][], color: string, size: number, isLast: boolean) => void;
+  /**
+   * Fired every ~16 ms while drawing and once with isLast=true on pointer-up.
+   * The sync layer uses this to broadcast live strokes to collaborators.
+   */
+  onStrokeUpdate?: (
+    strokeId: string,
+    pts: [number, number, number][],
+    color: string,
+    size: number,
+    tool: "pen" | "eraser",
+    isLast: boolean,
+  ) => void;
+  /**
+   * Fired once when a stroke is fully committed (pointer-up).
+   * The sync layer uses this to persist the stroke to the DB immediately.
+   */
+  onStrokeComplete?: (
+    strokeId: string,
+    pts: [number, number, number][],
+    color: string,
+    size: number,
+    tool: "pen" | "eraser",
+  ) => void;
+  /** Fired when the user undoes — sync layer should delete the stroke from DB. */
+  onUndoStroke?: (strokeId: string) => void;
+  /** Fired when the user redoes — sync layer should re-insert the stroke to DB. */
+  onRedoStroke?: (stroke: LocalStrokeEntry) => void;
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
 
 const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
   (
@@ -62,37 +113,99 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       height = 800,
       fillContainer = false,
       backgroundMode = "tile",
-      onDrawingCommit,
-      onDrawingProgress,
       onStrokeUpdate,
+      onStrokeComplete,
+      onUndoStroke,
+      onRedoStroke,
     },
-    ref
+    ref,
   ) => {
+    // ── Canvas refs ──────────────────────────────────────────────────────────
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const backgroundCanvasRef = useRef<HTMLCanvasElement>(null);
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+    const activeStrokeCanvasRef = useRef<HTMLCanvasElement>(null);
+
+    // ── Drawing state ────────────────────────────────────────────────────────
     const isDrawing = useRef(false);
     const activeStrokePointsRef = useRef<[number, number, number][]>([]);
     const preStrokeSnapshotRef = useRef<ImageData | null>(null);
     const lastStrokeBroadcastAtRef = useRef(0);
-    // Washi tape drag refs
+    const strokeDirtyRef = useRef(false);
+    const frozenPointCountRef = useRef(0);
+    const currentStrokeIdRef = useRef<string>("");
+
+    // ── Undo / redo (stroke-based, no giant ImageData arrays) ────────────────
+    // sessionBaseRef: GPU-backed snapshot of the canvas at session-start (after
+    // replaying remote strokes). Only ONE bitmap is held instead of 30×115 MB.
+    const sessionBaseRef = useRef<ImageBitmap | null>(null);
+    const localStrokesRef = useRef<LocalStrokeEntry[]>([]);
+    const undoneStrokesRef = useRef<LocalStrokeEntry[]>([]);
+
+    // ── Washi / select drag refs ─────────────────────────────────────────────
     const washiStartRef = useRef<{ x: number; y: number } | null>(null);
     const preWashiStateRef = useRef<ImageData | null>(null);
     const changedDuringPointerRef = useRef(false);
-    const [history, setHistory] = useState<ImageData[]>([]);
-    const [redoHistory, setRedoHistory] = useState<ImageData[]>([]);
-    const [textOverlay, setTextOverlay] = useState<{ id: string; x: number; y: number; value: string } | null>(null);
+    const selectionDragRef = useRef<{
+      id: string;
+      offsetX: number;
+      offsetY: number;
+    } | null>(null);
+
+    // ── Misc ─────────────────────────────────────────────────────────────────
+    const [textOverlay, setTextOverlay] = useState<{
+      id: string;
+      x: number;
+      y: number;
+      value: string;
+    } | null>(null);
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-    const selectionDragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
     const assetImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const paperImageRef = useRef<HTMLImageElement | null>(null);
     const rafIdRef = useRef<number | null>(null);
+    // Stable ref so handlePointerMove can call handlePointerUp without a dep cycle
+    const handlePointerUpRef = useRef<((e?: React.PointerEvent<HTMLCanvasElement>) => void) | null>(null);
 
-    const renderActiveStroke = useCallback(() => {
+    // Full accumulated points for the current stroke — used for broadcasting and DB
+    // persistence.  activeStrokePointsRef is trimmed by the freeze algorithm (for
+    // render perf), so we keep a separate unbounded copy here.
+    const allStrokePointsRef = useRef<[number, number, number][]>([]);
+    const lastBroadcastIndexRef = useRef(0);
+
+    // ── Restore session base + replay local strokes (for undo/redo) ──────────
+    const restoreAndReplay = useCallback(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (sessionBaseRef.current) {
+        ctx.drawImage(sessionBaseRef.current, 0, 0);
+      }
+      for (const stroke of localStrokesRef.current) {
+        const isEraser = stroke.tool === "eraser";
+        const outline = getStroke(stroke.pts, {
+          size: isEraser ? stroke.size * 2.5 : stroke.size,
+          thinning: isEraser ? 0 : 0.5,
+          smoothing: 0.5,
+          streamline: 0.4,
+          simulatePressure: false,
+        });
+        if (!outline.length) continue;
+        ctx.save();
+        if (isEraser) {
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.fillStyle = "rgba(0,0,0,1)";
+        } else {
+          ctx.fillStyle = stroke.color;
+        }
+        ctx.fill(strokeToPath2D(outline));
+        ctx.restore();
+      }
+    }, []);
+
+    // ── Active stroke rendering (RAF loop) ───────────────────────────────────
+    const renderActiveStroke = useCallback(() => {
       const pts = activeStrokePointsRef.current;
       if (!pts.length) return;
 
@@ -109,23 +222,79 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
       const path = strokeToPath2D(stroke);
 
-      if (preStrokeSnapshotRef.current) {
-        ctx.putImageData(preStrokeSnapshotRef.current, 0, 0);
-      }
+      if (isEraser) {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        if (preStrokeSnapshotRef.current) {
+          ctx.putImageData(preStrokeSnapshotRef.current, 0, 0);
+        }
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.fillStyle = "rgba(0,0,0,1)";
+        ctx.fill(path);
+        ctx.restore();
+      } else {
+        const activeCanvas = activeStrokeCanvasRef.current;
+        if (!activeCanvas) return;
+        const activeCtx = activeCanvas.getContext("2d");
+        if (!activeCtx) return;
 
-      ctx.save();
-      ctx.globalCompositeOperation = isEraser ? "destination-out" : "source-over";
-      ctx.fillStyle = isEraser ? "rgba(0,0,0,1)" : color;
-      ctx.fill(path);
-      ctx.restore();
+        // Point-freeze algorithm: cap getStroke() work to ~14 pts, preventing
+        // O(n²) lag on long strokes by committing the stable head incrementally.
+        const FREEZE_AT = 10;
+        const LIVE_WINDOW = 4;
+        const OVERLAP = 8;
+
+        const uncommitted = pts.length - frozenPointCountRef.current;
+        if (uncommitted > FREEZE_AT + LIVE_WINDOW) {
+          const newFreezeEnd = pts.length - LIVE_WINDOW;
+          const headOutline = getStroke(pts.slice(0, newFreezeEnd), {
+            size,
+            thinning: 0.5,
+            smoothing: 0.5,
+            streamline: 0.4,
+            simulatePressure: false,
+            last: false,
+          });
+          const mainCtx = canvasRef.current?.getContext("2d");
+          if (mainCtx) {
+            mainCtx.save();
+            mainCtx.fillStyle = color;
+            mainCtx.fill(strokeToPath2D(headOutline));
+            mainCtx.restore();
+          }
+          activeStrokePointsRef.current = pts.slice(newFreezeEnd - OVERLAP);
+          frozenPointCountRef.current = OVERLAP;
+        }
+
+        const livePts = activeStrokePointsRef.current;
+        const liveStart = Math.max(0, frozenPointCountRef.current - OVERLAP);
+        const liveOutline = getStroke(livePts.slice(liveStart), {
+          size,
+          thinning: 0.5,
+          smoothing: 0.5,
+          streamline: 0.4,
+          simulatePressure: false,
+        });
+        activeCtx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
+        activeCtx.save();
+        activeCtx.fillStyle = color;
+        activeCtx.fill(strokeToPath2D(liveOutline));
+        activeCtx.restore();
+      }
     }, [brushSettings]);
 
     const renderLoop = useCallback(() => {
-      renderActiveStroke();
+      if (strokeDirtyRef.current) {
+        strokeDirtyRef.current = false;
+        renderActiveStroke();
+      }
       rafIdRef.current = requestAnimationFrame(renderLoop);
     }, [renderActiveStroke]);
 
-    // Preload images for placed items
+    // ── Preload asset images ──────────────────────────────────────────────────
     useEffect(() => {
       placedItems.forEach((item) => {
         if (!assetImagesRef.current.has(item.id)) {
@@ -139,7 +308,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [placedItems]);
 
-    // Preload selected asset image (needed for washi canvas pattern)
     useEffect(() => {
       if (selectedAsset && !assetImagesRef.current.has(selectedAsset.id)) {
         const img = new Image();
@@ -149,6 +317,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       }
     }, [selectedAsset]);
 
+    // ── Overlay rendering (stickers / text) ──────────────────────────────────
     const renderOverlay = useCallback(() => {
       const overlay = overlayCanvasRef.current;
       if (!overlay) return;
@@ -159,15 +328,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       const wrapLines = (text: string, maxWidth: number, font: string): string[] => {
         ctx.font = font;
         const lines: string[] = [];
-        const hardLines = text.split("\n");
-        for (const hardLine of hardLines) {
+        for (const hardLine of text.split("\n")) {
           const words = hardLine.split(" ");
-          if (words.length === 0) {
-            lines.push("");
-            continue;
-          }
+          if (!words.length) { lines.push(""); continue; }
           let current = words[0] ?? "";
-          for (let i = 1; i < words.length; i += 1) {
+          for (let i = 1; i < words.length; i++) {
             const next = `${current} ${words[i]}`;
             if (ctx.measureText(next).width <= maxWidth) {
               current = next;
@@ -187,7 +352,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           const fontFamily = item.textFont?.startsWith("custom:")
             ? '"Space Mono", monospace'
             : (item.textFont ?? '"Space Mono", monospace');
-          const lines = wrapLines(item.text ?? "", Math.max(40, item.width - 10), `${fontSize}px ${fontFamily}`);
+          const lines = wrapLines(
+            item.text ?? "",
+            Math.max(40, item.width - 10),
+            `${fontSize}px ${fontFamily}`,
+          );
           ctx.save();
           ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
           ctx.rotate((item.rotation * Math.PI) / 180);
@@ -206,7 +375,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           ctx.globalAlpha = 1;
           return;
         }
-
         if (item.isAnimated) return;
         const img = assetImagesRef.current.get(item.id);
         if (img?.complete) {
@@ -221,28 +389,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       });
     }, [placedItems]);
 
-    const pointHitsItem = useCallback((x: number, y: number, item: PlacedSticker) => {
-      const centerX = item.x + item.width / 2;
-      const centerY = item.y + item.height / 2;
-      const angle = (-item.rotation * Math.PI) / 180;
-      const dx = x - centerX;
-      const dy = y - centerY;
-      const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
-      const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
-      return (
-        localX >= -item.width / 2 &&
-        localX <= item.width / 2 &&
-        localY >= -item.height / 2 &&
-        localY <= item.height / 2
-      );
-    }, []);
+    useEffect(() => { renderOverlay(); }, [renderOverlay]);
 
+    // ── Background rendering ──────────────────────────────────────────────────
     const renderBackground = useCallback(() => {
       const background = backgroundCanvasRef.current;
       if (!background) return;
       const ctx = background.getContext("2d");
       if (!ctx) return;
-
       ctx.imageSmoothingEnabled = false;
       ctx.clearRect(0, 0, background.width, background.height);
 
@@ -253,7 +407,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           const srcH = paper.naturalHeight || paper.height || background.height;
           const srcRatio = srcW / srcH;
           const dstRatio = background.width / background.height;
-
           let drawW = background.width;
           let drawH = background.height;
           let offsetX = 0;
@@ -267,30 +420,30 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             drawH = drawW / srcRatio;
             offsetY = (background.height - drawH) / 2;
           }
-
           ctx.drawImage(paper, offsetX, offsetY, drawW, drawH);
           return;
         }
-
         const tileW = paper.naturalWidth || paper.width || background.width;
         const tileH = paper.naturalHeight || paper.height || background.height;
         const startX = -((((backgroundOffsetX % tileW) + tileW) % tileW));
         const startY = -((((backgroundOffsetY % tileH) + tileH) % tileH));
-
         for (let y = startY; y < background.height; y += tileH) {
           for (let x = startX; x < background.width; x += tileW) {
             ctx.drawImage(paper, x, y, tileW, tileH);
           }
         }
       } else {
-        // Lined notebook paper
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, background.width, background.height);
         ctx.strokeStyle = "rgba(175, 165, 200, 0.28)";
         ctx.lineWidth = 1;
         const lineSpacing = 32;
         const lineOffset = ((backgroundOffsetY % lineSpacing) + lineSpacing) % lineSpacing;
-        for (let y = lineSpacing - lineOffset; y < background.height + lineSpacing; y += lineSpacing) {
+        for (
+          let y = lineSpacing - lineOffset;
+          y < background.height + lineSpacing;
+          y += lineSpacing
+        ) {
           ctx.beginPath();
           ctx.moveTo(0, Math.round(y) + 0.5);
           ctx.lineTo(background.width, Math.round(y) + 0.5);
@@ -298,10 +451,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         }
       }
     }, [selectedPaper, backgroundOffsetX, backgroundOffsetY, backgroundMode]);
-
-    useEffect(() => {
-      renderOverlay();
-    }, [renderOverlay]);
 
     useEffect(() => {
       if (!selectedPaper) {
@@ -323,18 +472,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       renderBackground();
     }, [width, height, renderBackground, backgroundOffsetX, backgroundOffsetY]);
 
-    const saveToHistory = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      setHistory((prev) => [
-        ...prev.slice(-30),
-        ctx.getImageData(0, 0, canvas.width, canvas.height),
-      ]);
-      setRedoHistory([]);
-    }, []);
-
+    // ── Input helpers ─────────────────────────────────────────────────────────
     const getCanvasPoint = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current;
@@ -346,16 +484,34 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           pressure: e.pressure || 0.5,
         };
       },
-      []
+      [],
     );
 
-    // Paint washi tape as a tiled strip from `from` to `to`
+    const pointHitsItem = useCallback(
+      (x: number, y: number, item: PlacedSticker) => {
+        const centerX = item.x + item.width / 2;
+        const centerY = item.y + item.height / 2;
+        const angle = (-item.rotation * Math.PI) / 180;
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
+        const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
+        return (
+          localX >= -item.width / 2 &&
+          localX <= item.width / 2 &&
+          localY >= -item.height / 2 &&
+          localY <= item.height / 2
+        );
+      },
+      [],
+    );
+
     const paintWashiStrip = useCallback(
       (
         ctx: CanvasRenderingContext2D,
         from: { x: number; y: number },
         to: { x: number; y: number },
-        tape: Sticker | WashiTape
+        tape: Sticker | WashiTape,
       ) => {
         const img = assetImagesRef.current.get(tape.id);
         if (!img?.complete) return;
@@ -375,29 +531,33 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         }
         ctx.restore();
       },
-      []
+      [],
     );
 
+    // ── Pointer handlers ──────────────────────────────────────────────────────
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         e.preventDefault();
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
         } catch {
-          // Ignore capture failures on unsupported browsers.
+          // ignore on unsupported browsers
         }
         const point = getCanvasPoint(e);
 
-        // Text: click existing text to edit, or create a new text block
         if (brushSettings.tool === "text") {
-          const target = [...placedItems].reverse().find((item) => pointHitsItem(point.x, point.y, item));
+          const target = [...placedItems]
+            .reverse()
+            .find((item) => pointHitsItem(point.x, point.y, item));
           if (target?.type === "text") {
             setSelectedItemId(target.id);
             setTextOverlay({ id: target.id, x: target.x, y: target.y, value: target.text ?? "" });
             return;
           }
-
-          const textSize = Math.max(12, brushSettings.textSize ?? Math.max(14, brushSettings.size * 3));
+          const textSize = Math.max(
+            12,
+            brushSettings.textSize ?? Math.max(14, brushSettings.size * 3),
+          );
           const textFont = brushSettings.textFont ?? '"Space Mono", monospace';
           const newItem: PlacedSticker = {
             id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
@@ -415,15 +575,21 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             textSize,
             textFont,
           };
-
           const created = onAddTextItem?.(newItem) ?? newItem;
           setSelectedItemId(created.id);
-          setTextOverlay({ id: created.id, x: created.x, y: created.y, value: created.text ?? "" });
+          setTextOverlay({
+            id: created.id,
+            x: created.x,
+            y: created.y,
+            value: created.text ?? "",
+          });
           return;
         }
 
         if (brushSettings.tool === "select") {
-          const target = [...placedItems].reverse().find((item) => pointHitsItem(point.x, point.y, item));
+          const target = [...placedItems]
+            .reverse()
+            .find((item) => pointHitsItem(point.x, point.y, item));
           if (!target) {
             setSelectedItemId(null);
             selectionDragRef.current = null;
@@ -439,44 +605,51 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           return;
         }
 
-        // Sticker: click to place
         if (brushSettings.tool === "sticker" && selectedAsset) {
           onPlaceAsset(
             selectedAsset,
             point.x - selectedAsset.width / 2,
-            point.y - selectedAsset.height / 2
+            point.y - selectedAsset.height / 2,
           );
           return;
         }
 
-        // Washi: drag to paint a strip directly onto the canvas
         if (brushSettings.tool === "washi" && selectedAsset) {
-          saveToHistory();
           changedDuringPointerRef.current = false;
           const canvas = canvasRef.current;
           if (!canvas) return;
           const ctx = canvas.getContext("2d");
           if (!ctx) return;
-          preWashiStateRef.current = ctx.getImageData(
-            0,
-            0,
-            canvas.width,
-            canvas.height
-          );
+          preWashiStateRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
           washiStartRef.current = { x: point.x, y: point.y };
           isDrawing.current = true;
           return;
         }
 
-        // Normal drawing / erasing
-        saveToHistory();
-        const drawCtx = canvasRef.current?.getContext("2d");
-        if (drawCtx && canvasRef.current) {
-          preStrokeSnapshotRef.current = drawCtx.getImageData(
-            0, 0, canvasRef.current.width, canvasRef.current.height
-          );
+        // Pen / eraser — generate a fresh stroke ID
+        currentStrokeIdRef.current = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        frozenPointCountRef.current = 0;
+
+        if (brushSettings.tool === "eraser") {
+          const drawCtx = canvasRef.current?.getContext("2d");
+          if (drawCtx && canvasRef.current) {
+            preStrokeSnapshotRef.current = drawCtx.getImageData(
+              0,
+              0,
+              canvasRef.current.width,
+              canvasRef.current.height,
+            );
+          }
+        } else {
+          preStrokeSnapshotRef.current = null;
+          const ac = activeStrokeCanvasRef.current;
+          if (ac) ac.getContext("2d")?.clearRect(0, 0, ac.width, ac.height);
         }
+
         activeStrokePointsRef.current = [[point.x, point.y, point.pressure]];
+        allStrokePointsRef.current = [[point.x, point.y, point.pressure]];
+        lastBroadcastIndexRef.current = 0;
+        strokeDirtyRef.current = true;
         isDrawing.current = true;
         changedDuringPointerRef.current = true;
         if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
@@ -490,32 +663,26 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         brushSettings.tool,
         brushSettings.textSize,
         brushSettings.textFont,
+        brushSettings.color,
+        brushSettings.size,
         onAddTextItem,
         onPlaceAsset,
-        saveToHistory,
         renderLoop,
-      ]
+      ],
     );
 
     const handlePointerMove = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         if (!isDrawing.current) return;
-        // On iPadOS, pointerup can fail to fire when Apple Pencil transitions from
-        // touching to hovering. Detect hover (pen with no buttons pressed) and end
-        // the stroke to prevent ghost lines connecting separate strokes.
+        // Apple Pencil hover detection — end stroke to prevent ghost lines
         if (e.pointerType === "pen" && e.buttons === 0) {
-          handlePointerUp(e);
+          handlePointerUpRef.current?.(e);
           return;
         }
         e.preventDefault();
         const point = getCanvasPoint(e);
 
-        // Live washi preview: restore pre-washi state and redraw strip
-        if (
-          brushSettings.tool === "select" &&
-          selectionDragRef.current &&
-          onUpdatePlacedItem
-        ) {
+        if (brushSettings.tool === "select" && selectionDragRef.current && onUpdatePlacedItem) {
           const drag = selectionDragRef.current;
           onUpdatePlacedItem(drag.id, {
             x: point.x - drag.offsetX,
@@ -535,17 +702,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           const ctx = canvas.getContext("2d");
           if (!ctx) return;
           ctx.putImageData(preWashiStateRef.current, 0, 0);
-          paintWashiStrip(
-            ctx,
-            washiStartRef.current,
-            { x: point.x, y: point.y },
-            selectedAsset
-          );
+          paintWashiStrip(ctx, washiStartRef.current, { x: point.x, y: point.y }, selectedAsset);
           changedDuringPointerRef.current = true;
-          onDrawingProgress?.();
           return;
         }
 
+        // Collect coalesced events for smooth high-frequency input
         const events =
           typeof e.nativeEvent.getCoalescedEvents === "function"
             ? e.nativeEvent.getCoalescedEvents()
@@ -553,31 +715,42 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
         const canvas = canvasRef.current;
         if (canvas) {
-          // Hoist getBoundingClientRect out of the loop — one layout read per move event.
+          // Hoist getBoundingClientRect outside the loop (one layout read per move)
           const rect = canvas.getBoundingClientRect();
           const scaleX = canvas.width / rect.width;
           const scaleY = canvas.height / rect.height;
           for (const ev of events) {
-            activeStrokePointsRef.current.push([
+            const pt: [number, number, number] = [
               (ev.clientX - rect.left) * scaleX,
               (ev.clientY - rect.top) * scaleY,
               ev.pressure || 0.5,
-            ]);
+            ];
+            activeStrokePointsRef.current.push(pt);
+            allStrokePointsRef.current.push(pt); // unbounded — used for sync
           }
         }
 
+        strokeDirtyRef.current = true;
         changedDuringPointerRef.current = true;
-        onDrawingProgress?.();
 
+        // Throttle broadcast to ~60 fps; send only the NEW points since last
+        // broadcast (delta) so remote users accumulate the full stroke.
         const now = performance.now();
         if (now - lastStrokeBroadcastAtRef.current >= 16) {
           lastStrokeBroadcastAtRef.current = now;
-          onStrokeUpdate?.(
-            activeStrokePointsRef.current,
-            brushSettings.color,
-            brushSettings.size,
-            false
-          );
+          const tool = brushSettings.tool === "eraser" ? "eraser" : "pen";
+          const deltaPts = allStrokePointsRef.current.slice(lastBroadcastIndexRef.current);
+          lastBroadcastIndexRef.current = allStrokePointsRef.current.length;
+          if (deltaPts.length > 0) {
+            onStrokeUpdate?.(
+              currentStrokeIdRef.current,
+              deltaPts,
+              brushSettings.color,
+              brushSettings.size,
+              tool,
+              false,
+            );
+          }
         }
       },
       [
@@ -587,100 +760,125 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         selectedAsset,
         onUpdatePlacedItem,
         paintWashiStrip,
-        onDrawingProgress,
         onStrokeUpdate,
-      ]
+        getCanvasPoint,
+      ],
     );
 
-    const handlePointerUp = useCallback((e?: React.PointerEvent<HTMLCanvasElement>) => {
-      if (e) {
-        try {
-          e.currentTarget.releasePointerCapture(e.pointerId);
-        } catch {
-          // Ignore release failures when capture is not active.
+    const handlePointerUp = useCallback(
+      (e?: React.PointerEvent<HTMLCanvasElement>) => {
+        if (e) {
+          try {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          } catch {
+            // ignore
+          }
         }
-      }
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-      if (isDrawing.current && activeStrokePointsRef.current.length) {
-        renderActiveStroke();
-        onStrokeUpdate?.(
-          activeStrokePointsRef.current,
-          brushSettings.color,
-          brushSettings.size,
-          true
-        );
-      }
-      activeStrokePointsRef.current = [];
-      preStrokeSnapshotRef.current = null;
-      isDrawing.current = false;
-      washiStartRef.current = null;
-      preWashiStateRef.current = null;
-      selectionDragRef.current = null;
-      if (changedDuringPointerRef.current) {
-        onDrawingCommit?.();
-      }
-      changedDuringPointerRef.current = false;
-    }, [onDrawingCommit, renderActiveStroke, onStrokeUpdate, brushSettings.color, brushSettings.size]);
+        if (rafIdRef.current !== null) {
+          cancelAnimationFrame(rafIdRef.current);
+          rafIdRef.current = null;
+        }
 
+        const didDraw =
+          isDrawing.current && activeStrokePointsRef.current.length > 0;
+
+        if (didDraw) {
+          renderActiveStroke();
+          const tool: "pen" | "eraser" =
+            brushSettings.tool === "eraser" ? "eraser" : "pen";
+          const allPts = allStrokePointsRef.current;   // full unbounded history
+          const { color, size } = brushSettings;
+          const strokeId = currentStrokeIdRef.current;
+
+          // Send any remaining unbroadcast points with isLast = true
+          const remainingDelta = allPts.slice(lastBroadcastIndexRef.current);
+          onStrokeUpdate?.(strokeId, remainingDelta, color, size, tool, true);
+
+          // Commit pen stroke from active canvas to drawing canvas
+          const ac = activeStrokeCanvasRef.current;
+          const dc = canvasRef.current;
+          if (ac && dc) {
+            dc.getContext("2d")?.drawImage(ac, 0, 0);
+            ac.getContext("2d")?.clearRect(0, 0, ac.width, ac.height);
+          }
+
+          // Track this stroke locally for undo (full points)
+          localStrokesRef.current.push({ id: strokeId, pts: allPts, color, size, tool });
+          undoneStrokesRef.current = []; // clear redo stack on new stroke
+
+          // Persist immediately with full accumulated points
+          onStrokeComplete?.(strokeId, allPts, color, size, tool);
+          currentStrokeIdRef.current = "";
+        } else if (isDrawing.current) {
+          // Washi / select / other tools
+          const ac = activeStrokeCanvasRef.current;
+          const dc = canvasRef.current;
+          if (ac && dc) {
+            dc.getContext("2d")?.drawImage(ac, 0, 0);
+            ac.getContext("2d")?.clearRect(0, 0, ac.width, ac.height);
+          }
+        }
+
+        activeStrokePointsRef.current = [];
+        allStrokePointsRef.current = [];
+        lastBroadcastIndexRef.current = 0;
+        preStrokeSnapshotRef.current = null;
+        isDrawing.current = false;
+        washiStartRef.current = null;
+        preWashiStateRef.current = null;
+        selectionDragRef.current = null;
+        changedDuringPointerRef.current = false;
+      },
+      [renderActiveStroke, onStrokeUpdate, onStrokeComplete, brushSettings],
+    );
+    handlePointerUpRef.current = handlePointerUp;
+
+    // ── Canvas operations ─────────────────────────────────────────────────────
     const clearCanvas = useCallback(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      saveToHistory();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      onDrawingCommit?.();
-    }, [saveToHistory, onDrawingCommit]);
+      // Reset local undo history — clearing is not undoable
+      localStrokesRef.current = [];
+      undoneStrokesRef.current = [];
+      // Update the session base to reflect the cleared state
+      void createImageBitmap(canvas).then((bitmap) => {
+        sessionBaseRef.current?.close();
+        sessionBaseRef.current = bitmap;
+      });
+    }, []);
 
     const undo = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx || history.length === 0) return;
-      const previous = history.at(-1);
-      if (!previous) return;
-      setRedoHistory((prev) => [...prev.slice(-30), ctx.getImageData(0, 0, canvas.width, canvas.height)]);
-      ctx.putImageData(previous, 0, 0);
-      setHistory((h) => h.slice(0, -1));
-      onDrawingCommit?.();
-    }, [history, onDrawingCommit]);
+      const last = localStrokesRef.current[localStrokesRef.current.length - 1];
+      if (!last) return;
+      localStrokesRef.current = localStrokesRef.current.slice(0, -1);
+      undoneStrokesRef.current = [...undoneStrokesRef.current, last];
+      restoreAndReplay();
+      onUndoStroke?.(last.id);
+    }, [restoreAndReplay, onUndoStroke]);
 
     const redo = useCallback(() => {
+      const next = undoneStrokesRef.current[undoneStrokesRef.current.length - 1];
+      if (!next) return;
+      undoneStrokesRef.current = undoneStrokesRef.current.slice(0, -1);
+      localStrokesRef.current = [...localStrokesRef.current, next];
+      restoreAndReplay();
+      onRedoStroke?.(next);
+    }, [restoreAndReplay, onRedoStroke]);
+
+    const setSessionBase = useCallback(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx || redoHistory.length === 0) return;
-      const next = redoHistory.at(-1);
-      if (!next) return;
-      setHistory((prev) => [...prev.slice(-30), ctx.getImageData(0, 0, canvas.width, canvas.height)]);
-      ctx.putImageData(next, 0, 0);
-      setRedoHistory((prev) => prev.slice(0, -1));
-      onDrawingCommit?.();
-    }, [redoHistory, onDrawingCommit]);
-
-    const commitTextBlock = useCallback((text: string, id: string) => {
-      if (!onUpdatePlacedItem) return;
-      const nextText = text.trim();
-      if (!nextText) return;
-
-      const fontSize = Math.max(10, brushSettings.textSize ?? Math.max(14, brushSettings.size * 3));
-      const lines = nextText.split("\n");
-      const longest = Math.max(...lines.map((line) => line.length), 4);
-      const blockWidth = Math.max(160, Math.min(760, longest * fontSize * 0.62));
-      const blockHeight = Math.max(fontSize * 1.6, lines.length * fontSize * 1.4 + 14);
-
-      onUpdatePlacedItem(id, {
-        text: nextText,
-        textColor: brushSettings.color,
-        textSize: fontSize,
-        textFont: brushSettings.textFont ?? '"Space Mono", monospace',
-        width: blockWidth,
-        height: blockHeight,
+      // ImageBitmap is GPU-backed — far cheaper than a 115 MB ImageData array
+      void createImageBitmap(canvas).then((bitmap) => {
+        sessionBaseRef.current?.close();
+        sessionBaseRef.current = bitmap;
+        localStrokesRef.current = [];
+        undoneStrokesRef.current = [];
       });
-    }, [onUpdatePlacedItem, brushSettings.color, brushSettings.size, brushSettings.textSize, brushSettings.textFont]);
+    }, []);
 
     const getCompositeCanvas = useCallback(() => {
       const w = canvasRef.current?.width ?? width;
@@ -697,6 +895,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         ctx.fillRect(0, 0, w, h);
       }
       if (canvasRef.current) ctx.drawImage(canvasRef.current, 0, 0);
+      if (activeStrokeCanvasRef.current) ctx.drawImage(activeStrokeCanvasRef.current, 0, 0);
       if (overlayCanvasRef.current) ctx.drawImage(overlayCanvasRef.current, 0, 0);
       return composite;
     }, [width, height]);
@@ -715,15 +914,24 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(temp, dx, dy);
       },
-      []
+      [],
     );
 
     const shiftContent = useCallback(
       (dx: number, dy: number) => {
         shiftSingleCanvas(canvasRef.current, dx, dy);
+        shiftSingleCanvas(activeStrokeCanvasRef.current, dx, dy);
         shiftSingleCanvas(overlayCanvasRef.current, dx, dy);
+        // Shift the session base too so undo remains aligned
+        const base = sessionBaseRef.current;
+        if (base && (dx !== 0 || dy !== 0)) {
+          void createImageBitmap(canvasRef.current!).then((bitmap) => {
+            base.close();
+            sessionBaseRef.current = bitmap;
+          });
+        }
       },
-      [shiftSingleCanvas]
+      [shiftSingleCanvas],
     );
 
     const getCanvasImageData = useCallback(() => {
@@ -732,25 +940,35 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       return canvas.toDataURL("image/png");
     }, []);
 
-    const setCanvasImageData = useCallback((imageData: string | null, options?: { shiftX?: number; shiftY?: number }) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (!imageData) return;
-
-      const img = new Image();
-      img.onload = () => {
+    const setCanvasImageData = useCallback(
+      (imageData: string | null, options?: { shiftX?: number; shiftY?: number }) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        const shiftX = options?.shiftX ?? 0;
-        const shiftY = options?.shiftY ?? 0;
-        ctx.drawImage(img, shiftX, shiftY, canvas.width, canvas.height);
+        if (!imageData) return;
+        const img = new Image();
+        img.onload = () => {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          const shiftX = options?.shiftX ?? 0;
+          const shiftY = options?.shiftY ?? 0;
+          ctx.drawImage(img, shiftX, shiftY, canvas.width, canvas.height);
+        };
+        img.src = imageData;
+      },
+      [],
+    );
+
+    // ── Cleanup ImageBitmap on unmount ────────────────────────────────────────
+    useEffect(() => {
+      return () => {
+        sessionBaseRef.current?.close();
+        sessionBaseRef.current = null;
       };
-      img.src = imageData;
     }, []);
 
+    // ── Imperative handle ─────────────────────────────────────────────────────
     useImperativeHandle(ref, () => ({
       getCanvas: () => canvasRef.current,
       getCanvasImageData,
@@ -760,8 +978,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       redo,
       getCompositeCanvas,
       shiftContent,
+      setSessionBase,
     }));
 
+    // ── Cursor ────────────────────────────────────────────────────────────────
     let cursor = "crosshair";
     if (brushSettings.tool === "eraser") cursor = "cell";
     else if (brushSettings.tool === "washi") cursor = "col-resize";
@@ -769,12 +989,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     else if (brushSettings.tool === "select") cursor = "default";
 
     const selectedItem = selectedItemId
-      ? placedItems.find((item) => item.id === selectedItemId) ?? null
+      ? (placedItems.find((item) => item.id === selectedItemId) ?? null)
       : null;
 
     const animatedItems = useMemo(
       () => placedItems.filter((item) => item.isAnimated),
-      [placedItems]
+      [placedItems],
     );
 
     const nudgeScale = (delta: number) => {
@@ -782,18 +1002,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       const nextWidth = Math.max(24, Math.round(selectedItem.width * delta));
       const nextHeight = Math.max(24, Math.round(selectedItem.height * delta));
       if (selectedItem.type === "text") {
-        const nextTextSize = Math.max(10, Math.round((selectedItem.textSize ?? 28) * delta));
         onUpdatePlacedItem(selectedItem.id, {
           width: nextWidth,
           height: nextHeight,
-          textSize: nextTextSize,
+          textSize: Math.max(10, Math.round((selectedItem.textSize ?? 28) * delta)),
         });
         return;
       }
-      onUpdatePlacedItem(selectedItem.id, {
-        width: nextWidth,
-        height: nextHeight,
-      });
+      onUpdatePlacedItem(selectedItem.id, { width: nextWidth, height: nextHeight });
     };
 
     const nudgeRotation = (delta: number) => {
@@ -803,13 +1019,43 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       });
     };
 
-    const textFontSize = Math.max(10, brushSettings.textSize ?? Math.max(14, brushSettings.size * 3));
+    const commitTextBlock = useCallback(
+      (text: string, id: string) => {
+        if (!onUpdatePlacedItem) return;
+        const nextText = text.trim();
+        if (!nextText) return;
+        const fontSize = Math.max(
+          10,
+          brushSettings.textSize ?? Math.max(14, brushSettings.size * 3),
+        );
+        const lines = nextText.split("\n");
+        const longest = Math.max(...lines.map((l) => l.length), 4);
+        onUpdatePlacedItem(id, {
+          text: nextText,
+          textColor: brushSettings.color,
+          textSize: fontSize,
+          textFont: brushSettings.textFont ?? '"Space Mono", monospace',
+          width: Math.max(160, Math.min(760, longest * fontSize * 0.62)),
+          height: Math.max(fontSize * 1.6, lines.length * fontSize * 1.4 + 14),
+        });
+      },
+      [onUpdatePlacedItem, brushSettings.color, brushSettings.size, brushSettings.textSize, brushSettings.textFont],
+    );
+
+    const textFontSize = Math.max(
+      10,
+      brushSettings.textSize ?? Math.max(14, brushSettings.size * 3),
+    );
     const textFontFamily = brushSettings.textFont?.startsWith("custom:")
       ? '"Space Mono", monospace'
       : (brushSettings.textFont ?? '"Space Mono", monospace');
 
+    // ── Render ────────────────────────────────────────────────────────────────
     return (
-      <div className={fillContainer ? "relative h-full w-full" : "relative"} style={fillContainer ? undefined : { width, height }}>
+      <div
+        className={fillContainer ? "relative h-full w-full" : "relative"}
+        style={fillContainer ? undefined : { width, height }}
+      >
         <canvas
           ref={backgroundCanvasRef}
           width={width}
@@ -830,12 +1076,20 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           onPointerCancel={handlePointerUp}
         />
         <canvas
+          ref={activeStrokeCanvasRef}
+          width={width}
+          height={height}
+          className="pointer-events-none absolute inset-0"
+          style={{ width: "100%", height: "100%" }}
+        />
+        <canvas
           ref={overlayCanvasRef}
           width={width}
           height={height}
           className="pointer-events-none absolute inset-0"
           style={{ width: "100%", height: "100%" }}
         />
+
         {animatedItems.map((item) => (
           <img
             key={item.id}
@@ -853,6 +1107,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             }}
           />
         ))}
+
         {brushSettings.tool === "select" && selectedItem !== null ? (
           <>
             <div
@@ -914,7 +1169,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 <button
                   className="btn-smooth rounded px-2 py-1 text-xs"
                   style={{ background: "rgba(249,168,212,0.22)", color: "#9d174d" }}
-                  onClick={() => setTextOverlay({ id: selectedItem.id, x: selectedItem.x, y: selectedItem.y, value: selectedItem.text ?? "" })}
+                  onClick={() =>
+                    setTextOverlay({
+                      id: selectedItem.id,
+                      x: selectedItem.x,
+                      y: selectedItem.y,
+                      value: selectedItem.text ?? "",
+                    })
+                  }
                   title="Edit text"
                 >
                   ✎
@@ -923,26 +1185,21 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             </div>
           </>
         ) : null}
+
         {textOverlay !== null && (
           <textarea
             autoFocus
             value={textOverlay.value}
             onChange={(e) =>
-              setTextOverlay((prev) =>
-                prev ? { ...prev, value: e.target.value } : null
-              )
+              setTextOverlay((prev) => (prev ? { ...prev, value: e.target.value } : null))
             }
             onBlur={() => {
-              if (textOverlay.value.trim()) {
-                commitTextBlock(textOverlay.value, textOverlay.id);
-              }
+              if (textOverlay.value.trim()) commitTextBlock(textOverlay.value, textOverlay.id);
               setTextOverlay(null);
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                if (textOverlay.value.trim()) {
-                  commitTextBlock(textOverlay.value, textOverlay.id);
-                }
+                if (textOverlay.value.trim()) commitTextBlock(textOverlay.value, textOverlay.id);
                 setTextOverlay(null);
               } else if (e.key === "Escape") {
                 setTextOverlay(null);
@@ -969,7 +1226,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         )}
       </div>
     );
-  }
+  },
 );
 
 DrawingCanvas.displayName = "DrawingCanvas";

@@ -245,6 +245,10 @@ function DoodlePad({ onCreate }: Readonly<{ onCreate: (imageUrl: string) => void
           drawingRef.current = false;
           pointRef.current = null;
         }}
+        onPointerCancel={() => {
+          drawingRef.current = false;
+          pointRef.current = null;
+        }}
       />
       <div className="mt-2 flex gap-2">
         <button

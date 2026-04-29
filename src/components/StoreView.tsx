@@ -114,6 +114,7 @@ export default function StoreView({
             placeholder="Search stickers, tape, paper, stamps, envelopes, or fonts..."
             className="input-soft py-2.5 pl-10 pr-4 text-sm outline-none"
             style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+            suppressHydrationWarning
           />
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: "var(--muted)" }}>🔍</span>
         </div>
