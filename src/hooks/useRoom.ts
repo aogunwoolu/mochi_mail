@@ -6,15 +6,15 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type RoomPhase =
-  | "idle"           // no room in URL, personal canvas
-  | "joining"        // auto-joining a public room in progress
-  | "join-required"  // private room — user must paste invite token
-  | "lobby"          // room verified, show code + waiting for others
-  | "drawing";       // user clicked "Start Drawing" or auto-transitioned
+/**
+ * creating → auto-creating a new private room (no ?room= in URL)
+ * joining  → joining an existing room via invite token in the URL
+ * drawing  → room is ready, canvas is live
+ * error    → something went wrong (see `error` field)
+ */
+export type RoomPhase = "creating" | "joining" | "drawing" | "error";
 
 export interface RoomMember {
-  /** Unique key for this presence slot (= selfId of that client). */
   presenceKey: string;
   userId: string;
   name: string;
@@ -61,7 +61,6 @@ function pickColor(seed: string): string {
 
 export interface UseRoomOptions {
   hasSession: boolean;
-  /** Stable session-level ID for this browser tab (used as presence key). */
   selfId: string;
   selfName: string;
   viewerAccountId?: string;
@@ -73,52 +72,39 @@ export interface UseRoomReturn {
   phase: RoomPhase;
   activeRoomId: string | null;
   activeRoomTitle: string | null;
-  /** Short human-readable code, e.g. "ABC123" — display as "ABC-123". */
-  activeRoomCode: string | null;
-  activeRoomInviteToken: string | null;
-  roomAccessError: string | null;
-  /** All currently-online members, including self. */
+  /** The invite_token — also the ?room= URL param. Share this URL to invite others. */
+  activeRoomToken: string | null;
+  isPublic: boolean;
+  isOwner: boolean;
+  /** null until the room is ready; used to gate stroke sync. */
+  collabScope: string | null;
   members: RoomMember[];
-  /** Yjs + stroke channel scope — same contract as useActiveRoomContext. */
-  collabScope: string;
-  /** Stable self color derived from selfId. */
   selfColor: string;
-  /**
-   * Call on every mouse/pointer move with world-space coordinates.
-   * Throttled internally to 16 ms; broadcasts to channel peers.
-   */
+  error: string | null;
   trackCursor: (pos: { x: number; y: number }) => void;
-  /** Transition from "lobby" → "drawing". */
-  enterDrawing: () => void;
-  /**
-   * For "join-required" phase: paste an invite token/link to join a private room.
-   * Resolves with null on success or an error string on failure.
-   */
-  joinWithToken: (tokenOrLink: string, password?: string) => Promise<string | null>;
+  setRoomPublic: (pub: boolean) => Promise<void>;
 }
 
 export function useRoom({
   hasSession,
   selfId,
   selfName,
-  viewerAccountId,
   selfAvatarUrl,
   selfUsername,
 }: UseRoomOptions): UseRoomReturn {
+  const [phase, setPhase] = useState<RoomPhase>("creating");
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [activeRoomTitle, setActiveRoomTitle] = useState<string | null>(null);
-  const [activeRoomCode, setActiveRoomCode] = useState<string | null>(null);
-  const [activeRoomInviteToken, setActiveRoomInviteToken] = useState<string | null>(null);
-  const [roomAccessError, setRoomAccessError] = useState<string | null>(null);
+  const [activeRoomToken, setActiveRoomToken] = useState<string | null>(null);
+  const [isPublic, setIsPublic] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
   const [members, setMembers] = useState<RoomMember[]>([]);
-  const [phase, setPhase] = useState<RoomPhase>("idle");
+  const [error, setError] = useState<string | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const lastCursorBroadcastRef = useRef(0);
-  const pendingRoomIdRef = useRef<string | null>(null);
   const selfColor = pickColor(selfId);
 
-  // Stable refs so closures always see current values without re-renders.
   const selfIdRef = useRef(selfId);
   const selfNameRef = useRef(selfName);
   const selfColorRef = useRef(selfColor);
@@ -130,109 +116,126 @@ export function useRoom({
   selfAvatarRef.current = selfAvatarUrl;
   selfUsernameRef.current = selfUsername;
 
-  // Derive collabScope — same contract as useActiveRoomContext.
+  // collabScope is null until the room is ready (gates stroke sync + board load)
   const collabScope = useMemo(
-    () =>
-      activeRoomId
-        ? `room:${activeRoomId}`
-        : `personal:${viewerAccountId ?? selfId}`,
-    [activeRoomId, viewerAccountId, selfId]
+    () => (activeRoomId ? `room:${activeRoomId}` : null),
+    [activeRoomId],
   );
 
-  // ── Step 1: Read URL param → verify room access ──────────────────────────
+  // ── Step 1: Read URL → create or join room ─────────────────────────────────
   useEffect(() => {
-    if (!hasSession) {
-      setActiveRoomId(null);
-      setActiveRoomTitle(null);
-      setActiveRoomCode(null);
-      setActiveRoomInviteToken(null);
-      setRoomAccessError(null);
-      setPhase("idle");
-      return;
+    if (!hasSession) return;
+
+    const token = new URLSearchParams(globalThis.location?.search ?? "")
+      .get("room")
+      ?.trim() ?? "";
+
+    if (!token) {
+      // No room in URL: reuse most-recent owned room, or create a new private one
+      setPhase("creating");
+      const supabase = createSupabaseBrowserClient();
+      void (async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+
+        // Look for an existing owned room before creating
+        if (user) {
+          const { data: existing } = await supabase
+            .from("rooms")
+            .select("id, title, invite_token, is_public")
+            .eq("owner_id", user.id)
+            .order("updated_at", { ascending: false })
+            .limit(1);
+
+          const room = existing?.[0] as
+            | { id: string; title: string; invite_token: string; is_public: boolean }
+            | undefined;
+
+          if (room) {
+            if (globalThis.history) {
+              const url = new URL(globalThis.location.href);
+              url.searchParams.set("room", room.invite_token);
+              globalThis.history.replaceState(null, "", url.toString());
+            }
+            setActiveRoomId(room.id);
+            setActiveRoomTitle(room.title);
+            setActiveRoomToken(room.invite_token);
+            setIsPublic(room.is_public);
+            setIsOwner(true);
+            setPhase("drawing");
+            return;
+          }
+        }
+
+        // No existing room — create a new private one
+        const { data, error: err } = await (supabase.rpc as Function)("create_room", {
+          p_title: "My Canvas",
+          p_description: "",
+          p_is_public: false,
+          p_password: null,
+        });
+        if (err || !data?.[0]) {
+          setPhase("error");
+          setError("Failed to create your canvas. Please refresh.");
+          return;
+        }
+        const { id, invite_token } = data[0] as { id: string; invite_token: string };
+
+        if (globalThis.history) {
+          const url = new URL(globalThis.location.href);
+          url.searchParams.set("room", invite_token);
+          globalThis.history.replaceState(null, "", url.toString());
+        }
+
+        setActiveRoomId(id);
+        setActiveRoomTitle("My Canvas");
+        setActiveRoomToken(invite_token);
+        setIsPublic(false);
+        setIsOwner(true);
+        setPhase("drawing");
+      })();
+    } else {
+      // Token in URL: join the room (idempotent for owner/existing members)
+      setPhase("joining");
+      const supabase = createSupabaseBrowserClient();
+      void (async () => {
+        const { data, error: err } = await (supabase.rpc as Function)("join_room_full", {
+          p_token: token,
+        });
+        if (err || !data?.[0]) {
+          setPhase("error");
+          setError("Could not join this room. The link may be invalid.");
+          return;
+        }
+        const room = data[0] as {
+          room_id: string;
+          room_title: string;
+          is_public: boolean;
+          is_owner: boolean;
+          invite_token: string;
+        };
+
+        setActiveRoomId(room.room_id);
+        setActiveRoomTitle(room.room_title);
+        setActiveRoomToken(room.invite_token);
+        setIsPublic(room.is_public);
+        setIsOwner(room.is_owner);
+        setPhase("drawing");
+      })();
     }
-
-    const params = new URLSearchParams(globalThis.location?.search ?? "");
-    const roomId = params.get("room")?.trim() ?? "";
-
-    if (!roomId) {
-      setActiveRoomId(null);
-      setActiveRoomTitle(null);
-      setActiveRoomCode(null);
-      setActiveRoomInviteToken(null);
-      setRoomAccessError(null);
-      setPhase("idle");
-      return;
-    }
-
-    const supabase = createSupabaseBrowserClient();
-    let cancelled = false;
-
-    void (async () => {
-      // ── Try to fetch room info. RLS allows: public rooms, owner, or member.
-      // room_code / is_public added by migrations 0007/0008 — cast until DB
-      // types are regenerated with `supabase gen types typescript`.
-      const { data, error } = await supabase
-        .from("rooms")
-        .select("id, title, invite_token, is_public")
-        .eq("id", roomId)
-        .maybeSingle();
-
-      if (cancelled) return;
-
-      if (error || !data) {
-        // Room not found OR private room the user can't see yet.
-        // Keep the roomId so joinWithToken can use it, but show the join form.
-        setActiveRoomId(null);
-        setActiveRoomTitle(null);
-        setActiveRoomCode(null);
-        setActiveRoomInviteToken(null);
-        setRoomAccessError(null);
-        // Store pending room id for joinWithToken to reference
-        pendingRoomIdRef.current = roomId;
-        setPhase("join-required");
-        return;
-      }
-
-      // room_code not in DB types until regenerated — safe unknown cast.
-      const roomCode = (data as unknown as Record<string, string>).room_code ?? null;
-
-      // ── Public room: auto-join so the user lands in room_members.
-      // join_room_by_id is idempotent (ON CONFLICT DO NOTHING), safe to call
-      // even if already a member.
-      if (data.is_public) {
-        setPhase("joining");
-        // join_room_by_id added in migration 0008 — cast until DB types regenerated.
-        await (supabase.rpc as Function)("join_room_by_id", { p_room_id: roomId });
-        if (cancelled) return;
-      }
-
-      setActiveRoomId(data.id);
-      setActiveRoomTitle(data.title);
-      setActiveRoomCode(roomCode);
-      setActiveRoomInviteToken(data.invite_token);
-      setRoomAccessError(null);
-      pendingRoomIdRef.current = null;
-      setPhase("lobby");
-    })();
-
-    return () => { cancelled = true; };
   }, [hasSession]);
 
-  // ── Step 2: Subscribe presence + cursor channel when room is active ────────
+  // ── Step 2: Presence + cursor channel (active once room is ready) ──────────
   useEffect(() => {
-    if (!hasSession || !activeRoomId) return;
+    if (!hasSession || !activeRoomId || phase !== "drawing") return;
 
     const supabase = createSupabaseBrowserClient();
-
     const ch = supabase
-      .channel(`room-live:${collabScope}`, {
+      .channel(`room-live:room:${activeRoomId}`, {
         config: {
           presence: { key: selfIdRef.current },
           broadcast: { self: false },
         },
       })
-      // Presence sync — fires on join/leave/initial connect.
-      // Gives us reliable online-status with auto-cleanup on disconnect.
       .on("presence", { event: "sync" }, () => {
         const state = ch.presenceState<PresencePayload>();
         const next: RoomMember[] = [];
@@ -252,14 +255,12 @@ export function useRoom({
         }
         setMembers(next);
       })
-      // Cursor broadcast — fast path for position updates (16 ms throttle).
-      // We update only the x/y of an existing member so we don't flash.
       .on("broadcast", { event: "cursor" }, ({ payload }) => {
         const data = payload as CursorBroadcast;
         if (!data?.id || data.id === selfIdRef.current) return;
         setMembers((prev) => {
           const idx = prev.findIndex((m) => m.presenceKey === data.id);
-          if (idx === -1) return prev; // unknown member — wait for presence sync
+          if (idx === -1) return prev;
           const updated = [...prev];
           updated[idx] = {
             ...updated[idx],
@@ -276,8 +277,6 @@ export function useRoom({
 
     ch.subscribe(async (status) => {
       if (status !== "SUBSCRIBED") return;
-      // Register self in presence — Supabase auto-unregisters on disconnect
-      // (ghost-cursor fix).
       await ch.track({
         userId: selfIdRef.current,
         name: selfNameRef.current,
@@ -292,14 +291,13 @@ export function useRoom({
     channelRef.current = ch;
 
     return () => {
-      // Untrack self before removing channel so peers get a clean leave event.
       void ch.untrack().finally(() => void supabase.removeChannel(ch));
       channelRef.current = null;
       setMembers([]);
     };
-  }, [hasSession, activeRoomId, collabScope]);
+  }, [hasSession, activeRoomId, phase]);
 
-  // ── Cursor tracking (fast broadcast, 16 ms throttle) ─────────────────────
+  // ── Cursor broadcast (16 ms throttle) ─────────────────────────────────────
   const trackCursor = useCallback((pos: { x: number; y: number }) => {
     const ch = channelRef.current;
     if (!ch) return;
@@ -321,62 +319,32 @@ export function useRoom({
     });
   }, []);
 
-  const enterDrawing = useCallback(() => {
-    setPhase("drawing");
-  }, []);
-
-  // ── joinWithToken: used when "join-required" phase is active ─────────────
-  const joinWithToken = useCallback(async (tokenOrLink: string, password?: string): Promise<string | null> => {
-    const raw = tokenOrLink.trim();
-    if (!raw) return "Paste an invite link or token.";
-    const token = raw.includes("/") ? raw.split("/").pop()?.trim() ?? "" : raw;
-    if (!token) return "Could not read a token from that link.";
-
-    try {
+  // ── Toggle room public / private (owner only) ──────────────────────────────
+  const setRoomPublic = useCallback(
+    async (pub: boolean) => {
+      if (!activeRoomId) return;
       const supabase = createSupabaseBrowserClient();
-      const { data, error } = await supabase.rpc("join_room_by_token", {
-        p_token: token,
-        p_password: password?.trim() ? password : null,
+      await (supabase.rpc as Function)("update_room_security", {
+        p_room_id: activeRoomId,
+        p_is_public: pub,
       });
-      if (error) return error.message;
-      const joined = (data as Array<{ room_id: string; room_title: string }> | null)?.[0];
-      if (!joined) return "Unable to join room.";
-
-      // Fetch full room info now that we have access.
-      const { data: room } = await supabase
-        .from("rooms")
-        .select("id, title, invite_token, is_public")
-        .eq("id", joined.room_id)
-        .maybeSingle();
-
-      if (!room) return "Joined but could not load room.";
-      const roomCode = (room as unknown as Record<string, string>).room_code ?? null;
-
-      pendingRoomIdRef.current = null;
-      setActiveRoomId(room.id);
-      setActiveRoomTitle(room.title);
-      setActiveRoomCode(roomCode);
-      setActiveRoomInviteToken(room.invite_token);
-      setRoomAccessError(null);
-      setPhase("lobby");
-      return null;
-    } catch (err) {
-      return err instanceof Error ? err.message : "Failed to join room.";
-    }
-  }, []);
+      setIsPublic(pub);
+    },
+    [activeRoomId],
+  );
 
   return {
     phase,
     activeRoomId,
     activeRoomTitle,
-    activeRoomCode,
-    activeRoomInviteToken,
-    roomAccessError,
-    members,
+    activeRoomToken,
+    isPublic,
+    isOwner,
     collabScope,
+    members,
     selfColor,
+    error,
     trackCursor,
-    enterDrawing,
-    joinWithToken,
+    setRoomPublic,
   };
 }

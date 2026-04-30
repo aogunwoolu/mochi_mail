@@ -34,9 +34,13 @@ type BoardUpdatePayload = {
   selectedPaper: PaperBackground | null;
 };
 
+type PlacedItemAddPayload = { senderId: string; item: PlacedSticker };
+type PlacedItemRemovePayload = { senderId: string; itemId: string };
+
 export type UseStrokeSyncOptions = {
   hasSession: boolean;
-  collabScope: string;
+  /** null while the room is still being created/joined — gates all DB + channel work */
+  collabScope: string | null;
   activeRoomId: string | null;
   selfIdRef: React.RefObject<string>;
   canvasRef: React.RefObject<DrawingCanvasHandle | null>;
@@ -47,6 +51,8 @@ export type UseStrokeSyncOptions = {
     placedItems?: PlacedSticker[];
     selectedPaper?: PaperBackground | null;
   }) => void;
+  onRemotePlacedItemAdd: (item: PlacedSticker) => void;
+  onRemotePlacedItemRemove: (itemId: string) => void;
   saveBoardState: (
     drawingData: string | null,
     items: PlacedSticker[],
@@ -127,9 +133,15 @@ export function useStrokeSync({
   placedItems,
   selectedPaper,
   applySharedCanvasState,
+  onRemotePlacedItemAdd,
+  onRemotePlacedItemRemove,
   saveBoardState,
   loadBoardState,
 }: UseStrokeSyncOptions) {
+  const onRemotePlacedItemAddRef = useRef(onRemotePlacedItemAdd);
+  const onRemotePlacedItemRemoveRef = useRef(onRemotePlacedItemRemove);
+  onRemotePlacedItemAddRef.current = onRemotePlacedItemAdd;
+  onRemotePlacedItemRemoveRef.current = onRemotePlacedItemRemove;
   type Channel = ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]>;
   const channelRef = useRef<Channel | null>(null);
 
@@ -186,7 +198,7 @@ export function useStrokeSync({
   // ── Initial load: replay stroke history + board metadata ───────────────────
 
   useEffect(() => {
-    if (!hasSession) return;
+    if (!hasSession || !collabScope) return;
 
     // Reset guards on scope change
     isSessionReadyRef.current = false;
@@ -257,7 +269,7 @@ export function useStrokeSync({
   // ── Realtime broadcast channel ─────────────────────────────────────────────
 
   useEffect(() => {
-    if (!hasSession) return;
+    if (!hasSession || !collabScope) return;
 
     const supabase = createSupabaseBrowserClient();
     const ch = supabase
@@ -295,7 +307,7 @@ export function useStrokeSync({
           }
         }
       })
-      // Placed-items and paper changes from collaborators
+      // Placed-items and paper changes from collaborators (bulk sync)
       .on("broadcast", { event: "board-update" }, ({ payload }) => {
         const data = payload as BoardUpdatePayload;
         if (!data?.senderId || data.senderId === selfIdRef.current) return;
@@ -317,6 +329,19 @@ export function useStrokeSync({
         } finally {
           isApplyingRemoteRef.current = false;
         }
+      })
+      // Delta events: immediate add/remove for placed items (GIFs, stickers, text)
+      .on("broadcast", { event: "placed-item-add" }, ({ payload }) => {
+        const data = payload as PlacedItemAddPayload;
+        if (!data?.senderId || data.senderId === selfIdRef.current || !data.item) return;
+        onRemotePlacedItemAddRef.current(data.item);
+        persistDirtyRef.current = true;
+      })
+      .on("broadcast", { event: "placed-item-remove" }, ({ payload }) => {
+        const data = payload as PlacedItemRemovePayload;
+        if (!data?.senderId || data.senderId === selfIdRef.current || !data.itemId) return;
+        onRemotePlacedItemRemoveRef.current(data.itemId);
+        persistDirtyRef.current = true;
       });
 
     ch.subscribe();
@@ -336,7 +361,7 @@ export function useStrokeSync({
   // ── Items / paper broadcast (debounced 120 ms) ─────────────────────────────
 
   useEffect(() => {
-    if (!hasSession) return;
+    if (!hasSession || !collabScope) return;
     if (isApplyingRemoteRef.current) return;
 
     const fingerprint = JSON.stringify({
@@ -418,7 +443,7 @@ export function useStrokeSync({
       size: number,
       tool: "pen" | "eraser",
     ) => {
-      if (!hasSession || !isSessionReadyRef.current) return;
+      if (!hasSession || !collabScope || !isSessionReadyRef.current) return;
       renderedStrokeIdsRef.current.add(strokeId);
       const supabase = createSupabaseBrowserClient();
       const { error } = await (supabase as any).from("board_strokes").insert({
@@ -448,7 +473,7 @@ export function useStrokeSync({
   // Delete a stroke from the DB (called on undo)
   const deleteStroke = useCallback(
     async (strokeId: string) => {
-      if (!hasSession) return;
+      if (!hasSession || !collabScope) return;
       renderedStrokeIdsRef.current.delete(strokeId);
       const supabase = createSupabaseBrowserClient();
       await (supabase as any)
@@ -468,5 +493,32 @@ export function useStrokeSync({
     [saveStroke],
   );
 
-  return { broadcastStroke, saveStroke, deleteStroke, restoreStroke };
+  const broadcastPlacedItemAdd = useCallback((item: PlacedSticker) => {
+    const ch = channelRef.current;
+    if (!ch) return;
+    void ch.send({
+      type: "broadcast",
+      event: "placed-item-add",
+      payload: { senderId: selfIdRef.current, item } satisfies PlacedItemAddPayload,
+    });
+  }, []);
+
+  const broadcastPlacedItemRemove = useCallback((itemId: string) => {
+    const ch = channelRef.current;
+    if (!ch) return;
+    void ch.send({
+      type: "broadcast",
+      event: "placed-item-remove",
+      payload: { senderId: selfIdRef.current, itemId } satisfies PlacedItemRemovePayload,
+    });
+  }, []);
+
+  return {
+    broadcastStroke,
+    saveStroke,
+    deleteStroke,
+    restoreStroke,
+    broadcastPlacedItemAdd,
+    broadcastPlacedItemRemove,
+  };
 }

@@ -268,6 +268,10 @@ export default function MailComposePanel({
     setActivePlacedItems((prev) => [...prev, nextItem]);
   }, [setActivePlacedItems]);
 
+  const removeAnimatedSticker = useCallback((id: string) => {
+    setActivePlacedItems((prev) => prev.filter((item) => item.id !== id));
+  }, [setActivePlacedItems]);
+
   const updatePlacedItem = useCallback((id: string, updates: Partial<PlacedSticker>) => {
     setActivePlacedItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updates } : item)));
   }, [setActivePlacedItems]);
@@ -562,6 +566,7 @@ export default function MailComposePanel({
                 customFonts={customFonts}
                 onPlaceAsset={placeItem}
                 onAddTextItem={placeTextItem}
+                removePlacedItem={removeAnimatedSticker}
                 onUpdatePlacedItem={updatePlacedItem}
                 width={1200}
                 height={900}
@@ -578,6 +583,7 @@ export default function MailComposePanel({
                 customFonts={customFonts}
                 onPlaceAsset={placeItem}
                 onAddTextItem={placeTextItem}
+                removePlacedItem={removeAnimatedSticker}
                 onUpdatePlacedItem={updatePlacedItem}
                 width={1200}
                 height={900}

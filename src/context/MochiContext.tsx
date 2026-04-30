@@ -39,11 +39,13 @@ interface MochiAssets {
   addStamp: (name: string, imageData: string, width: number, height: number) => MailStamp;
   addEnvelope: (name: string, imageData: string, width: number, height: number) => EnvelopeStyle;
   addCustomFont: (name: string, glyphs: Record<string, string>, glyphWidth: number, glyphHeight: number) => CustomFont;
-  placeItem: (asset: Sticker | WashiTape, x: number, y: number) => void;
-  placeTextItem: (text: string, x: number, y: number, color: string, size: number, font: string) => void;
+  placeItem: (asset: Sticker | WashiTape, x: number, y: number) => PlacedSticker;
+  placeTextItem: (text: string, x: number, y: number, color: string, size: number, font: string) => PlacedSticker;
   applySharedCanvasState: (state: { placedItems?: PlacedSticker[]; selectedPaper?: PaperBackground | null }) => void;
   shiftPlacedItems: (dx: number, dy: number) => void;
   updatePlacedItem: (id: string, updates: Partial<PlacedSticker>) => void;
+  removePlacedItem: (id: string) => void;
+  removeAnimatedSticker: (id: string) => void;
   removeSticker: (id: string) => void;
   removeWashiTape: (id: string) => void;
   removePaper: (id: string) => void;

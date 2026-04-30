@@ -32,7 +32,18 @@ export interface DrawingCanvasHandle {
   clearCanvas: () => void;
   undo: () => void;
   redo: () => void;
+  /** Full composite including current animated-GIF frame — use for static PNG export. */
   getCompositeCanvas: () => HTMLCanvasElement;
+  /**
+   * Static layers only (background + strokes + overlay stickers, no animated GIFs).
+   * Use as the base for animated export; call drawAnimatedLayer() each rAF tick on top.
+   */
+  getBaseCanvas: () => HTMLCanvasElement;
+  /**
+   * Draws the current animated-GIF frames onto an external canvas context.
+   * Call inside a requestAnimationFrame loop to record a live animation.
+   */
+  drawAnimatedLayer: (ctx: CanvasRenderingContext2D) => void;
   shiftContent: (dx: number, dy: number) => void;
   /** Called after the initial stroke replay so undo has a clean baseline. */
   setSessionBase?: () => void;
@@ -59,6 +70,9 @@ interface DrawingCanvasProps {
   onPlaceAsset: (asset: Sticker | WashiTape, x: number, y: number) => void;
   onAddTextItem?: (item: PlacedSticker) => PlacedSticker | void;
   onUpdatePlacedItem?: (id: string, updates: Partial<PlacedSticker>) => void;
+  removePlacedItem?: (id: string) => void;
+  /** @deprecated use removePlacedItem */
+  removeAnimatedSticker?: (id: string) => void;
   backgroundOffsetX?: number;
   backgroundOffsetY?: number;
   width?: number;
@@ -107,6 +121,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       onPlaceAsset,
       onAddTextItem,
       onUpdatePlacedItem,
+      removePlacedItem,
+      removeAnimatedSticker,
       backgroundOffsetX = 0,
       backgroundOffsetY = 0,
       width = 1200,
@@ -162,6 +178,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
     const assetImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const paperImageRef = useRef<HTMLImageElement | null>(null);
+    // Stable ref so getCompositeCanvas closure always sees fresh placedItems
+    const placedItemsRef = useRef(placedItems);
+    placedItemsRef.current = placedItems;
+    // DOM refs for animated <img> elements — these are in the live document so the
+    // browser advances their GIF frames. drawAnimatedLayer() reads from here.
+    const animatedImgRefsRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const rafIdRef = useRef<number | null>(null);
     // Stable ref so handlePointerMove can call handlePointerUp without a dep cycle
     const handlePointerUpRef = useRef<((e?: React.PointerEvent<HTMLCanvasElement>) => void) | null>(null);
@@ -880,14 +902,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       });
     }, []);
 
-    const getCompositeCanvas = useCallback(() => {
+    // Draws background + strokes + static stickers. No GIFs — use as animation base.
+    const getBaseCanvas = useCallback(() => {
       const w = canvasRef.current?.width ?? width;
       const h = canvasRef.current?.height ?? height;
-      const composite = document.createElement("canvas");
-      composite.width = w;
-      composite.height = h;
-      const ctx = composite.getContext("2d");
-      if (!ctx) return composite;
+      const base = document.createElement("canvas");
+      base.width = w;
+      base.height = h;
+      const ctx = base.getContext("2d");
+      if (!ctx) return base;
       if (backgroundCanvasRef.current) {
         ctx.drawImage(backgroundCanvasRef.current, 0, 0);
       } else {
@@ -897,8 +920,33 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       if (canvasRef.current) ctx.drawImage(canvasRef.current, 0, 0);
       if (activeStrokeCanvasRef.current) ctx.drawImage(activeStrokeCanvasRef.current, 0, 0);
       if (overlayCanvasRef.current) ctx.drawImage(overlayCanvasRef.current, 0, 0);
-      return composite;
+      return base;
     }, [width, height]);
+
+    // Stamps current animated-GIF frames onto an external context. Call each rAF tick.
+    // Uses animatedImgRefsRef (live DOM elements) so the browser's GIF frame
+    // advancement is captured, not the frozen preloaded copies in assetImagesRef.
+    const drawAnimatedLayer = useCallback((ctx: CanvasRenderingContext2D) => {
+      for (const item of placedItemsRef.current) {
+        if (!item.isAnimated) continue;
+        const img = animatedImgRefsRef.current.get(item.id);
+        if (!img || img.naturalWidth === 0) continue;
+        ctx.save();
+        ctx.globalAlpha = item.opacity;
+        ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
+        ctx.rotate((item.rotation * Math.PI) / 180);
+        ctx.drawImage(img, -item.width / 2, -item.height / 2, item.width, item.height);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+    }, []);
+
+    const getCompositeCanvas = useCallback(() => {
+      const base = getBaseCanvas();
+      const ctx = base.getContext("2d");
+      if (ctx) drawAnimatedLayer(ctx);
+      return base;
+    }, [getBaseCanvas, drawAnimatedLayer]);
 
     const shiftSingleCanvas = useCallback(
       (canvas: HTMLCanvasElement | null, dx: number, dy: number) => {
@@ -977,6 +1025,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       undo,
       redo,
       getCompositeCanvas,
+      getBaseCanvas,
+      drawAnimatedLayer,
       shiftContent,
       setSessionBase,
     }));
@@ -996,6 +1046,16 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       () => placedItems.filter((item) => item.isAnimated),
       [placedItems],
     );
+
+    const deleteItem = (id: string) => {
+      (removePlacedItem ?? removeAnimatedSticker)?.(id);
+      setSelectedItemId(null);
+    };
+
+    const deleteSelectedItem = () => {
+      if (!selectedItem) return;
+      deleteItem(selectedItem.id);
+    };
 
     const nudgeScale = (delta: number) => {
       if (!selectedItem || !onUpdatePlacedItem) return;
@@ -1091,21 +1151,52 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         />
 
         {animatedItems.map((item) => (
-          <img
+          <div
             key={item.id}
-            src={item.imageData}
-            alt={item.stickerId}
-            className="pointer-events-none absolute"
+            className="group absolute"
             style={{
               left: `${(item.x / width) * 100}%`,
               top: `${(item.y / height) * 100}%`,
               width: `${(item.width / width) * 100}%`,
               height: `${(item.height / height) * 100}%`,
-              opacity: item.opacity,
-              transform: `rotate(${item.rotation}deg)`,
-              transformOrigin: "center",
+              pointerEvents: "none",
             }}
-          />
+          >
+            {/* GIF render — pointer-events-none so drawing still works over it */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              ref={(el) => {
+                if (el) animatedImgRefsRef.current.set(item.id, el);
+                else animatedImgRefsRef.current.delete(item.id);
+              }}
+              src={item.imageData}
+              alt=""
+              className="absolute inset-0 h-full w-full"
+              style={{
+                opacity: item.opacity,
+                transform: `rotate(${item.rotation}deg)`,
+                transformOrigin: "center",
+                pointerEvents: "none",
+              }}
+            />
+            {/* Delete button — pointer-events-auto, always reachable */}
+            <button
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                deleteItem(item.id);
+              }}
+              className="absolute right-0 top-0 flex h-5 w-5 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white opacity-0 transition-opacity group-hover:opacity-100"
+              style={{
+                background: "rgba(185,28,28,0.85)",
+                pointerEvents: "auto",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+                zIndex: 10,
+              }}
+              title="Remove GIF"
+            >
+              ×
+            </button>
+          </div>
         ))}
 
         {brushSettings.tool === "select" && selectedItem !== null ? (
@@ -1164,6 +1255,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 title="Rotate right"
               >
                 ↻
+              </button>
+              <button
+                className="btn-smooth rounded px-2 py-1 text-xs"
+                style={{ background: "rgba(255,107,157,0.15)", color: "#b4236b" }}
+                onClick={deleteSelectedItem}
+                title="Remove"
+              >
+                x
               </button>
               {selectedItem.type === "text" ? (
                 <button

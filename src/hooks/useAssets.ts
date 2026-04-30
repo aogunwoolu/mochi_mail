@@ -574,6 +574,10 @@ export function useAssets(user: ViewerIdentity) {
     setCustomFonts((prev) => prev.filter((font) => font.id !== id));
   }, []);
 
+  const removePlacedItem = useCallback((id: string) => {
+    setPlacedItems((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
   const undoLastPlacement = useCallback(() => {
     setPlacedItems((prev) => prev.slice(0, -1));
   }, []);
@@ -676,6 +680,8 @@ export function useAssets(user: ViewerIdentity) {
     placeTextItem,
     shiftPlacedItems,
     updatePlacedItem,
+    removePlacedItem,
+    removeAnimatedSticker: removePlacedItem,
     removeSticker,
     removeWashiTape,
     removePaper,

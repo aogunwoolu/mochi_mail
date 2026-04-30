@@ -8,9 +8,9 @@ import StudioToolbar from "@/components/StudioToolbar";
 import MailComposePanel from "@/components/MailComposePanel";
 import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
-import RoomModeBanner from "@/components/RoomModeBanner";
-import { FiEdit3, FiMail, FiShoppingBag, FiUsers, FiShare2, FiCheck } from "react-icons/fi";
-import { exportWithDSBorder } from "@/components/ExportUtil";
+import RoomControl from "@/components/RoomControl";
+import { FiEdit3, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
+import { exportAnimated } from "@/components/ExportUtil";
 import { useRoom } from "@/hooks/useRoom";
 import type { RoomMember } from "@/hooks/useRoom";
 import { useStrokeSync } from "@/hooks/useStrokeSync";
@@ -23,6 +23,7 @@ import {
   EnvelopeStyle,
   MailStamp,
   PaperBackground,
+  PlacedSticker,
   Sticker,
   WashiTape,
   StoreItem,
@@ -42,7 +43,6 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<AppTab>("studio");
   const [mailView, setMailView] = useState<"inbox" | "compose">("inbox");
   const [accountOpen, setAccountOpen] = useState(false);
-  const [headerCopied, setHeaderCopied] = useState(false);
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -100,6 +100,7 @@ export default function Home() {
     applySharedCanvasState,
     shiftPlacedItems,
     updatePlacedItem,
+    removePlacedItem,
     removeSticker,
     removeWashiTape,
     removePaper,
@@ -117,12 +118,14 @@ export default function Home() {
   const {
     phase: roomPhase,
     activeRoomId,
-    activeRoomTitle,
+    isPublic: roomIsPublic,
+    isOwner: roomIsOwner,
     collabScope,
     members: roomMembers,
     trackCursor,
     selfColor,
-    joinWithToken,
+    error: roomError,
+    setRoomPublic,
   } = useRoom({
     hasSession: account.hasSession,
     selfId: selfArtistId,
@@ -137,7 +140,26 @@ export default function Home() {
   }, [selfArtistId]);
 
   // ── Unified stroke sync (replaces useBoardSync + useStrokeChannel) ──────────
-  const { broadcastStroke, saveStroke, deleteStroke, restoreStroke } = useStrokeSync({
+  // Delta placed-item events from collaborators — add/remove directly without replacing the
+  // whole array, so local changes made since the last board-update aren't clobbered.
+  const handleRemotePlacedItemAdd = useCallback(
+    (item: PlacedSticker) => applySharedCanvasState({ placedItems: [...placedItems, item] }),
+    [applySharedCanvasState, placedItems],
+  );
+  const handleRemotePlacedItemRemove = useCallback(
+    (itemId: string) =>
+      applySharedCanvasState({ placedItems: placedItems.filter((p) => p.id !== itemId) }),
+    [applySharedCanvasState, placedItems],
+  );
+
+  const {
+    broadcastStroke,
+    saveStroke,
+    deleteStroke,
+    restoreStroke,
+    broadcastPlacedItemAdd,
+    broadcastPlacedItemRemove,
+  } = useStrokeSync({
     hasSession: account.hasSession,
     collabScope,
     activeRoomId,
@@ -147,6 +169,8 @@ export default function Home() {
     placedItems,
     selectedPaper,
     applySharedCanvasState,
+    onRemotePlacedItemAdd: handleRemotePlacedItemAdd,
+    onRemotePlacedItemRemove: handleRemotePlacedItemRemove,
     saveBoardState,
     loadBoardState,
   });
@@ -198,6 +222,24 @@ export default function Home() {
     [restoreStroke],
   );
 
+  // ── Placed-item callbacks (broadcast immediately to collaborators) ────────────
+
+  const handlePlaceAsset = useCallback(
+    (asset: Sticker | WashiTape, x: number, y: number) => {
+      const placed = placeItem(asset, x, y);
+      if (placed) broadcastPlacedItemAdd(placed);
+    },
+    [placeItem, broadcastPlacedItemAdd],
+  );
+
+  const handleRemovePlacedItem = useCallback(
+    (id: string) => {
+      removePlacedItem(id);
+      broadcastPlacedItemRemove(id);
+    },
+    [removePlacedItem, broadcastPlacedItemRemove],
+  );
+
   // ── Asset callbacks ──────────────────────────────────────────────────────────
 
   const handleBrushChange = useCallback((update: Partial<BrushSettings>) => {
@@ -226,8 +268,8 @@ export default function Home() {
   );
 
   const handleExport = useCallback(() => {
-    if (canvasRef.current) exportWithDSBorder(canvasRef.current, "mochimail_letter");
-  }, []);
+    if (canvasRef.current) void exportAnimated(canvasRef.current, placedItems, "mochimail_letter");
+  }, [placedItems]);
 
   const handleStoreAddToAssets = useCallback(
     (item: StoreItem) => {
@@ -466,29 +508,6 @@ export default function Home() {
               </span>
               <span className="hidden sm:inline">Rooms</span>
             </button>
-            {activeRoomId ? (
-              <button
-                onClick={async () => {
-                  await navigator.clipboard.writeText(
-                    `${globalThis.location.origin}/rooms/${activeRoomId}`,
-                  );
-                  setHeaderCopied(true);
-                  setTimeout(() => setHeaderCopied(false), 2000);
-                }}
-                className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
-                style={{
-                  background: headerCopied ? "rgba(52,211,153,0.15)" : "transparent",
-                  color: headerCopied ? "#065f46" : "var(--muted)",
-                }}
-                aria-label="Share room link"
-                title={`Share: ${globalThis.location?.origin}/rooms/${activeRoomId}`}
-              >
-                <span>{headerCopied ? <FiCheck /> : <FiShare2 />}</span>
-                <span className="hidden sm:inline">
-                  {headerCopied ? "Copied!" : "Share"}
-                </span>
-              </button>
-            ) : null}
           </nav>
 
           <button
@@ -559,31 +578,30 @@ export default function Home() {
         className="relative flex-1 overflow-hidden"
         style={{ display: activeTab === "studio" ? "flex" : "none" }}
       >
-        <RoomModeBanner
+        {/* Room control: share + public/private toggle (top-left) */}
+        <RoomControl
           phase={roomPhase}
-          activeRoomId={activeRoomId}
-          activeRoomTitle={activeRoomTitle}
-          onJoinWithToken={joinWithToken}
-          onOpenRooms={() => router.push("/rooms")}
+          isPublic={roomIsPublic}
+          isOwner={roomIsOwner}
+          shareUrl={mounted ? globalThis.location?.href ?? "" : ""}
+          error={roomError}
+          onTogglePublic={setRoomPublic}
         />
 
-        {/* Edge indicators for off-screen collaborators */}
+        {/* Edge pointers for off-screen collaborators */}
         {viewSize.w > 0 &&
           remoteArtists.map((member) => {
-            const MARGIN = 32;
+            const MARGIN = 48;
             const vx = member.x - worldOffset.x - scrollPos.left;
             const vy = member.y - worldOffset.y - scrollPos.top;
             const isVisible =
-              vx >= -16 &&
-              vx <= viewSize.w + 16 &&
-              vy >= -16 &&
-              vy <= viewSize.h + 16;
+              vx >= -20 && vx <= viewSize.w + 20 && vy >= -20 && vy <= viewSize.h + 20;
             if (isVisible) return null;
             const cx = viewSize.w / 2;
             const cy = viewSize.h / 2;
             const dx = vx - cx;
             const dy = vy - cy;
-            const angle = Math.atan2(dy, dx);
+            const angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
             const tx =
               dx > 0
                 ? (viewSize.w - MARGIN - cx) / dx
@@ -597,32 +615,45 @@ export default function Home() {
                   ? (MARGIN - cy) / dy
                   : Infinity;
             const t = Math.min(tx, ty);
+            const px = cx + dx * t;
+            const py = cy + dy * t;
+            const initials = member.name.slice(0, 2).toUpperCase();
             return (
               <button
                 key={member.presenceKey}
                 onClick={() => jumpToMember(member)}
-                className="btn-smooth absolute z-50 flex flex-col items-center gap-0.5"
-                style={{ left: cx + dx * t, top: cy + dy * t, transform: "translate(-50%, -50%)" }}
+                className="btn-smooth absolute z-50 flex items-center gap-1.5 rounded-full py-1 pl-1 pr-2.5 text-[11px] font-semibold text-white"
+                style={{
+                  left: px,
+                  top: py,
+                  transform: "translate(-50%, -50%)",
+                  background: member.color,
+                  boxShadow: "0 2px 10px rgba(0,0,0,0.22)",
+                }}
                 title={`Jump to ${member.name}`}
               >
+                {/* Avatar circle */}
                 <span
-                  className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-[9px] font-semibold text-white"
-                  style={{ background: member.color, boxShadow: "0 2px 6px rgba(0,0,0,0.18)" }}
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+                  style={{ background: "rgba(255,255,255,0.25)" }}
                 >
-                  {member.name}
+                  {initials}
                 </span>
-                <div
-                  className="flex h-5 w-5 items-center justify-center rounded-full"
+                <span className="max-w-20 truncate">{member.name}</span>
+                {/* Directional arrow */}
+                <svg
+                  width="8"
+                  height="8"
+                  viewBox="0 0 8 8"
+                  fill="none"
                   style={{
-                    background: member.color,
-                    transform: `rotate(${(angle * 180) / Math.PI}deg)`,
-                    boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+                    marginLeft: 2,
+                    transform: `rotate(${angleDeg}deg)`,
+                    flexShrink: 0,
                   }}
                 >
-                  <svg width="9" height="9" viewBox="-5 -5 10 10" fill="none">
-                    <polygon points="5,0 -3.5,-3.5 -3.5,3.5" fill="white" />
-                  </svg>
-                </div>
+                  <polygon points="8,4 2,1 3,4 2,7" fill="white" opacity="0.9" />
+                </svg>
               </button>
             );
           })}
@@ -641,18 +672,20 @@ export default function Home() {
               onStrokeComplete={handleStrokeComplete}
               onUndoStroke={handleUndoStroke}
               onRedoStroke={handleRedoStroke}
-              onPlaceAsset={(asset, x, y) => placeItem(asset, x, y)}
-              onAddTextItem={(item) =>
-                placeTextItem(
+              onPlaceAsset={handlePlaceAsset}
+              onAddTextItem={(item) => {
+                const placed = placeTextItem(
                   item.text ?? "Text",
                   item.x,
                   item.y,
                   item.textColor ?? brushSettings.color,
                   item.textSize ?? 32,
                   item.textFont ?? '"Space Mono", monospace',
-                )
-              }
+                );
+                if (placed) broadcastPlacedItemAdd(placed);
+              }}
               onUpdatePlacedItem={updatePlacedItem}
+              removePlacedItem={handleRemovePlacedItem}
               backgroundOffsetX={worldOffset.x}
               backgroundOffsetY={worldOffset.y}
               width={CANVAS_W}

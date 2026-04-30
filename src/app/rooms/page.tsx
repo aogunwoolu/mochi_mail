@@ -28,9 +28,21 @@ function CopyButton({ text, label = "Copy link" }: { text: string; label?: strin
   return (
     <button
       onClick={async () => {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const el = document.createElement("textarea");
+            el.value = text;
+            el.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand("copy");
+            document.body.removeChild(el);
+          }
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch { /* silent fail */ }
       }}
       className="btn-smooth flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold"
       style={{
@@ -170,13 +182,13 @@ function RoomsPageInner() {
       const codeOnly = raw.replace(/-/g, "").toUpperCase();
       if (/^[A-Z0-9]{6}$/.test(codeOnly)) {
         const joined = await rooms.joinByCode(codeOnly, joinPassword);
-        router.push(`/?room=${encodeURIComponent(joined.room_id)}`);
+        router.push(`/?room=${encodeURIComponent(joined.invite_token || joined.room_id)}`);
         return;
       }
       // Otherwise treat as invite link or raw token
       const token = raw.includes("/") ? raw.split("/").pop() ?? "" : raw;
       const joined = await rooms.joinByInviteToken(token, joinPassword);
-      router.push(`/?room=${encodeURIComponent(joined.room_id)}`);
+      router.push(`/?room=${encodeURIComponent(joined.invite_token || joined.room_id)}`);
     } catch (err) {
       flash(errMsg(err, "Unable to join room."), true);
     }
@@ -252,7 +264,7 @@ function RoomsPageInner() {
               ) : null}
             </div>
             <button
-              onClick={() => router.push(`/?room=${encodeURIComponent(primaryRoom.id)}`)}
+              onClick={() => router.push(`/?room=${encodeURIComponent(primaryRoom.inviteToken)}`)}
               className="btn-smooth shrink-0 flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-white"
               style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}
             >
@@ -371,9 +383,22 @@ function RoomsPageInner() {
               <RoomRow
                 key={room.id}
                 room={room}
-                onOpen={() => router.push(`/?room=${encodeURIComponent(room.id)}`)}
+                onOpen={() => router.push(`/?room=${encodeURIComponent(room.inviteToken)}`)}
                 onCopyLink={async () => {
-                  await navigator.clipboard.writeText(getRoomLink(room));
+                  const link = getRoomLink(room);
+                  try {
+                    if (navigator.clipboard?.writeText) {
+                      await navigator.clipboard.writeText(link);
+                    } else {
+                      const el = document.createElement("textarea");
+                      el.value = link;
+                      el.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
+                      document.body.appendChild(el);
+                      el.select();
+                      document.execCommand("copy");
+                      document.body.removeChild(el);
+                    }
+                  } catch { /* silent fail */ }
                   flash(`Copied link for "${room.title}"`);
                 }}
                 onRotate={async () => {

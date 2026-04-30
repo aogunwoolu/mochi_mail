@@ -185,13 +185,32 @@ export function useRooms(currentAccount: AccountIdentity) {
   const joinByInviteToken = useCallback(
     async (token: string, password?: string) => {
       const supabase = createSupabaseBrowserClient();
-      const { data, error: joinError } = await supabase.rpc("join_room_by_token", {
+      // Use join_room_full so we get invite_token back in one call
+      const { data, error: joinError } = await (supabase.rpc as Function)("join_room_full", {
         p_token: token,
-        p_password: password?.trim() ? password : null,
       });
 
+      // Fallback: if the token has a password, join_room_by_token handles that case
+      if (joinError && password?.trim()) {
+        const { data: d2, error: e2 } = await supabase.rpc("join_room_by_token", {
+          p_token: token,
+          p_password: password.trim(),
+        });
+        if (e2) throw e2;
+        const joined2 = (d2 as Array<{ room_id: string; room_title: string }> | null)?.[0];
+        if (!joined2) throw new Error("Unable to join this room.");
+        // Fetch invite_token separately after password join
+        const { data: roomData } = await supabase
+          .from("rooms")
+          .select("id, title, invite_token, is_public")
+          .eq("id", joined2.room_id)
+          .single();
+        await refresh();
+        return { room_id: joined2.room_id, room_title: joined2.room_title, invite_token: roomData?.invite_token ?? token };
+      }
+
       if (joinError) throw joinError;
-      const joined = data?.[0];
+      const joined = (data as Array<{ room_id: string; room_title: string; invite_token: string }> | null)?.[0];
       if (!joined) throw new Error("Unable to join this room.");
       await refresh();
       return joined;
@@ -202,7 +221,6 @@ export function useRooms(currentAccount: AccountIdentity) {
   const joinByCode = useCallback(
     async (code: string, password?: string) => {
       const supabase = createSupabaseBrowserClient();
-      // join_room_by_code added in migration 0007 — cast until DB types are regenerated
       const { data, error: joinError } = await (supabase as unknown as { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }> })
         .rpc("join_room_by_code", {
           p_code: code.toUpperCase().trim(),
@@ -213,8 +231,15 @@ export function useRooms(currentAccount: AccountIdentity) {
       const rows = data as Array<{ room_id: string; room_title: string; room_code: string }> | null;
       const joined = rows?.[0];
       if (!joined) throw new Error("Unable to join this room.");
+
+      // Fetch invite_token so the canvas URL uses it
+      const { data: roomData } = await supabase
+        .from("rooms")
+        .select("invite_token")
+        .eq("id", joined.room_id)
+        .single();
       await refresh();
-      return joined;
+      return { ...joined, invite_token: (roomData as { invite_token?: string } | null)?.invite_token ?? "" };
     },
     [refresh]
   );
