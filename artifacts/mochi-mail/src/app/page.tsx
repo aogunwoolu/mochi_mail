@@ -271,6 +271,8 @@ export default function Home() {
     trackCanvasExport();
   }, [placedItems, isExporting, trackCanvasExport]);
 
+  const [triggerOpenAssets, setTriggerOpenAssets] = useState(0);
+
   const handleStoreAddToAssets = useCallback(
     (item: StoreItem) => {
       if (item.type === "sticker")
@@ -292,6 +294,8 @@ export default function Home() {
           item.fontData.glyphHeight,
         );
       trackItemAdded(item.id, item.type, item.name);
+      setActiveTab("studio");
+      setTriggerOpenAssets((n) => n + 1);
     },
     [addSticker, addWashiTape, addPaper, addStamp, addEnvelope, addCustomFont, setSelectedPaper, trackItemAdded],
   );
@@ -734,6 +738,7 @@ export default function Home() {
           onClear={() => canvasRef.current?.clearCanvas()}
           onExport={handleExport}
           isExporting={isExporting}
+          triggerOpenAssets={triggerOpenAssets}
           stickers={stickers}
           washiTapes={washiTapes}
           papers={papers}

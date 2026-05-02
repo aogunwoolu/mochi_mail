@@ -71,6 +71,7 @@ interface StudioToolbarProps {
   onClear: () => void;
   onExport: () => void;
   isExporting?: boolean;
+  triggerOpenAssets?: number;
   stickers: Sticker[];
   washiTapes: WashiTape[];
   papers: PaperBackground[];
@@ -165,6 +166,7 @@ function Divider() {
 
 export default function StudioToolbar({
   brushSettings, onBrushChange, onUndo, onRedo, onClear, onExport, isExporting = false,
+  triggerOpenAssets = 0,
   stickers, washiTapes, papers, customFonts, kitLibrary, storeItems,
   selectedAsset, selectedPaper, viewer,
   onSelectSticker, onSelectWashi, onSelectPaper, onDeselectAsset,
@@ -200,6 +202,13 @@ export default function StudioToolbar({
   }, []);
 
   useEffect(() => { setCustomColor(brushSettings.color); }, [brushSettings.color]);
+
+  useEffect(() => {
+    if (triggerOpenAssets > 0) {
+      setDrawerOpen(true);
+      setActiveSection("assets");
+    }
+  }, [triggerOpenAssets]);
 
   // Persist custom palette
   useEffect(() => {
