@@ -448,10 +448,11 @@ export function useStore(user: ViewerIdentity) {
       const fontItem = isFont ? (item as CustomFont) : null;
       const visualItem: VisualAsset | null = "glyphs" in item ? null : item;
       const previewGlyph = fontItem ? (fontItem.glyphs["A"] ?? fontItem.glyphs["a"] ?? Object.values(fontItem.glyphs)[0] ?? "") : "";
+      const imageData = isFont ? previewGlyph : (visualItem?.imageData ?? "");
       const storeItem: StoreItem = {
         id: generateId(),
         name: item.name,
-        imageData: isFont ? previewGlyph : (visualItem?.imageData ?? ""),
+        imageData,
         type: itemType,
         authorName,
         authorId,
@@ -461,6 +462,7 @@ export function useStore(user: ViewerIdentity) {
         width: isFont ? fontItem?.glyphWidth ?? 52 : (visualItem?.width ?? 80),
         height: isFont ? fontItem?.glyphHeight ?? 64 : (visualItem?.height ?? 80),
         tags,
+        isAnimated: itemType === "sticker" && imageData.startsWith("data:image/gif"),
         fontData: isFont ? fontItem ?? undefined : undefined,
       };
       setStoreItems((prev) => {
@@ -573,6 +575,7 @@ export function useStore(user: ViewerIdentity) {
         imageData: item.imageData,
         width: item.width,
         height: item.height,
+        isAnimated: item.isAnimated ?? item.imageData.startsWith("data:image/gif"),
       } as Sticker;
     },
     [storeItems]

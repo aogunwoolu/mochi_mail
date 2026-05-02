@@ -278,7 +278,7 @@ export default function Home() {
   const handleStoreAddToAssets = useCallback(
     (item: StoreItem) => {
       if (item.type === "sticker")
-        addSticker(item.name, item.imageData, item.width, item.height);
+        addSticker(item.name, item.imageData, item.width, item.height, item.isAnimated ?? item.imageData.startsWith("data:image/gif"));
       else if (item.type === "washi")
         addWashiTape(item.name, item.imageData, item.opacity ?? 0.7, item.width, item.height);
       else if (item.type === "background") {

@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { SpaceItem, SpaceItemType, UserSpace } from "@/types";
 import type { Database } from "@/types/database";
@@ -11,7 +11,7 @@ type SpaceUpdate = Database["public"]["Tables"]["spaces"]["Update"];
 type SpaceItemUpdate = Database["public"]["Tables"]["space_items"]["Update"];
 
 function generateId(): string {
-  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}-${Math.random().toString(36).slice(2, 8)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 function rowToSpaceItem(row: SpaceItemRow): SpaceItem {
@@ -113,16 +113,6 @@ export function useSpaces(
   currentAccount: { id: string; displayName: string; username: string; bio: string; avatarUrl: string; youtubeUrl: string; accentColor: string; wallpaper: string; homeTitle: string } | null
 ) {
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
-  const pendingItemPatchRef = useRef<Record<string, Partial<SpaceItem>>>({});
-  const pendingItemTimerRef = useRef<Record<string, ReturnType<typeof globalThis.setTimeout>>>({});
-
-  useEffect(() => {
-    return () => {
-      Object.values(pendingItemTimerRef.current).forEach((timerId) => globalThis.clearTimeout(timerId));
-      pendingItemTimerRef.current = {};
-      pendingItemPatchRef.current = {};
-    };
-  }, []);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -284,6 +274,7 @@ export function useSpaces(
 
     const supabase = createSupabaseBrowserClient();
     void supabase.from("space_items").insert({
+      id: item.id,
       space_id: ownSpace.id,
       type: item.type,
       title: item.title,
@@ -304,31 +295,13 @@ export function useSpaces(
     setSpaces((prev) =>
       prev.map((s) =>
         s.id === spaceId
-          ? {
-              ...s,
-              items: s.items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)),
-              updatedAt: Date.now(),
-            }
+          ? { ...s, items: s.items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)), updatedAt: Date.now() }
           : s
       )
     );
-
-    const mergedPatch = { ...(pendingItemPatchRef.current[itemId] ?? {}), ...patch };
-    pendingItemPatchRef.current[itemId] = mergedPatch;
-
-    const existingTimer = pendingItemTimerRef.current[itemId];
-    if (existingTimer) globalThis.clearTimeout(existingTimer);
-
-    pendingItemTimerRef.current[itemId] = globalThis.setTimeout(() => {
-      const payload = pendingItemPatchRef.current[itemId];
-      delete pendingItemPatchRef.current[itemId];
-      delete pendingItemTimerRef.current[itemId];
-
-      if (!payload) return;
-
-      const supabase = createSupabaseBrowserClient();
-      void supabase.from("space_items").update(toSpaceItemUpdate(payload)).eq("id", itemId);
-    }, 140);
+    const supabase = createSupabaseBrowserClient();
+    void supabase.from("space_items").update(toSpaceItemUpdate(patch)).eq("id", itemId)
+      .then(({ error }) => { if (error) console.error("[space] save failed:", error.message); });
   }, []);
 
   const removeSpaceItem = useCallback(async (spaceId: string, itemId: string) => {

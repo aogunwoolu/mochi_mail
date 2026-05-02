@@ -153,7 +153,7 @@ export function MochiProvider({ children }: { children: ReactNode }) {
 
   const equipFromStore = (item: StoreItem) => {
     if (item.type === "sticker") {
-      assets.addSticker(item.name, item.imageData, item.width, item.height);
+      assets.addSticker(item.name, item.imageData, item.width, item.height, item.isAnimated ?? item.imageData.startsWith("data:image/gif"));
     } else if (item.type === "washi") {
       assets.addWashiTape(item.name, item.imageData, item.opacity ?? 0.7, item.width, item.height);
     } else if (item.type === "background") {

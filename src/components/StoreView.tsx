@@ -291,13 +291,18 @@ export default function StoreView({
                 key={item.id}
                 className="glass group rounded-2xl p-3 transition-all hover:scale-[1.02]"
               >
-                <div className={`mb-2 flex items-center justify-center overflow-hidden rounded-xl ${item.type === "background" || item.type === "font" || item.type === "envelope" ? "aspect-4/3" : "aspect-square"}`} style={{ background: "rgba(255,255,255,0.03)" }}>
+                <div className={`relative mb-2 flex items-center justify-center overflow-hidden rounded-xl ${item.type === "background" || item.type === "font" || item.type === "envelope" ? "aspect-4/3" : "aspect-square"}`} style={{ background: "rgba(255,255,255,0.03)" }}>
                   <img
                     src={item.imageData}
                     alt={item.name}
                     className="h-full w-full object-cover"
                     style={{ imageRendering: item.type === "background" || item.type === "font" || item.type === "envelope" ? "auto" : "pixelated", opacity: item.type === "washi" ? item.opacity ?? 0.7 : 1 }}
                   />
+                  {item.isAnimated && (
+                    <span className="absolute bottom-1 right-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold" style={{ background: "rgba(217,119,6,0.9)", color: "#fff" }}>
+                      GIF
+                    </span>
+                  )}
                 </div>
                 <div className="mb-1 truncate text-sm font-semibold">{item.name}</div>
                 <div className="mb-2 flex items-center justify-between text-[10px]" style={{ color: "var(--muted)" }}>

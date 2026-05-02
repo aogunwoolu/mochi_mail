@@ -234,6 +234,7 @@ export interface StoreItem {
   width: number;
   height: number;
   tags: string[];
+  isAnimated?: boolean;
   fontData?: CustomFont;
   kitData?: ScrapbookKit;
 }

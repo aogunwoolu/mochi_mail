@@ -585,14 +585,22 @@ export default function SpaceStudio({
   // Drag handling
   useEffect(() => {
     if (!dragState || !selectedSpace || !isOwner) return;
+    const spaceId = selectedSpace.id;
     const move = (e: PointerEvent) =>
       setDragState((p) => p ? { ...p, liveX: Math.max(8, p.originX + (e.clientX - p.startX)), liveY: Math.max(8, p.originY + (e.clientY - p.startY)) } : p);
-    const up = () =>
+    const up = () => {
+      // Capture latest position from the functional updater (which always receives the current state
+      // synchronously — JavaScript is single-threaded so `saved` is set before the next line runs).
+      let saved: { itemId: string; x: number; y: number } | null = null;
       setDragState((p) => {
-        if (!p) return null;
-        onUpdateSpaceItem(selectedSpace.id, p.itemId, { x: p.liveX, y: p.liveY });
+        if (p) saved = { itemId: p.itemId, x: p.liveX, y: p.liveY };
         return null;
       });
+      if (saved) {
+        const { itemId, x, y } = saved as { itemId: string; x: number; y: number };
+        onUpdateSpaceItem(spaceId, itemId, { x, y });
+      }
+    };
     globalThis.addEventListener("pointermove", move);
     globalThis.addEventListener("pointerup", up);
     return () => { globalThis.removeEventListener("pointermove", move); globalThis.removeEventListener("pointerup", up); };
