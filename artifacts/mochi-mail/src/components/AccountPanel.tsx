@@ -1,6 +1,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ViewerIdentity } from "@/types";
+import { getTrackingEnabled, setTrackingEnabled } from "@/lib/posthog";
 
 const ACCENT_PRESETS = ["#ff6b9d", "#67d4f1", "#6ee7b7", "#a78bfa", "#fb923c", "#fbbf24"] as const;
 
@@ -389,6 +390,13 @@ export default function AccountPanel({
   const [mode, setMode] = useState<"login" | "signup">("signup");
   const [error, setError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [trackingEnabled, setTrackingEnabledState] = useState(getTrackingEnabled);
+
+  const handleTrackingToggle = () => {
+    const next = !trackingEnabled;
+    setTrackingEnabledState(next);
+    setTrackingEnabled(next);
+  };
   const [guestName, setGuestName] = useState(viewer.name);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -566,6 +574,37 @@ export default function AccountPanel({
 
       <div className="max-h-[min(80vh,46rem)] overflow-y-auto p-4">
         {panelBody}
+      </div>
+
+      <div className="border-t px-4 py-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.6)" }}>
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-semibold" style={{ color: "var(--foreground-soft)" }}>
+              Usage analytics
+            </p>
+            <p className="mt-0.5 text-[10px] leading-relaxed" style={{ color: "var(--muted)" }}>
+              Helps us understand what's working and catch errors before they reach you. No personal data is sold or shared.
+            </p>
+          </div>
+          <button
+            onClick={handleTrackingToggle}
+            role="switch"
+            aria-checked={trackingEnabled}
+            className="btn-smooth mt-0.5 shrink-0"
+            style={{ outline: "none" }}
+            aria-label={trackingEnabled ? "Disable analytics" : "Enable analytics"}
+          >
+            <div
+              className="relative h-5 w-9 rounded-full transition-colors duration-200"
+              style={{ background: trackingEnabled ? "var(--pink)" : "rgba(180,170,195,0.45)" }}
+            >
+              <div
+                className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
+                style={{ transform: trackingEnabled ? "translateX(1.125rem)" : "translateX(0.125rem)" }}
+              />
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );

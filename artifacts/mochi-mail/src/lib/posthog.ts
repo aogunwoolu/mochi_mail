@@ -3,6 +3,31 @@ import posthog from "posthog-js";
 const KEY = import.meta.env.VITE_POSTHOG_KEY as string | undefined;
 const HOST = import.meta.env.VITE_POSTHOG_HOST as string | undefined;
 
+export const TRACKING_PREF_KEY = "mochimail_tracking_enabled";
+
+export function getTrackingEnabled(): boolean {
+  try {
+    const stored = localStorage.getItem(TRACKING_PREF_KEY);
+    return stored === null ? true : stored === "true";
+  } catch {
+    return true;
+  }
+}
+
+export function setTrackingEnabled(enabled: boolean) {
+  try {
+    localStorage.setItem(TRACKING_PREF_KEY, String(enabled));
+  } catch {
+    // ignore
+  }
+  if (!KEY) return;
+  if (enabled) {
+    posthog.opt_in_capturing();
+  } else {
+    posthog.opt_out_capturing();
+  }
+}
+
 export function initPostHog() {
   if (!KEY || !HOST) return;
   posthog.init(KEY, {
@@ -12,6 +37,7 @@ export function initPostHog() {
     capture_pageleave: true,
     autocapture: true,
     persistence: "memory",
+    opt_out_capturing_by_default: !getTrackingEnabled(),
     disable_session_recording: import.meta.env.DEV,
     disable_surveys: true,
     enable_heatmaps: !import.meta.env.DEV,
