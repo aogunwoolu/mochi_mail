@@ -36,7 +36,7 @@ function SpacePageInner() {
     if (account.hydrated && !account.hasSession) {
       navigate("/");
     }
-  }, [account.hydrated, account.hasSession, router]);
+  }, [account.hydrated, account.hasSession, navigate]);
 
   if (!account.hydrated || isPreparingSpace) {
     return (
