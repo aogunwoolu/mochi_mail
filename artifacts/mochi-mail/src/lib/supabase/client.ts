@@ -1,4 +1,3 @@
-
 import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
@@ -12,9 +11,16 @@ export function createSupabaseBrowserClient(): SupabaseClient<Database> {
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
-    throw new Error("Supabase environment variables are missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+    console.warn(
+      "[MochiMail] VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is not set. " +
+      "The app will run in offline/local-only mode. " +
+      "Set these environment variables in your deployment to enable accounts and sync."
+    );
   }
 
-  client = createBrowserClient<Database>(url, anonKey);
+  client = createBrowserClient<Database>(
+    url || "https://placeholder.supabase.co",
+    anonKey || "placeholder-anon-key"
+  );
   return client;
 }
