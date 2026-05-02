@@ -18,7 +18,7 @@ function errMsg(err: unknown, fallback: string): string {
 export default function RoomInvitePage() {
   const router = useRouter();
   const params = useParams<{ inviteToken: string }>();
-  const token = params.inviteToken;
+  const token = params?.inviteToken;
   const account = useAccount();
   const rooms = useRooms(account.currentAccount ? {
     id: account.currentAccount.id,
@@ -41,7 +41,7 @@ export default function RoomInvitePage() {
         setError(null);
 
         try {
-          const result = await rooms.getInvitePreview(token);
+          const result = await rooms.getInvitePreview(token ?? "");
           if (!cancelled) {
             if (result) {
               setPreview(result);
@@ -55,7 +55,7 @@ export default function RoomInvitePage() {
           const { data: roomData } = await supabase
             .from("rooms")
             .select("id,title")
-            .eq("id", token)
+            .eq("id", token ?? "")
             .maybeSingle();
 
           if (!cancelled) {
@@ -79,7 +79,7 @@ export default function RoomInvitePage() {
         cancelled = true;
       };
     } else {
-      router.push(`/rooms?invite=${encodeURIComponent(token)}`);
+      router.push(`/rooms?invite=${encodeURIComponent(token ?? "")}`);
       return;
     }
   }, [account.hydrated, account.hasSession, rooms, router, token]);
@@ -130,7 +130,7 @@ export default function RoomInvitePage() {
                 onClick={async () => {
                   setError(null);
                   try {
-                    const joined = await rooms.joinByInviteToken(token, password);
+                    const joined = await rooms.joinByInviteToken(token ?? "", password);
                     router.push(`/?room=${encodeURIComponent(joined.invite_token || joined.room_id)}`);
                   } catch (err) {
                     setError(errMsg(err, "Could not join room."));

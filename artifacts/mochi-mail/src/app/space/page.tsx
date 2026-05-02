@@ -14,7 +14,7 @@ function SpacePageInner() {
   const spaces = useSpaces(account.accounts, account.currentAccount);
   const [selectedSpaceId, setSelectedSpaceId] = useState("");
   const isPreparingSpace = account.hydrated && account.hasSession && !account.currentAccount;
-  const requestedUser = searchParams.get("u")?.trim().toLowerCase() ?? "";
+  const requestedUser = searchParams?.get("u")?.trim().toLowerCase() ?? "";
 
   const selectedSpace = spaces.spaces.find((s) => s.id === selectedSpaceId)
     ?? spaces.ownSpace

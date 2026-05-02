@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { SpaceItem, SpaceItemType, UserSpace } from "@/types";
 import type { Database } from "@/types/database";
@@ -113,6 +113,8 @@ export function useSpaces(
   currentAccount: { id: string; displayName: string; username: string; bio: string; avatarUrl: string; youtubeUrl: string; accentColor: string; wallpaper: string; homeTitle: string } | null
 ) {
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
+  const pendingItemTimerRef = useRef<Record<string, number>>({});
+  const pendingItemPatchRef = useRef<Record<string, Partial<SpaceItem>>>({});
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();

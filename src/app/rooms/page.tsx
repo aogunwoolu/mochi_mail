@@ -108,7 +108,7 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
 function RoomsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const inviteFromUrl = searchParams.get("invite")?.trim() ?? "";
+  const inviteFromUrl = searchParams?.get("invite")?.trim() ?? "";
   const account = useAccount();
   const rooms = useRooms(account.currentAccount ? {
     id: account.currentAccount.id,
