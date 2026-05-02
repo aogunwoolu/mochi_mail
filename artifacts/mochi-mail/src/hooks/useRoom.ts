@@ -233,32 +233,70 @@ export function useRoom({
         timeout,
       ]);
     } else {
-      // Token in URL: join the room (idempotent for owner/existing members)
+      // Token in URL: join the room (idempotent for owner/existing members).
+      // The token may be an invite_token (hex string) or a room UUID (stable link).
       setPhase("joining");
       const supabase = createSupabaseBrowserClient();
       void (async () => {
+        // 1. Try invite token first (the normal case)
         const { data, error: err } = await (supabase.rpc as Function)("join_room_full", {
           p_token: token,
         });
-        if (err || !data?.[0]) {
-          setPhase("error");
-          setError("Could not join this room. The link may be invalid.");
+
+        if (!err && data?.[0]) {
+          const room = data[0] as {
+            room_id: string;
+            room_title: string;
+            is_public: boolean;
+            is_owner: boolean;
+            invite_token: string;
+          };
+          setActiveRoomId(room.room_id);
+          setActiveRoomTitle(room.room_title);
+          setActiveRoomToken(room.invite_token);
+          setIsPublic(room.is_public);
+          setIsOwner(room.is_owner);
+          setPhase("drawing");
           return;
         }
-        const room = data[0] as {
-          room_id: string;
-          room_title: string;
-          is_public: boolean;
-          is_owner: boolean;
-          invite_token: string;
-        };
 
-        setActiveRoomId(room.room_id);
-        setActiveRoomTitle(room.room_title);
-        setActiveRoomToken(room.invite_token);
-        setIsPublic(room.is_public);
-        setIsOwner(room.is_owner);
-        setPhase("drawing");
+        // 2. Fallback: token might be a room UUID from the stable share link.
+        //    join_room_by_id handles public rooms and existing members by ID.
+        const { data: d2, error: e2 } = await (supabase.rpc as Function)("join_room_by_id", {
+          p_room_id: token,
+        });
+
+        if (!e2 && d2?.[0]) {
+          const room2 = d2[0] as {
+            room_id: string;
+            room_title: string;
+            is_public: boolean;
+            invite_token: string;
+          };
+          // Update URL to the invite token so future shares work correctly.
+          if (globalThis.history && room2.invite_token) {
+            const url = new URL(globalThis.location.href);
+            url.searchParams.set("room", room2.invite_token);
+            globalThis.history.replaceState(null, "", url.toString());
+          }
+          setActiveRoomId(room2.room_id);
+          setActiveRoomTitle(room2.room_title);
+          setActiveRoomToken(room2.invite_token);
+          setIsPublic(room2.is_public);
+          setIsOwner(false);
+          setPhase("drawing");
+          return;
+        }
+
+        // Both failed — surface a helpful error.
+        const detail = e2 instanceof Error ? e2.message : (err instanceof Error ? err.message : "");
+        const isPrivate = detail === "private";
+        setPhase("error");
+        setError(
+          isPrivate
+            ? "This room is private. Ask the owner for their invite link."
+            : "Could not join this room. The link may be invalid or expired.",
+        );
       })();
     }
   }, [hasSession, hydrated]);

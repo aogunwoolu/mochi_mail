@@ -129,7 +129,8 @@ export default function RoomInvitePage() {
                   setError(null);
                   try {
                     const joined = await rooms.joinByInviteToken(token, password);
-                    navigate(`/?room=${encodeURIComponent(joined.room_id)}`);
+                    // Use invite_token so join_room_full can resolve it on the canvas page.
+                    navigate(`/?room=${encodeURIComponent(joined.invite_token || joined.room_id)}`);
                   } catch (err) {
                     setError(errMsg(err, "Could not join room."));
                   }
