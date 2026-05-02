@@ -443,28 +443,25 @@ export default function StudioToolbar({
         </>
       )}
 
-      {/* ── Left toolbar wrapper — transparent column for centering ─────────── */}
+      {/* ── Left toolbar (centered in canvas area above tab bar) ── */}
       <div
         className="pointer-events-none absolute left-3 z-30 flex items-center justify-center"
         style={{ top: "1rem", bottom: "5.5rem" }}
       >
-      {/* Pill */}
-      <div
-        className="pointer-events-auto flex flex-col px-2 py-3"
-        style={{
-          maxHeight: "100%",
-          overflowY: "auto",
-          scrollbarWidth: "none",
-          background: "rgba(255,255,255,0.96)",
-          backdropFilter: "blur(20px)",
-          WebkitBackdropFilter: "blur(20px)",
-          borderRadius: 22,
-          border: "1px solid rgba(186,156,214,0.25)",
-          boxShadow: "0 8px 32px rgba(143,109,178,0.16), 0 2px 8px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
-        }}
-      >
-        {/* Tools — single column */}
-        <div className="flex flex-col items-center gap-0.5">
+        <div
+          className="pointer-events-auto flex flex-col items-center gap-0.5 px-2 py-3"
+          style={{
+            maxHeight: "100%",
+            overflowY: "auto",
+            scrollbarWidth: "none",
+            background: "rgba(255,255,255,0.96)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            borderRadius: 22,
+            border: "1px solid rgba(186,156,214,0.25)",
+            boxShadow: "0 8px 32px rgba(143,109,178,0.16), 0 2px 8px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
+          }}
+        >
           <ToolBtn
             active={brushSettings.tool === "pen" && !isStickerActive && !isWashiActive}
             onClick={() => setTool("pen")}
@@ -473,7 +470,6 @@ export default function StudioToolbar({
           >
             {PenIcon}
           </ToolBtn>
-
           <ToolBtn
             active={brushSettings.tool === "text"}
             onClick={() => setTool("text")}
@@ -482,7 +478,6 @@ export default function StudioToolbar({
           >
             {TextIcon}
           </ToolBtn>
-
           <ToolBtn
             active={brushSettings.tool === "select"}
             onClick={() => setTool("select")}
@@ -491,7 +486,6 @@ export default function StudioToolbar({
           >
             {SelectIcon}
           </ToolBtn>
-
           <ToolBtn
             active={brushSettings.tool === "eraser"}
             onClick={() => setTool("eraser")}
@@ -503,7 +497,6 @@ export default function StudioToolbar({
 
           <Divider />
 
-          {/* Asset drawer toggle */}
           <ToolBtn
             active={drawerOpen}
             onClick={() => setDrawerOpen((p) => !p)}
@@ -512,118 +505,114 @@ export default function StudioToolbar({
           >
             {AssetsIcon}
           </ToolBtn>
-        </div>
 
-        <Divider />
+          <Divider />
 
-        {/* Color swatches — 2-column grid to halve vertical footprint */}
-        <div className="grid grid-cols-2 gap-1.5 px-0.5 py-1">
-          {userPalette.map((color, i) => {
-            const selected = brushSettings.color === color;
-            return (
-              <button
-                key={`${color}-${i}`}
-                onClick={() => {
+          {/* Color swatches — 2-column grid */}
+          <div className="grid grid-cols-2 gap-1.5 px-0.5 py-0.5">
+            {userPalette.map((color, i) => {
+              const selected = brushSettings.color === color;
+              return (
+                <button
+                  key={`${color}-${i}`}
+                  onClick={() => {
+                    onBrushChange({
+                      color,
+                      tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool,
+                    });
+                    onDeselectAsset();
+                  }}
+                  className="btn-smooth rounded-full transition-all"
+                  style={{
+                    width: 24,
+                    height: 24,
+                    background: color,
+                    boxShadow: selected
+                      ? `0 0 0 2px white, 0 0 0 4px ${color}`
+                      : color === "#ffffff"
+                      ? "inset 0 0 0 1.5px rgba(0,0,0,0.15)"
+                      : "0 1px 4px rgba(0,0,0,0.15)",
+                  }}
+                  title={color}
+                  aria-label={`Color ${color}`}
+                />
+              );
+            })}
+            <label
+              className="btn-smooth flex cursor-pointer items-center justify-center overflow-hidden rounded-full"
+              style={{
+                width: 24,
+                height: 24,
+                background: "conic-gradient(from 0deg, #ff6b9d, #fb923c, #fbbf24, #6ee7b7, #67d4f1, #a78bfa, #ff6b9d)",
+                boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
+              }}
+              title="Custom color"
+              aria-label="Pick custom color"
+            >
+              <input
+                type="color"
+                value={customColor}
+                onChange={(e) => {
+                  setCustomColor(e.target.value);
                   onBrushChange({
-                    color,
+                    color: e.target.value,
                     tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool,
                   });
                   onDeselectAsset();
                 }}
-                className="btn-smooth rounded-full transition-all"
-                style={{
-                  width: 24,
-                  height: 24,
-                  background: color,
-                  outline: selected ? `3px solid ${color}` : "none",
-                  outlineOffset: 2,
-                  boxShadow: selected
-                    ? `0 0 0 2px white, 0 0 0 4px ${color}`
-                    : color === "#ffffff"
-                    ? "inset 0 0 0 1.5px rgba(0,0,0,0.15)"
-                    : "0 1px 4px rgba(0,0,0,0.15)",
-                }}
-                title={color}
-                aria-label={`Color ${color}`}
+                className="absolute opacity-0"
+                style={{ width: 1, height: 1 }}
               />
-            );
-          })}
-
-          {/* Custom color picker — fills last slot in grid */}
-          <label
-            className="btn-smooth flex cursor-pointer items-center justify-center overflow-hidden rounded-full"
-            style={{
-              width: 24,
-              height: 24,
-              background: "conic-gradient(from 0deg, #ff6b9d, #fb923c, #fbbf24, #6ee7b7, #67d4f1, #a78bfa, #ff6b9d)",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
-            }}
-            title="Custom color"
-            aria-label="Pick custom color"
-          >
-            <input
-              type="color"
-              value={customColor}
-              onChange={(e) => {
-                setCustomColor(e.target.value);
-                onBrushChange({
-                  color: e.target.value,
-                  tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool,
-                });
-                onDeselectAsset();
-              }}
-              className="absolute opacity-0"
-              style={{ width: 1, height: 1 }}
-            />
-          </label>
+            </label>
+          </div>
         </div>
       </div>
-      </div>
 
-      {/* ── Brush size popover — aligned with toolbar center ── */}
+      {/* ── Brush size — floats to the right of the toolbar, same vertical center ── */}
       {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
         <div
           className="pointer-events-none absolute left-[4.5rem] z-30 flex items-center"
           style={{ top: "1rem", bottom: "5.5rem" }}
         >
-        <div
-          className="pointer-events-auto flex flex-col items-center gap-1 px-1.5 py-2"
-          style={{
-            background: "rgba(255,255,255,0.96)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-            borderRadius: 16,
-            border: "1px solid rgba(186,156,214,0.25)",
-            boxShadow: "0 4px 16px rgba(143,109,178,0.13), 0 1px 4px rgba(0,0,0,0.06)",
-          }}
-        >
-          {([2, 5, 10, 18] as const).map((sz) => {
-            const active = brushSettings.size === sz;
-            const dot = Math.max(4, Math.min(sz + 2, 16));
-            return (
-              <button
-                key={sz}
-                onClick={() => onBrushChange({ size: sz })}
-                className="btn-smooth flex items-center justify-center rounded-xl"
-                style={{
-                  width: 34,
-                  height: 34,
-                  background: active ? "rgba(255,107,157,0.13)" : "transparent",
-                }}
-                title={`Size ${sz}`}
-                aria-label={`Brush size ${sz}`}
-              >
-                <span
-                  className="rounded-full"
+          <div
+            className="pointer-events-auto flex flex-col items-center gap-1 px-1.5 py-2"
+            style={{
+              background: "rgba(255,255,255,0.96)",
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+              borderRadius: 16,
+              border: "1px solid rgba(186,156,214,0.25)",
+              boxShadow: "0 4px 16px rgba(143,109,178,0.13), 0 1px 4px rgba(0,0,0,0.06)",
+            }}
+          >
+            {([2, 5, 10, 18] as const).map((sz) => {
+              const active = brushSettings.size === sz;
+              const dot = Math.max(4, Math.min(sz + 2, 16));
+              return (
+                <button
+                  key={sz}
+                  onClick={() => onBrushChange({ size: sz })}
+                  className="btn-smooth flex items-center justify-center rounded-xl"
                   style={{
-                    width: dot,
-                    height: dot,
-                    background: active ? "var(--pink)" : "rgba(100,80,130,0.35)",
+                    width: 34,
+                    height: 34,
+                    background: active ? "rgba(255,107,157,0.13)" : "transparent",
                   }}
-                />
-              </button>
-            );
-          })}
+                  title={`Size ${sz}`}
+                  aria-label={`Brush size ${sz}`}
+                >
+                  <span
+                    className="rounded-full"
+                    style={{
+                      width: dot,
+                      height: dot,
+                      background: active ? "var(--pink)" : "rgba(100,80,130,0.35)",
+                    }}
+                  />
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
