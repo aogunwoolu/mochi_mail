@@ -1,76 +1,58 @@
 
-import { GIFEncoder, quantize, applyPalette } from "gifenc";
 import type { PlacedSticker } from "@/types";
 import { DrawingCanvasHandle } from "./DrawingCanvas";
 
-// ─── Static PNG export ────────────────────────────────────────────────────────
-
-export function exportWithDSBorder(
-  canvasHandle: DrawingCanvasHandle,
-  filename: string = "mochimail"
-) {
-  const composite = canvasHandle.getCompositeCanvas();
-  const cw = composite.width;
-  const ch = composite.height;
-
-  const padding = 32;
-  const labelHeight = 28;
-
-  const exportCanvas = document.createElement("canvas");
-  exportCanvas.width = cw + padding * 2;
-  exportCanvas.height = ch + padding * 2 + labelHeight;
-  const ctx = exportCanvas.getContext("2d")!;
-
-  _drawDecoFrame(ctx, composite, cw, ch, padding, labelHeight, exportCanvas.width, exportCanvas.height);
-
-  const link = document.createElement("a");
-  link.download = `${filename}.png`;
-  link.href = exportCanvas.toDataURL("image/png");
-  link.click();
-}
-
-// ─── Animated GIF export ──────────────────────────────────────────────────────
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Exports an animated GIF when the canvas contains animated GIFs, otherwise
- * falls back to a static PNG.
- *
- * Fix for "not animated" bug: the CORS images must have real CSS layout
- * dimensions (not width:0/height:0) so the browser advances their GIF frames.
- * Zero-size or display:none elements are skipped by the browser's animation
- * engine — every captured frame would be frame-1, producing a static output.
- *
- * Fix for quality: 10 fps keeps file size manageable while still looking smooth,
- * and each frame gets its own optimal palette via per-frame quantisation.
+ * Main export entry point.
+ * - Animated items present → WebM video (full colour, no palette limit)
+ * - Static only            → JPEG (compact, high quality)
  */
-export async function exportAnimated(
+export async function exportCanvas(
   canvasHandle: DrawingCanvasHandle,
   placedItems: PlacedSticker[],
   filename = "mochimail",
-  durationMs = 2500,
+  durationMs = 3000,
 ): Promise<void> {
-  const hasGifs = placedItems.some((p) => p.isAnimated);
-  if (!hasGifs) {
-    exportWithDSBorder(canvasHandle, filename);
-    return;
+  if (placedItems.some((p) => p.isAnimated)) {
+    await _exportWebM(canvasHandle, placedItems, filename, durationMs);
+  } else {
+    _exportJpeg(canvasHandle, filename);
   }
+}
 
-  // ── Dimensions: scale so longest edge ≤ 800 px ─────────────────────────────
-  // Smaller output = fewer unique pixel colours = better palette use in GIF.
+// ─── JPEG (static) ────────────────────────────────────────────────────────────
+
+function _exportJpeg(canvasHandle: DrawingCanvasHandle, filename: string) {
+  const composite = canvasHandle.getCompositeCanvas();
+  const link = document.createElement("a");
+  link.download = `${filename}.jpg`;
+  link.href = composite.toDataURL("image/jpeg", 0.92);
+  link.click();
+}
+
+// ─── WebM video (animated) ────────────────────────────────────────────────────
+
+async function _exportWebM(
+  canvasHandle: DrawingCanvasHandle,
+  placedItems: PlacedSticker[],
+  filename: string,
+  durationMs: number,
+): Promise<void> {
   const base = canvasHandle.getBaseCanvas();
   const cw = base.width;
   const ch = base.height;
 
-  const MAX_DIM = 800;
+  // Scale so longest edge ≤ 1200 px — keeps file size manageable
+  const MAX_DIM = 1200;
   const scale = Math.min(1, MAX_DIM / Math.max(cw, ch));
   const sw = Math.round(cw * scale);
   const sh = Math.round(ch * scale);
 
-  // ── CORS-safe animated images ───────────────────────────────────────────────
-  // CRITICAL: images MUST have non-zero layout dimensions in the document.
-  // The browser's GIF animation engine skips elements that are width:0/height:0
-  // or display:none. We use opacity:0 + actual size to keep them invisible while
-  // still letting the browser advance their frames.
+  // ── CORS-safe animated images ─────────────────────────────────────────────
+  // Must have real CSS dimensions (not width:0/height:0) so the browser
+  // advances their GIF frames. opacity:0 keeps them invisible.
   const corsContainer = document.createElement("div");
   corsContainer.style.cssText =
     "position:fixed;top:0;left:0;opacity:0;pointer-events:none;z-index:-9999;overflow:hidden";
@@ -85,7 +67,6 @@ export async function exportAnimated(
         new Promise<void>((resolve) => {
           const img = document.createElement("img");
           img.crossOrigin = "anonymous";
-          // Give the image its actual rendered dimensions — required for animation.
           img.style.cssText = `position:absolute;width:${item.width}px;height:${item.height}px`;
           img.onload = () => resolve();
           img.onerror = () => resolve();
@@ -96,40 +77,53 @@ export async function exportAnimated(
     ),
   );
 
-  // Wait for the browser to decode & start animating the GIFs.
-  // Without this pause the first several captured frames are often still frame-1.
+  // Give the browser time to decode GIFs and start their animation loops
   await new Promise<void>((r) => setTimeout(r, 250));
 
-  // ── Frame canvas (willReadFrequently for fast getImageData) ─────────────────
+  // ── Frame canvas ──────────────────────────────────────────────────────────
   const frameCanvas = document.createElement("canvas");
   frameCanvas.width = sw;
   frameCanvas.height = sh;
-  const ctx = frameCanvas.getContext("2d", { willReadFrequently: true })!;
+  const ctx = frameCanvas.getContext("2d")!;
 
-  // Pre-scale the static base once — reused every frame
+  // Pre-scale static base once
   const scaledBase = document.createElement("canvas");
   scaledBase.width = sw;
   scaledBase.height = sh;
   scaledBase.getContext("2d")!.drawImage(base, 0, 0, sw, sh);
 
-  // ── GIF settings ─────────────────────────────────────────────────────────
-  // 10 fps: smooth enough for GIF, keeps file size manageable.
-  const FPS = 10;
-  const FRAME_DELAY = Math.round(100 / FPS); // centiseconds
-  const TOTAL_FRAMES = Math.round((FPS * durationMs) / 1000);
+  // ── MediaRecorder setup ───────────────────────────────────────────────────
+  const mimeType =
+    MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+      ? "video/webm;codecs=vp9"
+      : MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
+        ? "video/webm;codecs=vp8"
+        : "video/webm";
 
-  const gif = GIFEncoder();
+  const FPS = 30;
+  const stream = frameCanvas.captureStream(FPS);
+  const recorder = new MediaRecorder(stream, {
+    mimeType,
+    videoBitsPerSecond: 6_000_000,
+  });
+  const chunks: Blob[] = [];
+  recorder.ondataavailable = (e) => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
 
-  // ── Capture loop — rAF lets the browser advance each source GIF each tick ──
+  const recordingDone = new Promise<void>((resolve) => {
+    recorder.onstop = () => resolve();
+  });
+
+  recorder.start(100); // flush data every 100 ms
+
+  // ── Draw loop — runs for durationMs, rAF advances source GIF frames ───────
+  const startTime = performance.now();
   await new Promise<void>((resolve) => {
-    let captured = 0;
-
     function step() {
-      // 1. Static base (background + strokes + static stickers)
       ctx.clearRect(0, 0, sw, sh);
       ctx.drawImage(scaledBase, 0, 0);
 
-      // 2. Animated GIFs — drawn at scaled coordinates
       ctx.save();
       ctx.scale(scale, scale);
       for (const item of animatedItems) {
@@ -145,96 +139,25 @@ export async function exportAnimated(
       ctx.globalAlpha = 1;
       ctx.restore();
 
-      // 3. Per-frame quantise — each frame gets its own optimal 256-colour palette
-      const { data } = ctx.getImageData(0, 0, sw, sh);
-      const palette = quantize(data, 256);
-      const index = applyPalette(data, palette);
-      gif.writeFrame(index, sw, sh, { palette, delay: FRAME_DELAY, repeat: 0 });
-
-      captured++;
-      if (captured >= TOTAL_FRAMES) {
-        resolve();
-      } else {
+      if (performance.now() - startTime < durationMs) {
         requestAnimationFrame(step);
+      } else {
+        resolve();
       }
     }
-
     requestAnimationFrame(step);
   });
 
-  // Clean up hidden container
+  recorder.stop();
+  await recordingDone;
+
   document.body.removeChild(corsContainer);
 
-  gif.finish();
-
-  const blob = new Blob([gif.bytes().buffer as ArrayBuffer], { type: "image/gif" });
+  const blob = new Blob(chunks, { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${filename}.gif`;
+  a.download = `${filename}.webm`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
-
-// ─── Shared decorative frame (PNG export only) ────────────────────────────────
-
-function _drawDecoFrame(
-  ctx: CanvasRenderingContext2D,
-  content: HTMLCanvasElement,
-  cw: number,
-  ch: number,
-  padding: number,
-  labelHeight: number,
-  totalW: number,
-  totalH: number,
-) {
-  const grad = ctx.createLinearGradient(0, 0, totalW, totalH);
-  grad.addColorStop(0, "#1a1028");
-  grad.addColorStop(1, "#0f0a1a");
-  ctx.fillStyle = grad;
-  _rrFill(ctx, 0, 0, totalW, totalH, 16);
-
-  ctx.strokeStyle = "rgba(167, 139, 250, 0.3)";
-  ctx.lineWidth = 2;
-  _rrPath(ctx, 1, 1, totalW - 2, totalH - 2, 16);
-  ctx.stroke();
-
-  ctx.save();
-  ctx.beginPath();
-  _rrPath(ctx, padding, padding, cw, ch, 8);
-  ctx.clip();
-  ctx.fillStyle = "#FFFFFF";
-  ctx.fillRect(padding, padding, cw, ch);
-  ctx.drawImage(content, padding, padding);
-  ctx.restore();
-
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
-  ctx.lineWidth = 1;
-  _rrPath(ctx, padding, padding, cw, ch, 8);
-  ctx.stroke();
-
-  ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
-  ctx.font = "bold 10px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("✦ MochiMail ✦", totalW / 2, padding + ch + labelHeight);
-}
-
-function _rrFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  _rrPath(ctx, x, y, w, h, r);
-  ctx.fill();
-}
-
-function _rrPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
 }

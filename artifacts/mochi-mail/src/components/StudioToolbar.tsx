@@ -907,8 +907,8 @@ export default function StudioToolbar({
             boxShadow: isExporting ? "none" : "0 6px 18px rgba(255,107,157,0.38)",
             cursor: isExporting ? "not-allowed" : "pointer",
           }}
-          title={isExporting ? "Exporting…" : "Save / Export"}
-          aria-label={isExporting ? "Exporting…" : "Save / Export"}
+          title={isExporting ? "Saving…" : "Save (JPEG or WebM)"}
+          aria-label={isExporting ? "Saving…" : "Save canvas"}
           aria-busy={isExporting}
         >
           {isExporting ? (

@@ -9,7 +9,7 @@ import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
 import RoomControl from "@/components/RoomControl";
 import { FiEdit3, FiMail, FiShoppingBag, FiUsers, FiUser } from "react-icons/fi";
-import { exportAnimated } from "@/components/ExportUtil";
+import { exportCanvas } from "@/components/ExportUtil";
 import { useRoom } from "@/hooks/useRoom";
 import type { RoomMember } from "@/hooks/useRoom";
 import { useStrokeSync } from "@/hooks/useStrokeSync";
@@ -266,7 +266,7 @@ export default function Home() {
   const handleExport = useCallback(() => {
     if (!canvasRef.current || isExporting) return;
     setIsExporting(true);
-    exportAnimated(canvasRef.current, placedItems, "mochimail_letter")
+    exportCanvas(canvasRef.current, placedItems, "mochimail_letter")
       .finally(() => setIsExporting(false));
     trackCanvasExport();
   }, [placedItems, isExporting, trackCanvasExport]);
