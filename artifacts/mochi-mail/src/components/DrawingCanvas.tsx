@@ -637,11 +637,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
         if (brushSettings.tool === "washi" && selectedAsset) {
           changedDuringPointerRef.current = false;
-          const canvas = canvasRef.current;
-          if (!canvas) return;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return;
-          preWashiStateRef.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
           washiStartRef.current = { x: point.x, y: point.y };
           isDrawing.current = true;
           return;
@@ -715,15 +710,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (
           brushSettings.tool === "washi" &&
           selectedAsset &&
-          washiStartRef.current &&
-          preWashiStateRef.current
+          washiStartRef.current
         ) {
-          const canvas = canvasRef.current;
-          if (!canvas) return;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return;
-          ctx.putImageData(preWashiStateRef.current, 0, 0);
-          paintWashiStrip(ctx, washiStartRef.current, { x: point.x, y: point.y }, selectedAsset);
+          const overlay = overlayCanvasRef.current;
+          if (!overlay) return;
+          const octx = overlay.getContext("2d");
+          if (!octx) return;
+          octx.clearRect(0, 0, overlay.width, overlay.height);
+          paintWashiStrip(octx, washiStartRef.current, { x: point.x, y: point.y }, selectedAsset);
           changedDuringPointerRef.current = true;
           return;
         }
@@ -831,12 +825,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           onStrokeComplete?.(strokeId, allPts, color, size, tool);
           currentStrokeIdRef.current = "";
         } else if (isDrawing.current) {
-          // Washi / select / other tools
-          const ac = activeStrokeCanvasRef.current;
-          const dc = canvasRef.current;
-          if (ac && dc) {
-            dc.getContext("2d")?.drawImage(ac, 0, 0);
-            ac.getContext("2d")?.clearRect(0, 0, ac.width, ac.height);
+          // Washi — commit the overlay-canvas preview to the main drawing canvas
+          if (brushSettings.tool === "washi" && washiStartRef.current) {
+            const ov = overlayCanvasRef.current;
+            const dc = canvasRef.current;
+            if (ov && dc) {
+              dc.getContext("2d")?.drawImage(ov, 0, 0);
+              ov.getContext("2d")?.clearRect(0, 0, ov.width, ov.height);
+            }
           }
         }
 

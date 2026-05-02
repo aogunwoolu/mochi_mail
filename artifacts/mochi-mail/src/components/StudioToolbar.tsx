@@ -1,5 +1,5 @@
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrushSettings, CustomFont, PASTEL_COLORS, PaperBackground, ScrapbookKit, ScrapbookKitElement, Sticker, StoreItem, ViewerIdentity, WashiTape } from "@/types";
 import StudioAssetDrawer, { type DrawerSection, type GifSearchResult, getSwatchShadow } from "./StudioAssetDrawer";
 
@@ -188,6 +188,8 @@ export default function StudioToolbar({
     PASTEL_COLORS[8],
     "#1e1e2e",
   ]);
+  const paletteInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const longPressTimers = useRef<(ReturnType<typeof setTimeout> | null)[]>([]);
 
   useEffect(() => { setCustomColor(brushSettings.color); }, [brushSettings.color]);
 
@@ -441,29 +443,70 @@ export default function StudioToolbar({
             {userPalette.map((color, i) => {
               const selected = brushSettings.color === color;
               return (
-                <button
-                  key={`${color}-${i}`}
-                  onClick={() => {
-                    onBrushChange({
-                      color,
-                      tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool,
-                    });
-                    onDeselectAsset();
-                  }}
-                  className="btn-smooth rounded-full transition-all"
-                  style={{
-                    width: 24,
-                    height: 24,
-                    background: color,
-                    boxShadow: selected
-                      ? `0 0 0 2px white, 0 0 0 4px ${color}`
-                      : color === "#ffffff"
-                      ? "inset 0 0 0 1.5px rgba(0,0,0,0.15)"
-                      : "0 1px 4px rgba(0,0,0,0.15)",
-                  }}
-                  title={color}
-                  aria-label={`Color ${color}`}
-                />
+                <div key={`swatch-${i}`} className="relative">
+                  <button
+                    onClick={() => {
+                      onBrushChange({
+                        color,
+                        tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool,
+                      });
+                      onDeselectAsset();
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      paletteInputRefs.current[i]?.click();
+                    }}
+                    onPointerDown={() => {
+                      longPressTimers.current[i] = setTimeout(() => {
+                        paletteInputRefs.current[i]?.click();
+                      }, 500);
+                    }}
+                    onPointerUp={() => {
+                      if (longPressTimers.current[i]) {
+                        clearTimeout(longPressTimers.current[i]!);
+                        longPressTimers.current[i] = null;
+                      }
+                    }}
+                    onPointerLeave={() => {
+                      if (longPressTimers.current[i]) {
+                        clearTimeout(longPressTimers.current[i]!);
+                        longPressTimers.current[i] = null;
+                      }
+                    }}
+                    className="btn-smooth rounded-full transition-all"
+                    style={{
+                      width: 24,
+                      height: 24,
+                      background: color,
+                      boxShadow: selected
+                        ? `0 0 0 2px white, 0 0 0 4px ${color}`
+                        : color === "#ffffff"
+                        ? "inset 0 0 0 1.5px rgba(0,0,0,0.15)"
+                        : "0 1px 4px rgba(0,0,0,0.15)",
+                    }}
+                    title={`${color} — right-click or hold to change`}
+                    aria-label={`Color ${color}`}
+                  />
+                  <input
+                    type="color"
+                    ref={(el) => { paletteInputRefs.current[i] = el; }}
+                    value={color}
+                    onChange={(e) => {
+                      const next = [...userPalette];
+                      next[i] = e.target.value;
+                      setUserPalette(next);
+                      onBrushChange({
+                        color: e.target.value,
+                        tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool,
+                      });
+                      onDeselectAsset();
+                    }}
+                    className="pointer-events-none absolute opacity-0"
+                    style={{ width: 1, height: 1, top: 0, left: 0 }}
+                    aria-hidden="true"
+                    tabIndex={-1}
+                  />
+                </div>
               );
             })}
             <label
