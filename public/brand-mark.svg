@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="MochiMail brand mark">
+  <defs>
+    <linearGradient id="mmGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#dd6ab2" />
+      <stop offset="100%" stop-color="#9f8bf6" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="64" height="64" rx="16" fill="url(#mmGrad)" />
+  <path d="M32 18 C33.5 24 37 27.5 43 29 C37 30.5 33.5 34 32 40 C30.5 34 27 30.5 21 29 C27 27.5 30.5 24 32 18Z" fill="#352742" />
+</svg>

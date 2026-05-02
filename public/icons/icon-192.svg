@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="32" fill="#FF6B8A"/>
+  <rect x="8" y="8" width="176" height="176" rx="28" fill="#F0E8F8"/>
+  <rect x="40" y="60" width="112" height="80" rx="4" fill="#FF6B8A" opacity="0.9"/>
+  <polygon points="40,60 96,108 152,60" fill="#E8507A"/>
+  <rect x="40" y="56" width="112" height="8" rx="2" fill="#4A4A5A"/>
+  <text x="96" y="170" text-anchor="middle" font-size="20" font-family="monospace" font-weight="bold" fill="#4A4A5A">MOCHI</text>
+</svg>

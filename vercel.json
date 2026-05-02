@@ -1,11 +1,3 @@
 {
-  "buildCommand": "pnpm --filter @workspace/mochi-mail build",
-  "outputDirectory": "artifacts/mochi-mail/dist/public",
-  "installCommand": "pnpm install",
-  "framework": null,
-  "rewrites": [
-    { "source": "/api/auth/signup", "destination": "/api/auth/signup" },
-    { "source": "/api/gifs/search", "destination": "/api/gifs/search" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  "framework": "nextjs"
 }

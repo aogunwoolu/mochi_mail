@@ -11,6 +11,8 @@ out-tsc
 # dependencies
 node_modules
 
+.next
+
 # IDEs and editors
 /.idea
 .project
@@ -47,3 +49,5 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+.env*
