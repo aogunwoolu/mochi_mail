@@ -78,7 +78,6 @@
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
     "gifenc": "^1.0.3",
-    "next": "^16.2.4",
     "perfect-freehand": "^1.2.3"
   }
 }

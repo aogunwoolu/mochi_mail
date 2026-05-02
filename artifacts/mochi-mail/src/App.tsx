@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+import { Switch, Route, Router as WouterRouter } from "wouter";
 import { MochiProvider } from "./context/MochiContext";
 import Home from "./pages/Home";
 import RoomsPage from "./pages/RoomsPage";
@@ -15,11 +15,7 @@ function Router() {
       <Route path="/space" component={SpacePage} />
       <Route path="/space/:username">
         {(params) => {
-          const [, navigate] = useLocation();
-          // Redirect /space/:username → /space?u=:username
-          if (typeof window !== "undefined") {
-            window.location.replace(`/space?u=${encodeURIComponent(params.username ?? "")}`);
-          }
+          window.location.replace(`/space?u=${encodeURIComponent(params.username ?? "")}`);
           return null;
         }}
       </Route>

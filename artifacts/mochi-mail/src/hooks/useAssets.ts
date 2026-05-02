@@ -292,7 +292,11 @@ function loadAssetPayload(storageKey: string): AssetPayload | null {
 
 function saveAssetPayload(storageKey: string, payload: AssetPayload) {
   if (!globalThis.window) return;
-  localStorage.setItem(storageKey, JSON.stringify(payload));
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(payload));
+  } catch {
+    // Storage quota exceeded — skip local save silently
+  }
 }
 
 export function useAssets(user: ViewerIdentity) {
