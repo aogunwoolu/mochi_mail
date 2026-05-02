@@ -1,4 +1,3 @@
-"use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { BrushSettings, CustomFont, PASTEL_COLORS, PaperBackground, Sticker, WashiTape } from "@/types";

@@ -1,4 +1,3 @@
-"use client";
 
 import { GIFEncoder, quantize, applyPalette } from "gifenc";
 import type { PlacedSticker } from "@/types";

@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useCallback, useEffect } from "react";
 import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity } from "@/types";
@@ -70,12 +69,12 @@ function loadCollection(key: string): string[] {
 
 function saveCollection(ids: string[]) {
   if (!globalThis.window) return;
-  localStorage.setItem(COLLECTION_KEY, JSON.stringify(ids));
+  try { localStorage.setItem(COLLECTION_KEY, JSON.stringify(ids)); } catch { /* quota exceeded */ }
 }
 
 function saveCollectionByKey(key: string, ids: string[]) {
   if (!globalThis.window) return;
-  localStorage.setItem(key, JSON.stringify(ids));
+  try { localStorage.setItem(key, JSON.stringify(ids)); } catch { /* quota exceeded */ }
 }
 
 function createCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {

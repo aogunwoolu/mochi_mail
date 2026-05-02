@@ -1,4 +1,3 @@
-"use client";
 
 import { useLocation, useSearch } from "wouter";
 import { useAccount } from "@/hooks/useAccount";

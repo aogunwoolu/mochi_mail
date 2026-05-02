@@ -1,4 +1,3 @@
-"use client";
 
 import React, { createContext, useContext, type ReactNode } from "react";
 import { useAccount } from "@/hooks/useAccount";

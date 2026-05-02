@@ -1,4 +1,3 @@
-"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Letter } from "@/types";
@@ -91,8 +90,8 @@ export default function MailboxPanel({
   useEffect(() => {
     if (!viewLetter) return;
     setOpening(true);
-    const timeout = window.setTimeout(() => setOpening(false), 950);
-    return () => window.clearTimeout(timeout);
+    const timeout = globalThis.setTimeout(() => setOpening(false), 950);
+    return () => globalThis.clearTimeout(timeout);
   }, [viewLetter]);
 
   if (viewLetter) {
@@ -189,7 +188,7 @@ export default function MailboxPanel({
                           <span className="animate-float text-base">{letter.deliverySpeed === "express" ? "⚡" : letter.deliverySpeed === "standard" ? "✈️" : "🐌"}</span>
                           <span>In transit · {timeLeft}</span>
                         </div>
-                        <div className="h-1.5 w-40 overflow-hidden rounded-full" style={{ background: "var(--surface-active)" }}>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: "var(--surface-active)" }}>
                           <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress * 100}%`, background: "linear-gradient(90deg, var(--pink), var(--lavender))" }} />
                         </div>
                       </div>

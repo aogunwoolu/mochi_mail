@@ -1,4 +1,3 @@
-"use client";
 
 import React, { useMemo } from "react";
 import { BrushSettings, CustomFont, PaperBackground, Sticker, WashiTape } from "@/types";

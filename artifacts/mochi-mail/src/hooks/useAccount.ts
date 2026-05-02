@@ -1,4 +1,3 @@
-"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";

@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useRef, useCallback, useEffect, useSyncExternalStore } from "react";
 import { useLocation } from "wouter";

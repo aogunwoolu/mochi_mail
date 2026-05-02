@@ -1,4 +1,3 @@
-"use client";
 
 import React, { useRef, useState, useCallback } from "react";
 import { PASTEL_COLORS } from "@/types";

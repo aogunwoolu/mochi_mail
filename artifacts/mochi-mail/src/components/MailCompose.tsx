@@ -1,4 +1,3 @@
-"use client";
 
 import React, { useRef, useState, useCallback, useEffect } from "react";
 import DrawingCanvas, { DrawingCanvasHandle } from "./DrawingCanvas";

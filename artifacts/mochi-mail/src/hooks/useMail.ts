@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { Letter, DELIVERY_SPEEDS, LetterSendPayload, ViewerIdentity } from "@/types";
@@ -34,7 +33,7 @@ function loadLetters(storageKey: string): Letter[] {
 
 function saveLetters(storageKey: string, letters: Letter[]) {
   if (!globalThis.window) return;
-  localStorage.setItem(storageKey, JSON.stringify(letters));
+  try { localStorage.setItem(storageKey, JSON.stringify(letters)); } catch { /* quota exceeded */ }
 }
 
 export function useMail(user: ViewerIdentity) {

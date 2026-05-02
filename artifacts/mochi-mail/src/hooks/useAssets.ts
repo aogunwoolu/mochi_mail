@@ -1,4 +1,3 @@
-"use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Sticker, WashiTape, PlacedSticker, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity } from "@/types";

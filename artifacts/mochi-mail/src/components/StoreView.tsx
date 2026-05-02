@@ -1,4 +1,3 @@
-"use client";
 
 import React, { useState } from "react";
 import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle } from "@/types";

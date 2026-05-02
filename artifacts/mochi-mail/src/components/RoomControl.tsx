@@ -1,4 +1,3 @@
-"use client";
 
 import { useState } from "react";
 import { FiCopy, FiCheck, FiLock, FiGlobe } from "react-icons/fi";
