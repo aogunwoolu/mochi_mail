@@ -511,8 +511,8 @@ export function useAssets(user: ViewerIdentity) {
   }, []);
 
   const placeTextItem = useCallback((text: string, x: number, y: number, color: string, size: number, font: string) => {
-    const safeText = text.trim() || "Text";
-    const lines = safeText.split("\n");
+    const safeText = text.trim();
+    const lines = safeText ? safeText.split("\n") : [""];
     const width = Math.max(180, Math.min(680, Math.max(...lines.map((line) => line.length), 6) * size * 0.62));
     const height = Math.max(size * 1.6, lines.length * size * 1.45 + 14);
     const placed: PlacedSticker = {
