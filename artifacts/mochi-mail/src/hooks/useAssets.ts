@@ -1,6 +1,6 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Sticker, WashiTape, PlacedSticker, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity } from "@/types";
+import { Sticker, WashiTape, PlacedSticker, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity, ScrapbookKit } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { Json } from "@/types/database";
 
@@ -277,6 +277,7 @@ type AssetPayload = {
   placedItems: PlacedSticker[];
   selectedPaperId: string | null;
   selectedAssetId: string | null;
+  kitLibrary?: ScrapbookKit[];
 };
 
 function loadAssetPayload(storageKey: string): AssetPayload | null {
@@ -308,6 +309,7 @@ export function useAssets(user: ViewerIdentity) {
   const [selectedPaper, setSelectedPaper] = useState<PaperBackground | null>(null);
   const [placedItems, setPlacedItems] = useState<PlacedSticker[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<Sticker | WashiTape | null>(null);
+  const [kitLibrary, setKitLibrary] = useState<ScrapbookKit[]>([]);
   const [hydratedRemote, setHydratedRemote] = useState(false);
   const boardPersistenceDisabledRef = useRef(false);
   const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
@@ -329,6 +331,7 @@ export function useAssets(user: ViewerIdentity) {
       setEnvelopes(local.envelopes?.length ? local.envelopes : defaults.envelopes);
       setCustomFonts(local.customFonts ?? []);
       setPlacedItems(local.placedItems ?? []);
+      setKitLibrary(local.kitLibrary ?? []);
       const selected = (local.papers ?? []).find((p) => p.id === local.selectedPaperId)
         ?? defaults.papers.find((p) => p.id === local.selectedPaperId)
         ?? (local.papers?.[0] ?? defaults.papers[0] ?? null);
@@ -410,6 +413,7 @@ export function useAssets(user: ViewerIdentity) {
       placedItems,
       selectedPaperId: selectedPaper?.id ?? null,
       selectedAssetId: selectedAsset?.id ?? null,
+      kitLibrary,
     };
 
     saveAssetPayload(storageKey, payload);
@@ -442,6 +446,7 @@ export function useAssets(user: ViewerIdentity) {
     placedItems,
     selectedPaper,
     selectedAsset,
+    kitLibrary,
   ]);
 
   const addSticker = useCallback((name: string, imageData: string, width: number, height: number, isAnimated = false) => {
@@ -577,6 +582,18 @@ export function useAssets(user: ViewerIdentity) {
     setCustomFonts((prev) => prev.filter((font) => font.id !== id));
   }, []);
 
+  const addKitToLibrary = useCallback((kit: ScrapbookKit) => {
+    setKitLibrary((prev) => {
+      if (prev.some((k) => k.id === kit.id)) return prev;
+      return [...prev, kit];
+    });
+    return kit;
+  }, []);
+
+  const removeKit = useCallback((id: string) => {
+    setKitLibrary((prev) => prev.filter((k) => k.id !== id));
+  }, []);
+
   const removePlacedItem = useCallback((id: string) => {
     setPlacedItems((prev) => prev.filter((item) => item.id !== id));
   }, []);
@@ -670,6 +687,7 @@ export function useAssets(user: ViewerIdentity) {
     stamps,
     envelopes,
     customFonts,
+    kitLibrary,
     selectedPaper,
     placedItems,
     selectedAsset,
@@ -681,6 +699,8 @@ export function useAssets(user: ViewerIdentity) {
     addStamp,
     addEnvelope,
     addCustomFont,
+    addKitToLibrary,
+    removeKit,
     placeItem,
     placeTextItem,
     shiftPlacedItems,

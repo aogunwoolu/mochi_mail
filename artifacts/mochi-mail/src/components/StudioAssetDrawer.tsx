@@ -1,11 +1,12 @@
 
 import React, { useMemo } from "react";
-import { BrushSettings, CustomFont, PaperBackground, Sticker, WashiTape } from "@/types";
+import { BrushSettings, CustomFont, PaperBackground, Sticker, WashiTape, ScrapbookKit, ScrapbookKitElement, StoreItem, ViewerIdentity } from "@/types";
 import FontTracerCreator from "./FontTracerCreator";
 import StickerCreator from "./StickerCreator";
 import WashiTapeCreator from "./WashiTapeCreator";
+import ScrapbookView from "./ScrapbookView";
 
-export type DrawerSection = "assets" | "paper" | "extras" | "fonts";
+export type DrawerSection = "assets" | "paper" | "scrapbook" | "extras" | "fonts";
 
 export type GifSearchResult = {
   id: string;
@@ -19,6 +20,7 @@ export type GifSearchResult = {
 const SECTION_LABELS: Record<DrawerSection, string> = {
   assets: "Stickers & Tape",
   paper: "Paper",
+  scrapbook: "Scrapbook",
   extras: "Extras",
   fonts: "Fonts",
 };
@@ -52,54 +54,6 @@ function SectionChip({ active, label, onClick }: { active: boolean; label: strin
   );
 }
 
-export interface ScrapbookKitMeta {
-  id: string;
-  name: string;
-  tagline: string;
-  accent: string;
-  textColor: string;
-  bg: string;
-  elementNames: string[];
-}
-
-export const SCRAPBOOK_KITS_META: ScrapbookKitMeta[] = [
-  {
-    id: "pastel",
-    name: "Pastel Dreams",
-    tagline: "Soft, kawaii scrapbook essentials",
-    accent: "#ff6b9d",
-    textColor: "#9d174d",
-    bg: "linear-gradient(135deg, rgba(253,242,248,0.95), rgba(237,233,254,0.95))",
-    elementNames: ["Polaroid Frame", "Heart Badge", "Cloud Bubble", "Star Label"],
-  },
-  {
-    id: "vintage",
-    name: "Vintage Post",
-    tagline: "Airmail, postmarks & travel tags",
-    accent: "#3b82f6",
-    textColor: "#1d4ed8",
-    bg: "linear-gradient(135deg, rgba(239,246,255,0.95), rgba(254,249,235,0.95))",
-    elementNames: ["Airmail Frame", "Postmark", "Travel Tag", "Stamp Frame"],
-  },
-  {
-    id: "garden",
-    name: "Garden Notes",
-    tagline: "Botanical frames, daisies & leaves",
-    accent: "#4ade80",
-    textColor: "#15803d",
-    bg: "linear-gradient(135deg, rgba(240,253,244,0.95), rgba(254,252,232,0.95))",
-    elementNames: ["Botanical Frame", "Daisy Sticker", "Leaf Sprig", "Pressed Oval"],
-  },
-  {
-    id: "journal",
-    name: "Journal Clips",
-    tagline: "Tape, film strips & sticky notes",
-    accent: "#a78bfa",
-    textColor: "#6d28d9",
-    bg: "linear-gradient(135deg, rgba(245,243,255,0.95), rgba(240,249,255,0.95))",
-    elementNames: ["Photo Tape", "Film Strip", "Sticky Note", "Caption Box"],
-  },
-];
 
 export interface StudioAssetDrawerProps {
   assetCount: number;
@@ -108,6 +62,9 @@ export interface StudioAssetDrawerProps {
   washiTapes: WashiTape[];
   papers: PaperBackground[];
   customFonts: CustomFont[];
+  kitLibrary: ScrapbookKit[];
+  shopKits: StoreItem[];
+  viewer: ViewerIdentity;
   selectedAsset: Sticker | WashiTape | null;
   selectedPaper: PaperBackground | null;
   brushSettings: BrushSettings;
@@ -140,20 +97,25 @@ export interface StudioAssetDrawerProps {
   addGifFromResult: (result: GifSearchResult) => void;
   setGifUrlInput: (value: string) => void;
   addGifFromUrl: () => void;
-  onAddScrapbookKit: (kitId: string) => void;
-  onAddScrapbookElement: (kitId: string, elementName: string) => void;
+  onAddKitElement: (el: ScrapbookKitElement) => void;
+  onAddKit: (kit: ScrapbookKit) => void;
+  onAddKitToLibrary: (kit: ScrapbookKit) => void;
+  onRemoveKit: (id: string) => void;
+  onPublishKit: (kit: ScrapbookKit, publishToShop: boolean) => void;
   setAssetSearch: (value: string) => void;
 }
 
 export default function StudioAssetDrawer({
   assetCount, activeSection, stickers, washiTapes, papers, customFonts,
+  kitLibrary, shopKits, viewer,
   selectedAsset, selectedPaper, brushSettings,
   customColor, colorChoices, gifQuery, gifResults, gifLoading, gifError, gifUrlInput,
   assetSearch, onClose, onSelectSection, onSelectSticker, onSelectWashi, onSelectPaper,
   onDeselectAsset, onDeleteSticker, onDeleteWashi, onDeletePaper, onDeleteCustomFont,
   onSaveSticker, onSaveWashi, onSaveCustomFont, onBrushChange, onClear,
   setCustomColor, setGifQuery, searchGifs, addGifFromResult, setGifUrlInput, addGifFromUrl,
-  onAddScrapbookKit, onAddScrapbookElement, setAssetSearch,
+  onAddKitElement, onAddKit, onAddKitToLibrary, onRemoveKit, onPublishKit,
+  setAssetSearch,
 }: Readonly<StudioAssetDrawerProps>) {
   const query = assetSearch.trim().toLowerCase();
   const filteredStickers = useMemo(() => stickers.filter((s) => s.name.toLowerCase().includes(query)), [stickers, query]);
@@ -195,7 +157,7 @@ export default function StudioAssetDrawer({
         className="flex gap-1.5 overflow-x-auto px-4 pb-2"
         style={{ scrollbarWidth: "none", borderBottom: "1px solid rgba(186,156,214,0.15)" }}
       >
-        {(["assets", "paper", "extras", "fonts"] as DrawerSection[]).map((s) => (
+        {(["assets", "paper", "scrapbook", "extras", "fonts"] as DrawerSection[]).map((s) => (
           <SectionChip key={s} active={activeSection === s} label={SECTION_LABELS[s]} onClick={() => onSelectSection(s)} />
         ))}
       </div>
@@ -317,55 +279,24 @@ export default function StudioAssetDrawer({
           </div>
         )}
 
-        {/* ── Extras (scrapbook kits + GIFs) ── */}
+        {/* ── Scrapbook ── */}
+        {activeSection === "scrapbook" && (
+          <ScrapbookView
+            kitLibrary={kitLibrary}
+            shopKits={shopKits}
+            userStickers={stickers}
+            viewer={viewer}
+            onAddElement={onAddKitElement}
+            onAddKit={onAddKit}
+            onAddKitToLibrary={onAddKitToLibrary}
+            onRemoveKit={onRemoveKit}
+            onPublishKit={onPublishKit}
+          />
+        )}
+
+        {/* ── Extras (GIFs) ── */}
         {activeSection === "extras" && (
           <div className="panel-soft p-4 flex flex-col gap-5">
-
-            {/* Scrapbook Kits */}
-            <div>
-              <SectionTitle title="Scrapbook Kits" note="Themed element packs — add a whole kit or pick individual pieces." />
-              <div className="grid gap-3 sm:grid-cols-2">
-                {SCRAPBOOK_KITS_META.map((kit) => (
-                  <div
-                    key={kit.id}
-                    className="rounded-2xl border p-3 flex flex-col gap-2"
-                    style={{ background: kit.bg, borderColor: `${kit.accent}44` }}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs font-bold leading-tight" style={{ color: kit.textColor }}>{kit.name}</p>
-                        <p className="text-[10px] leading-snug mt-0.5" style={{ color: kit.textColor, opacity: 0.75 }}>{kit.tagline}</p>
-                      </div>
-                      <button
-                        onClick={() => onAddScrapbookKit(kit.id)}
-                        className="btn-smooth shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-bold whitespace-nowrap"
-                        style={{ background: kit.accent, color: "#fff", boxShadow: `0 2px 8px ${kit.accent}55` }}
-                        title={`Add all ${kit.elementNames.length} items from ${kit.name}`}
-                      >
-                        + Add All
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {kit.elementNames.map((name) => (
-                        <button
-                          key={name}
-                          onClick={() => onAddScrapbookElement(kit.id, name)}
-                          className="btn-smooth rounded-full px-2 py-0.5 text-[9px] font-semibold transition-all hover:scale-105"
-                          style={{
-                            background: `${kit.accent}18`,
-                            color: kit.textColor,
-                            border: `1px solid ${kit.accent}33`,
-                          }}
-                          title={`Add ${name}`}
-                        >
-                          {name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
 
             {/* GIF Search */}
             <div>

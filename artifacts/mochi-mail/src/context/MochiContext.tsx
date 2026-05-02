@@ -16,6 +16,7 @@ import type {
   Letter,
   StoreItem,
   DeliverySpeed,
+  ScrapbookKit,
 } from "@/types";
 
 // ─── Shape ────────────────────────────────────────────────────────────────────
@@ -51,6 +52,9 @@ interface MochiAssets {
   removeStamp: (id: string) => void;
   removeEnvelope: (id: string) => void;
   removeCustomFont: (id: string) => void;
+  kitLibrary: ScrapbookKit[];
+  addKitToLibrary: (kit: ScrapbookKit) => ScrapbookKit;
+  removeKit: (id: string) => void;
   saveBoardState: (drawingData: string | null, items: PlacedSticker[], paper: PaperBackground | null, roomId?: string | null) => Promise<void>;
   loadBoardState: (roomId?: string | null) => Promise<{ drawingData: string; placedItems: PlacedSticker[]; selectedPaper: PaperBackground | null } | null>;
   /** Add a store item directly into the asset library. */
@@ -80,6 +84,7 @@ interface MochiMail {
 
 interface MochiStore {
   storeItems: StoreItem[];
+  allStoreItems: StoreItem[];
   filterType: StoreItem["type"] | "all";
   setFilterType: (t: StoreItem["type"] | "all") => void;
   searchQuery: string;
@@ -94,6 +99,7 @@ interface MochiStore {
     authorId: string,
     tags: string[]
   ) => void;
+  publishKitToStore: (kit: ScrapbookKit, authorName: string, authorId: string, tags?: string[]) => StoreItem;
 }
 
 interface MochiAccountMethods {
@@ -188,7 +194,9 @@ export function MochiProvider({ children }: { children: ReactNode }) {
       equipFromStore,
     } as unknown as MochiAssets,
     mail,
-    store,
+    store: {
+      ...store,
+    },
   };
 
   return <MochiContext.Provider value={value}>{children}</MochiContext.Provider>;

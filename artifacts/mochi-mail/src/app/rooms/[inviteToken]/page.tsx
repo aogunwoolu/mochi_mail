@@ -79,6 +79,7 @@ export default function RoomInvitePage() {
       };
     } else {
       navigate(`/rooms?invite=${encodeURIComponent(token)}`);
+      return;
     }
   }, [account.hydrated, account.hasSession, rooms, navigate, token]);
 

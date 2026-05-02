@@ -716,6 +716,9 @@ export default function Home() {
           washiTapes={washiTapes}
           papers={papers}
           customFonts={customFonts}
+          kitLibrary={assets.kitLibrary}
+          storeItems={store.storeItems}
+          viewer={account.viewer}
           selectedAsset={selectedAsset}
           selectedPaper={selectedPaper ?? null}
           onSelectSticker={handleSelectSticker}
@@ -729,6 +732,14 @@ export default function Home() {
           onSaveSticker={addSticker}
           onSaveWashi={addWashiTape}
           onSaveCustomFont={addCustomFont}
+          onAddKitToLibrary={assets.addKitToLibrary}
+          onRemoveKit={assets.removeKit}
+          onPublishKit={(kit, publishToShop) => {
+            if (publishToShop) {
+              store.publishKitToStore(kit, mail.user.name, account.viewer.accountId ?? "guest");
+            }
+            assets.addKitToLibrary(kit);
+          }}
           collaborators={artistList.map((a) => ({
             id: a.id,
             name: a.name,

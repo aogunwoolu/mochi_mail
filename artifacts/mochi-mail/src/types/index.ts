@@ -201,11 +201,31 @@ export interface RoomInvitePreview {
   ownerUsername: string;
 }
 
+export interface ScrapbookKitElement {
+  name: string;
+  imageData: string;
+  width: number;
+  height: number;
+}
+
+export interface ScrapbookKit {
+  id: string;
+  name: string;
+  description: string;
+  creator: string;
+  creatorId: string;
+  accent: string;
+  tags: string[];
+  elements: ScrapbookKitElement[];
+  createdAt: number;
+  isBuiltIn?: boolean;
+}
+
 export interface StoreItem {
   id: string;
   name: string;
   imageData: string;
-  type: "sticker" | "washi" | "background" | "font" | "stamp" | "envelope";
+  type: "sticker" | "washi" | "background" | "font" | "stamp" | "envelope" | "kit";
   authorName: string;
   authorId: string;
   downloads: number;
@@ -215,6 +235,7 @@ export interface StoreItem {
   height: number;
   tags: string[];
   fontData?: CustomFont;
+  kitData?: ScrapbookKit;
 }
 
 export interface CanvasState {

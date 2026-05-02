@@ -1,6 +1,6 @@
 
 import { useState, useCallback, useEffect } from "react";
-import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity } from "@/types";
+import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity, ScrapbookKit } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { Json } from "@/types/database";
 
@@ -312,7 +312,7 @@ export function useStore(user: ViewerIdentity) {
   const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [collection, setCollection] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterType, setFilterType] = useState<"all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope">("all");
+  const [filterType, setFilterType] = useState<"all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope" | "kit">("all");
   const [hydratedRemote, setHydratedRemote] = useState(false);
   const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
   const storeKey = storeKeyFor(user);
@@ -383,6 +383,32 @@ export function useStore(user: ViewerIdentity) {
 
     return () => globalThis.clearTimeout(timeout);
   }, [hydratedRemote, ownerId, storeKey, collectionKey, storeItems, collection]);
+
+  const publishKitToStore = useCallback(
+    (kit: ScrapbookKit, authorName: string, authorId: string, tags: string[] = []) => {
+      const storeItem: StoreItem = {
+        id: generateId(),
+        name: kit.name,
+        imageData: kit.elements[0]?.imageData ?? "",
+        type: "kit",
+        authorName,
+        authorId,
+        downloads: 0,
+        createdAt: Date.now(),
+        width: kit.elements[0]?.width ?? 160,
+        height: kit.elements[0]?.height ?? 160,
+        tags: [...new Set([...kit.tags, ...tags])],
+        kitData: kit,
+      };
+      setStoreItems((prev) => {
+        const updated = [storeItem, ...prev];
+        saveStoreByKey(storeKey, updated);
+        return updated;
+      });
+      return storeItem;
+    },
+    [storeKey]
+  );
 
   const publishToStore = useCallback(
     (
@@ -536,6 +562,7 @@ export function useStore(user: ViewerIdentity) {
     filterType,
     setFilterType,
     publishToStore,
+    publishKitToStore,
     addToCollection,
     removeFromCollection,
     isInCollection,

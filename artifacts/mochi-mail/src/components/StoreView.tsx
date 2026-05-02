@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle } from "@/types";
 
-type StoreFilterType = "all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope";
+type StoreFilterType = "all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope" | "kit";
 
 interface StoreViewProps {
   storeItems: StoreItem[];
@@ -31,6 +31,7 @@ function filterLabel(type: StoreFilterType): string {
   if (type === "background") return "Paper";
   if (type === "stamp") return "Stamps";
   if (type === "envelope") return "Envelopes";
+  if (type === "kit") return "Kits";
   return "Fonts";
 }
 
@@ -40,6 +41,7 @@ function itemTypeLabel(type: StoreItem["type"]): string {
   if (type === "font") return "Font";
   if (type === "stamp") return "Stamp";
   if (type === "envelope") return "Envelope";
+  if (type === "kit") return "Scrapbook Kit";
   return "Sticker";
 }
 
@@ -117,8 +119,8 @@ export default function StoreView({
           />
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: "var(--muted)" }}>🔍</span>
         </div>
-        <div className="flex gap-1 rounded-xl p-1" style={{ background: "var(--surface)" }}>
-          {(["all", "sticker", "washi", "background", "stamp", "envelope", "font"] as const).map((type) => (
+        <div className="flex gap-1 flex-wrap rounded-xl p-1" style={{ background: "var(--surface)" }}>
+          {(["all", "sticker", "washi", "background", "stamp", "envelope", "font", "kit"] as const).map((type) => (
             <button
               key={type}
               onClick={() => setFilterType(type)}
@@ -210,13 +212,74 @@ export default function StoreView({
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {storeItems.map((item) => {
             const inCollection = isInCollection(item.id);
+            const isKit = item.type === "kit";
+            const kitData = item.kitData;
+
+            // ── Kit card ────────────────────────────────────────────────────
+            if (isKit && kitData) {
+              const accent = kitData.accent || "#a78bfa";
+              return (
+                <div
+                  key={item.id}
+                  className="glass group rounded-2xl overflow-hidden transition-all hover:scale-[1.02]"
+                  style={{ border: `1.5px solid ${accent}33` }}
+                >
+                  {/* Kit header */}
+                  <div className="px-3 py-2" style={{ background: `${accent}18`, borderBottom: `1px solid ${accent}22` }}>
+                    <p className="text-xs font-bold truncate" style={{ color: accent }}>{item.name}</p>
+                    <p className="text-[10px] truncate" style={{ color: accent, opacity: 0.7 }}>by {item.authorName} · {item.downloads} ⬇</p>
+                  </div>
+                  {/* Element thumbnails */}
+                  <div className="grid grid-cols-2 gap-1 p-2">
+                    {(kitData.elements ?? []).slice(0, 4).map((el) => (
+                      <div
+                        key={el.name}
+                        className="aspect-square rounded-lg overflow-hidden flex items-center justify-center p-1"
+                        style={{ background: `${accent}10` }}
+                      >
+                        <img src={el.imageData} alt={el.name} className="max-w-full max-h-full object-contain" />
+                      </div>
+                    ))}
+                  </div>
+                  {/* Tags */}
+                  {item.tags.length > 0 && (
+                    <div className="px-2 pb-1 flex flex-wrap gap-1">
+                      {item.tags.slice(0, 3).map((tag) => (
+                        <span key={tag} className="rounded-full px-1.5 py-px text-[9px]" style={{ background: `${accent}15`, color: accent }}>{tag}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-1.5 p-2 pt-0">
+                    <button
+                      onClick={() => inCollection ? removeFromCollection(item.id) : addToCollection(item.id)}
+                      className="btn-smooth flex-1 rounded-lg py-1.5 text-xs font-semibold"
+                      style={{
+                        background: inCollection ? "rgba(110,231,183,0.15)" : "var(--surface)",
+                        color: inCollection ? "var(--mint)" : "var(--muted-strong)",
+                        border: inCollection ? "1px solid rgba(110,231,183,0.3)" : "1px solid var(--border)",
+                      }}
+                    >
+                      {inCollection ? "✓ Saved" : "♡ Save"}
+                    </button>
+                    <button
+                      onClick={() => onAddToAssets(item)}
+                      className="btn-smooth rounded-lg px-2.5 py-1.5 text-xs font-semibold"
+                      style={{ background: accent, color: "#fff" }}
+                    >
+                      Use
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
+            // ── Standard card ────────────────────────────────────────────────
             return (
               <div
                 key={item.id}
                 className="glass group rounded-2xl p-3 transition-all hover:scale-[1.02]"
               >
                 <div className={`mb-2 flex items-center justify-center overflow-hidden rounded-xl ${item.type === "background" || item.type === "font" || item.type === "envelope" ? "aspect-4/3" : "aspect-square"}`} style={{ background: "rgba(255,255,255,0.03)" }}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={item.imageData}
                     alt={item.name}
@@ -244,7 +307,7 @@ export default function StoreView({
                 <div className="flex gap-1.5">
                   <button
                     onClick={() => inCollection ? removeFromCollection(item.id) : addToCollection(item.id)}
-                    className={`btn-smooth flex-1 rounded-lg py-1.5 text-xs font-semibold`}
+                    className="btn-smooth flex-1 rounded-lg py-1.5 text-xs font-semibold"
                     style={{
                       background: inCollection ? "rgba(110,231,183,0.15)" : "var(--surface)",
                       color: inCollection ? "var(--mint)" : "var(--muted-strong)",
