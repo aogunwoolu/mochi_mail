@@ -582,29 +582,45 @@ export default function SpaceStudio({
     return () => document.removeEventListener("mousedown", handler);
   }, [activePanel, showSpacePicker]);
 
-  // Drag handling
+  // Refs so drag handlers attached once on mount always see current values
+  const dragRef = useRef<DragState | null>(null);
+  const isOwnerRef = useRef(isOwner);
+  const selectedSpaceRef = useRef(selectedSpace);
+  const onUpdateSpaceItemRef = useRef(onUpdateSpaceItem);
+  useEffect(() => { isOwnerRef.current = isOwner; }, [isOwner]);
+  useEffect(() => { selectedSpaceRef.current = selectedSpace; }, [selectedSpace]);
+  useEffect(() => { onUpdateSpaceItemRef.current = onUpdateSpaceItem; }, [onUpdateSpaceItem]);
+
+  // Attach drag handlers ONCE on mount — no dependency on dragState so listeners
+  // never churn on pointermove, and pointerup can never be missed.
   useEffect(() => {
-    if (!dragState || !selectedSpace || !isOwner) return;
-    const spaceId = selectedSpace.id;
-    const move = (e: PointerEvent) =>
-      setDragState((p) => p ? { ...p, liveX: Math.max(8, p.originX + (e.clientX - p.startX)), liveY: Math.max(8, p.originY + (e.clientY - p.startY)) } : p);
+    const move = (e: PointerEvent) => {
+      const p = dragRef.current;
+      if (!p || !isOwnerRef.current) return;
+      const updated: DragState = {
+        ...p,
+        liveX: Math.max(8, p.originX + (e.clientX - p.startX)),
+        liveY: Math.max(8, p.originY + (e.clientY - p.startY)),
+      };
+      dragRef.current = updated;          // sync immediately so pointerup always reads latest
+      setDragState(updated);              // trigger re-render for visual position
+    };
     const up = () => {
-      // Capture latest position from the functional updater (which always receives the current state
-      // synchronously — JavaScript is single-threaded so `saved` is set before the next line runs).
-      let saved: { itemId: string; x: number; y: number } | null = null;
-      setDragState((p) => {
-        if (p) saved = { itemId: p.itemId, x: p.liveX, y: p.liveY };
-        return null;
-      });
-      if (saved) {
-        const { itemId, x, y } = saved as { itemId: string; x: number; y: number };
-        onUpdateSpaceItem(spaceId, itemId, { x, y });
+      const p = dragRef.current;
+      const space = selectedSpaceRef.current;
+      dragRef.current = null;
+      setDragState(null);
+      if (p && space && isOwnerRef.current) {
+        onUpdateSpaceItemRef.current(space.id, p.itemId, { x: p.liveX, y: p.liveY });
       }
     };
     globalThis.addEventListener("pointermove", move);
     globalThis.addEventListener("pointerup", up);
-    return () => { globalThis.removeEventListener("pointermove", move); globalThis.removeEventListener("pointerup", up); };
-  }, [dragState, isOwner, onUpdateSpaceItem, selectedSpace]);
+    return () => {
+      globalThis.removeEventListener("pointermove", move);
+      globalThis.removeEventListener("pointerup", up);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateConfig = useCallback(
     (patch: Partial<SpaceConfig>) => onUpdateOwnSpace({ wallpaper: spaceConfigToWallpaper({ ...spaceConfig, ...patch }) }),
@@ -857,7 +873,9 @@ export default function SpaceStudio({
                   e.stopPropagation();
                   setSelectedItemId(item.id);
                   if (!isOwner) return;
-                  setDragState({ itemId: item.id, startX: e.clientX, startY: e.clientY, originX: item.x, originY: item.y, liveX: item.x, liveY: item.y });
+                  const ds: DragState = { itemId: item.id, startX: e.clientX, startY: e.clientY, originX: item.x, originY: item.y, liveX: item.x, liveY: item.y };
+                  dragRef.current = ds;
+                  setDragState(ds);
                 }}
                 onClick={(e) => { e.stopPropagation(); setSelectedItemId(active ? null : item.id); setActivePanel(null); }}
               >
