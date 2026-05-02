@@ -224,6 +224,7 @@ export default function StudioToolbar({
       const code = error instanceof Error ? error.message : "unknown";
       if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY not set on the server.");
       else if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY not set on the server.");
+      else if (code === "rate_limited") setGifError("Too many requests — please wait a moment and try again.");
       else setGifError("GIF search failed.");
     } finally {
       setGifLoading(false);
@@ -233,7 +234,19 @@ export default function StudioToolbar({
   useEffect(() => {
     if (activeSection !== "extras") return;
     if (gifResults.length > 0 || gifLoading) return;
-    void searchGifs();
+    fetch(`${GIF_SEARCH_URL.replace("/search", "/status")}`)
+      .then((r) => r.json())
+      .then((status: { ready?: boolean; error?: string }) => {
+        if (status.ready === false) {
+          const code = status.error ?? "unknown";
+          if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY is not configured on the server. Add it in Replit Secrets to enable GIF search.");
+          else if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY is not configured on the server. Add it in Replit Secrets to enable GIF search.");
+          else setGifError("GIF provider is not configured.");
+        } else {
+          void searchGifs();
+        }
+      })
+      .catch(() => void searchGifs());
   }, [activeSection, gifResults.length, gifLoading, searchGifs]);
 
   // Scrapbook pack: 3 canvas-drawn sticker shapes

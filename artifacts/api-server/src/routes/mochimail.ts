@@ -88,6 +88,29 @@ const GIPHY_KEY = process.env.GIPHY_API_KEY ?? "";
 const GIFAPI_KEY = process.env.GIFAPI_KEY ?? "";
 const GIFAPI_BASE_URL = process.env.GIFAPI_BASE_URL ?? "https://api.gifapi.com/v1";
 
+function gifProviderReady(): { ready: boolean; provider: string; error?: string } {
+  if (GIF_PROVIDER === "giphy") {
+    return GIPHY_KEY
+      ? { ready: true, provider: "giphy" }
+      : { ready: false, provider: "giphy", error: "missing_giphy_key" };
+  }
+  return GIFAPI_KEY
+    ? { ready: true, provider: "gifapi" }
+    : { ready: false, provider: "gifapi", error: "missing_gifapi_key" };
+}
+
+// Log GIF provider status at startup so missing keys are surfaced immediately.
+const gifStatus = gifProviderReady();
+if (gifStatus.ready) {
+  console.info(`[GIF] Provider "${gifStatus.provider}" configured and ready.`);
+} else {
+  console.warn(`[GIF] Provider "${gifStatus.provider}" not ready — ${gifStatus.error}. Set the appropriate API key secret to enable GIF search.`);
+}
+
+router.get("/gifs/status", (_req, res) => {
+  return res.json(gifProviderReady());
+});
+
 router.get("/gifs/search", async (req, res) => {
   const q = (req.query.q as string | undefined)?.trim();
   if (!q) return res.status(400).json({ error: "Missing query" });
@@ -103,6 +126,7 @@ router.get("/gifs/search", async (req, res) => {
     }
 
     const fetchRes = await fetch(url);
+    if (fetchRes.status === 429) return res.status(429).json({ error: "rate_limited" });
     if (!fetchRes.ok) return res.status(502).json({ error: "search_failed" });
     const data = await fetchRes.json();
     return res.json(data);

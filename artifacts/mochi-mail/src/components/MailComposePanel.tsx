@@ -204,6 +204,7 @@ export default function MailComposePanel({
   const [gifResults, setGifResults] = useState<GifSearchResult[]>([]);
   const [gifLoading, setGifLoading] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
+  const gifSearchedRef = useRef(false);
   const [sendPreview, setSendPreview] = useState<{
     receiverName: string;
     letterImageData: string;
@@ -301,11 +302,31 @@ export default function MailComposePanel({
       const code = error instanceof Error ? error.message : "unknown";
       if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY not set on the server.");
       else if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY not set on the server.");
+      else if (code === "rate_limited") setGifError("Too many requests — please wait a moment and try again.");
       else setGifError("GIF search failed.");
     } finally {
       setGifLoading(false);
     }
   }, [gifQuery]);
+
+  useEffect(() => {
+    if (toolDrawer !== "gifs") return;
+    if (gifSearchedRef.current || gifResults.length > 0 || gifLoading) return;
+    gifSearchedRef.current = true;
+    fetch(`${GIF_SEARCH_URL.replace("/search", "/status")}`)
+      .then((r) => r.json())
+      .then((status: { ready?: boolean; error?: string }) => {
+        if (status.ready === false) {
+          const code = status.error ?? "unknown";
+          if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY is not configured on the server. Add it in Replit Secrets to enable GIF search.");
+          else if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY is not configured on the server. Add it in Replit Secrets to enable GIF search.");
+          else setGifError("GIF provider is not configured.");
+        } else {
+          void searchGifs();
+        }
+      })
+      .catch(() => void searchGifs());
+  }, [toolDrawer, gifResults.length, gifLoading, searchGifs]);
 
   const addGifAsset = useCallback(async (src: string, title?: string) => {
     const image = await loadImage(src);
@@ -802,8 +823,14 @@ export default function MailComposePanel({
                 <div>
                   <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--muted)" }}>Search GIFs</p>
                   <div className="flex gap-2">
-                    <input value={gifQuery} onChange={(e) => setGifQuery(e.target.value)} placeholder="cute post office" className="input-soft min-w-0 flex-1 px-3 py-2 text-xs outline-none" />
-                    <button onClick={() => void searchGifs()} className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold text-white" style={{ background: "var(--pink)" }}>Search</button>
+                    <input
+                      value={gifQuery}
+                      onChange={(e) => setGifQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { gifSearchedRef.current = true; void searchGifs(); } }}
+                      placeholder="cute post office"
+                      className="input-soft min-w-0 flex-1 px-3 py-2 text-xs outline-none"
+                    />
+                    <button onClick={() => { gifSearchedRef.current = true; void searchGifs(); }} className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold text-white" style={{ background: "var(--pink)" }}>Search</button>
                   </div>
                 </div>
                 {gifLoading ? <div className="text-xs" style={{ color: "var(--muted)" }}>Loading GIFs...</div> : null}
