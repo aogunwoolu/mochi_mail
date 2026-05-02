@@ -39,6 +39,23 @@ function normalizeGifResults(payload: unknown): GifSearchResult[] {
   }).filter((item): item is GifSearchResult => item !== null);
 }
 
+// ── Built-in font options ─────────────────────────────────────────────────────
+
+const BUILT_IN_FONTS: { label: string; preview: string; value: string }[] = [
+  { label: "Mono",       preview: "Aa", value: '"Space Mono", monospace' },
+  { label: "Serif",      preview: "Aa", value: "Georgia, serif" },
+  { label: "Sans",       preview: "Aa", value: "Arial, sans-serif" },
+  { label: "Playful",   preview: "Aa", value: '"Comic Sans MS", cursive' },
+  { label: "Type",       preview: "Aa", value: '"Courier New", monospace' },
+];
+
+const TEXT_SIZES: { label: string; value: number; display: number }[] = [
+  { label: "Small",  value: 14, display: 11 },
+  { label: "Medium", value: 24, display: 15 },
+  { label: "Large",  value: 36, display: 20 },
+  { label: "XL",     value: 52, display: 26 },
+];
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Collaborator = { id: string; name: string; color: string; avatarUrl?: string; username?: string };
@@ -184,7 +201,7 @@ export default function StudioToolbar({
 
   const colorChoices = useMemo(() => PASTEL_COLORS.slice(0, 10), []);
   const selectedTextFont = brushSettings.textFont ?? '"Space Mono", monospace';
-  const selectedTextSize = brushSettings.textSize ?? 34;
+  const selectedTextSize = brushSettings.textSize ?? 36;
   const assetCount = stickers.length + washiTapes.length + papers.length;
 
   // GIF helpers
@@ -534,6 +551,160 @@ export default function StudioToolbar({
                 </button>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Text options — floats to the right of the toolbar when text tool active ── */}
+      {brushSettings.tool === "text" && (
+        <div
+          className="pointer-events-none absolute left-[4.5rem] z-20 flex items-center"
+          style={{ top: "1rem", bottom: "5.5rem" }}
+        >
+          <div
+            className="pointer-events-auto flex flex-col items-center gap-0.5 px-1.5 py-2"
+            style={{
+              background: "rgba(255,255,255,0.96)",
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+              borderRadius: 16,
+              border: "1px solid rgba(186,156,214,0.25)",
+              boxShadow: "0 4px 16px rgba(143,109,178,0.13), 0 1px 4px rgba(0,0,0,0.06)",
+            }}
+          >
+            {/* Size label */}
+            <span
+              className="mb-0.5 text-[8px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--muted)" }}
+            >
+              Size
+            </span>
+
+            {/* Size presets */}
+            {TEXT_SIZES.map((sz) => {
+              const active = selectedTextSize === sz.value;
+              return (
+                <button
+                  key={sz.value}
+                  onClick={() => onBrushChange({ textSize: sz.value })}
+                  className="btn-smooth flex items-center justify-center rounded-xl"
+                  style={{
+                    width: 38,
+                    height: 34,
+                    background: active ? "rgba(255,107,157,0.13)" : "transparent",
+                  }}
+                  title={`${sz.label} (${sz.value}px)`}
+                  aria-label={`Text size ${sz.label}`}
+                >
+                  <span
+                    style={{
+                      fontSize: sz.display,
+                      fontFamily: '"Space Mono", monospace',
+                      fontWeight: 700,
+                      color: active ? "var(--pink)" : "rgba(100,80,130,0.45)",
+                      lineHeight: 1,
+                    }}
+                  >
+                    A
+                  </span>
+                </button>
+              );
+            })}
+
+            {/* Divider */}
+            <div style={{ width: 26, height: 1, background: "rgba(186,156,214,0.3)", margin: "3px 0" }} />
+
+            {/* Font label */}
+            <span
+              className="mb-0.5 text-[8px] font-semibold uppercase tracking-widest"
+              style={{ color: "var(--muted)" }}
+            >
+              Font
+            </span>
+
+            {/* Built-in font presets */}
+            {BUILT_IN_FONTS.map((font) => {
+              const active = selectedTextFont === font.value;
+              return (
+                <button
+                  key={font.value}
+                  onClick={() => onBrushChange({ textFont: font.value })}
+                  className="btn-smooth flex flex-col items-center justify-center rounded-xl gap-0"
+                  style={{
+                    width: 38,
+                    height: 38,
+                    background: active ? "rgba(167,139,250,0.15)" : "transparent",
+                  }}
+                  title={font.label}
+                  aria-label={`Font: ${font.label}`}
+                >
+                  <span
+                    style={{
+                      fontSize: 13,
+                      fontFamily: font.value,
+                      fontWeight: 700,
+                      color: active ? "var(--lavender)" : "rgba(100,80,130,0.5)",
+                      lineHeight: 1,
+                    }}
+                  >
+                    Aa
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 7,
+                      fontFamily: '"Space Mono", monospace',
+                      color: active ? "var(--lavender)" : "rgba(100,80,130,0.35)",
+                      lineHeight: 1.2,
+                      marginTop: 2,
+                    }}
+                  >
+                    {font.label}
+                  </span>
+                </button>
+              );
+            })}
+
+            {/* Custom fonts */}
+            {customFonts.length > 0 && (
+              <>
+                <div style={{ width: 26, height: 1, background: "rgba(186,156,214,0.3)", margin: "3px 0" }} />
+                {customFonts.map((cf) => {
+                  const value = `custom:${cf.name}`;
+                  const active = selectedTextFont === value;
+                  return (
+                    <button
+                      key={cf.id}
+                      onClick={() => onBrushChange({ textFont: value })}
+                      className="btn-smooth flex flex-col items-center justify-center rounded-xl"
+                      style={{
+                        width: 38,
+                        height: 38,
+                        background: active ? "rgba(251,146,60,0.13)" : "transparent",
+                      }}
+                      title={cf.name}
+                      aria-label={`Custom font: ${cf.name}`}
+                    >
+                      <span
+                        style={{
+                          fontSize: 8,
+                          fontFamily: '"Space Mono", monospace',
+                          fontWeight: 700,
+                          color: active ? "var(--coral)" : "rgba(100,80,130,0.5)",
+                          lineHeight: 1.2,
+                          textAlign: "center",
+                          maxWidth: 34,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {cf.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </div>
         </div>
       )}
