@@ -521,7 +521,7 @@ export default function AccountPanel({
 
   return (
     <div
-      className="absolute right-4 top-16 z-50 w-[min(28rem,calc(100vw-2rem))] animate-fade-in overflow-hidden rounded-3xl"
+      className="fixed right-4 top-16 z-[400] w-[min(28rem,calc(100vw-2rem))] animate-fade-in overflow-hidden rounded-3xl"
       style={{
         background: "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(250,245,255,0.96))",
         border: "1px solid var(--border-strong)",
