@@ -1,6 +1,7 @@
 
 import React, { useState } from "react";
 import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle } from "@/types";
+import { exportImageAsset, exportFont } from "@/lib/exportAsset";
 
 type StoreFilterType = "all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope" | "kit";
 
@@ -265,6 +266,14 @@ export default function StoreView({
                       {inCollection ? "✓ Saved" : "♡ Save"}
                     </button>
                     <button
+                      onClick={() => exportImageAsset(item.name, item.authorName, item.imageData)}
+                      className="btn-smooth rounded-lg px-2 py-1.5 text-xs font-semibold"
+                      style={{ background: "var(--surface)", color: "var(--lavender)", border: "1px solid var(--border)" }}
+                      title="Download"
+                    >
+                      ↓
+                    </button>
+                    <button
                       onClick={() => onAddToAssets(item)}
                       className="btn-smooth rounded-lg px-2.5 py-1.5 text-xs font-semibold"
                       style={{ background: accent, color: "#fff" }}
@@ -318,6 +327,20 @@ export default function StoreView({
                     }}
                   >
                     {inCollection ? "✓ Saved" : "♡ Save"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (item.type === "font" && item.fontData) {
+                        exportFont(item.fontData, item.authorName);
+                      } else {
+                        exportImageAsset(item.name, item.authorName, item.imageData);
+                      }
+                    }}
+                    className="btn-smooth rounded-lg px-2 py-1.5 text-xs font-semibold"
+                    style={{ background: "var(--surface)", color: "var(--lavender)", border: "1px solid var(--border)" }}
+                    title={item.type === "font" ? "Download font (.json)" : "Download PNG"}
+                  >
+                    ↓
                   </button>
                   <button
                     onClick={() => onAddToAssets(item)}

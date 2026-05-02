@@ -1,7 +1,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrushSettings, CustomFont, PASTEL_COLORS, PaperBackground, ScrapbookKit, ScrapbookKitElement, Sticker, StoreItem, ViewerIdentity, WashiTape } from "@/types";
-import StudioAssetDrawer, { type DrawerSection, type GifSearchResult, getSwatchShadow } from "./StudioAssetDrawer";
+import StudioAssetDrawer, { type DrawerSection, type GifSearchResult } from "./StudioAssetDrawer";
+import { getSwatchShadow } from "@/lib/swatchUtils";
 
 
 

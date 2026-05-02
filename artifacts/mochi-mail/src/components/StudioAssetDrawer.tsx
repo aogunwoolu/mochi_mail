@@ -5,6 +5,8 @@ import FontTracerCreator from "./FontTracerCreator";
 import StickerCreator from "./StickerCreator";
 import WashiTapeCreator from "./WashiTapeCreator";
 import ScrapbookView from "./ScrapbookView";
+import { exportImageAsset, exportFont } from "@/lib/exportAsset";
+import { getSwatchShadow } from "@/lib/swatchUtils";
 
 export type DrawerSection = "assets" | "paper" | "scrapbook" | "extras" | "fonts";
 
@@ -25,11 +27,6 @@ const SECTION_LABELS: Record<DrawerSection, string> = {
   fonts: "Fonts",
 };
 
-export function getSwatchShadow(isSelected: boolean, color: string): string {
-  if (isSelected) return `0 0 0 2px white, 0 0 0 3.5px ${color}`;
-  if (color === "#ffffff") return "inset 0 0 0 1px rgba(0,0,0,0.12)";
-  return "0 1px 4px rgba(0,0,0,0.1)";
-}
 
 function SectionTitle({ title, note }: { title: string; note?: string }) {
   return (
@@ -208,6 +205,7 @@ export default function StudioAssetDrawer({
                             <img src={sticker.imageData} alt={sticker.name} className="max-h-full max-w-full object-contain" />
                           </button>
                           <button onClick={() => onDeleteSticker(sticker.id)} className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full text-[8px] text-white group-hover:flex" style={{ background: "var(--pink)" }}>✕</button>
+                          <button onClick={() => exportImageAsset(sticker.name, viewer.name, sticker.imageData)} className="absolute -left-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full text-[8px] text-white group-hover:flex" style={{ background: "var(--lavender)" }} title="Download PNG">↓</button>
                         </div>
                       );
                     })}
@@ -235,6 +233,7 @@ export default function StudioAssetDrawer({
                               <img src={tape.imageData} alt={tape.name} className="h-full w-full object-cover" />
                             </div>
                           </button>
+                          <button onClick={() => exportImageAsset(tape.name, viewer.name, tape.imageData)} className="btn-smooth flex h-9 w-9 items-center justify-center rounded-lg text-xs" style={{ color: "var(--lavender)", background: "var(--surface)" }} title="Download PNG">↓</button>
                           <button onClick={() => onDeleteWashi(tape.id)} className="btn-smooth flex h-9 w-9 items-center justify-center rounded-lg text-xs" style={{ color: "var(--muted)", background: "var(--surface)" }}>✕</button>
                         </div>
                       );
@@ -268,6 +267,7 @@ export default function StudioAssetDrawer({
                           </div>
                           <div className="truncate px-1 pb-1 text-[10px] font-semibold" style={{ color: "var(--muted-strong)" }}>{paper.name}</div>
                         </button>
+                        <button onClick={() => exportImageAsset(paper.name, viewer.name, paper.imageData)} className="absolute -left-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full text-[8px] text-white group-hover:flex" style={{ background: "var(--lavender)" }} title="Download PNG">↓</button>
                         {filteredPapers.length > 1 && (
                           <button onClick={() => onDeletePaper(paper.id)} className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full text-[8px] text-white group-hover:flex" style={{ background: "var(--sky)" }}>✕</button>
                         )}
@@ -344,6 +344,7 @@ export default function StudioAssetDrawer({
                         <div className="text-xs font-semibold">{font.name}</div>
                         <div className="text-[10px]" style={{ color: "var(--muted)" }}>Use this traced font for text mode</div>
                       </button>
+                      <button onClick={() => exportFont(font, viewer.name)} className="btn-smooth rounded-lg px-2 py-1 text-[10px]" style={{ background: "rgba(167,139,250,0.15)", color: "var(--lavender)" }} title="Download font as JSON">↓ Export</button>
                       <button onClick={() => onDeleteCustomFont(font.id)} className="btn-smooth rounded-lg px-2 py-1 text-[10px]" style={{ background: "rgba(251,146,60,0.15)", color: "var(--coral)" }}>Delete</button>
                     </div>
                   ))}
