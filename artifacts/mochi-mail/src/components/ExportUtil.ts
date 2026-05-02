@@ -35,20 +35,19 @@ export function exportWithDSBorder(
  * Exports an animated GIF when the canvas contains animated GIFs, otherwise
  * falls back to a static PNG.
  *
- * Quality notes:
- * - Draws from live DOM <img> elements (animatedImgRefsRef) so the browser's
- *   own GIF frame advancement is captured — no GIF decoder needed.
- * - Skips the gradient decorative frame: a gradient uses ~80 palette slots,
- *   leaving almost nothing for actual content colours. GIF is exported as
- *   clean canvas content with a plain white background instead.
- * - Per-frame colour quantisation: each frame gets its own optimal 256-colour
- *   palette, preventing the washed-out look of a single global palette.
+ * Fix for "not animated" bug: the CORS images must have real CSS layout
+ * dimensions (not width:0/height:0) so the browser advances their GIF frames.
+ * Zero-size or display:none elements are skipped by the browser's animation
+ * engine — every captured frame would be frame-1, producing a static output.
+ *
+ * Fix for quality: 10 fps keeps file size manageable while still looking smooth,
+ * and each frame gets its own optimal palette via per-frame quantisation.
  */
 export async function exportAnimated(
   canvasHandle: DrawingCanvasHandle,
   placedItems: PlacedSticker[],
   filename = "mochimail",
-  durationMs = 3000,
+  durationMs = 2500,
 ): Promise<void> {
   const hasGifs = placedItems.some((p) => p.isAnimated);
   if (!hasGifs) {
@@ -56,24 +55,25 @@ export async function exportAnimated(
     return;
   }
 
-  // ── Dimensions: scale so longest edge ≤ 1200 px ────────────────────────────
+  // ── Dimensions: scale so longest edge ≤ 800 px ─────────────────────────────
+  // Smaller output = fewer unique pixel colours = better palette use in GIF.
   const base = canvasHandle.getBaseCanvas();
   const cw = base.width;
   const ch = base.height;
 
-  const MAX_DIM = 1200;
+  const MAX_DIM = 800;
   const scale = Math.min(1, MAX_DIM / Math.max(cw, ch));
   const sw = Math.round(cw * scale);
   const sh = Math.round(ch * scale);
 
   // ── CORS-safe animated images ───────────────────────────────────────────────
-  // DOM <img> elements loaded without crossOrigin taint the canvas and block
-  // getImageData(). Fix: create fresh elements with crossOrigin="anonymous" in
-  // a hidden container so the browser (a) makes a CORS request and (b) advances
-  // GIF animation frames while the element is in the live document.
+  // CRITICAL: images MUST have non-zero layout dimensions in the document.
+  // The browser's GIF animation engine skips elements that are width:0/height:0
+  // or display:none. We use opacity:0 + actual size to keep them invisible while
+  // still letting the browser advance their frames.
   const corsContainer = document.createElement("div");
   corsContainer.style.cssText =
-    "position:fixed;top:-9999px;left:-9999px;width:0;height:0;overflow:hidden;pointer-events:none";
+    "position:fixed;top:0;left:0;opacity:0;pointer-events:none;z-index:-9999;overflow:hidden";
   document.body.appendChild(corsContainer);
 
   const animatedItems = placedItems.filter((p) => p.isAnimated);
@@ -85,8 +85,10 @@ export async function exportAnimated(
         new Promise<void>((resolve) => {
           const img = document.createElement("img");
           img.crossOrigin = "anonymous";
+          // Give the image its actual rendered dimensions — required for animation.
+          img.style.cssText = `position:absolute;width:${item.width}px;height:${item.height}px`;
           img.onload = () => resolve();
-          img.onerror = () => resolve(); // don't block export on a bad URL
+          img.onerror = () => resolve();
           img.src = item.imageData;
           corsContainer.appendChild(img);
           corsImgs.set(item.id, img);
@@ -94,35 +96,40 @@ export async function exportAnimated(
     ),
   );
 
+  // Wait for the browser to decode & start animating the GIFs.
+  // Without this pause the first several captured frames are often still frame-1.
+  await new Promise<void>((r) => setTimeout(r, 250));
+
   // ── Frame canvas (willReadFrequently for fast getImageData) ─────────────────
   const frameCanvas = document.createElement("canvas");
   frameCanvas.width = sw;
   frameCanvas.height = sh;
   const ctx = frameCanvas.getContext("2d", { willReadFrequently: true })!;
 
-  // Pre-scale the static base once
+  // Pre-scale the static base once — reused every frame
   const scaledBase = document.createElement("canvas");
   scaledBase.width = sw;
   scaledBase.height = sh;
   scaledBase.getContext("2d")!.drawImage(base, 0, 0, sw, sh);
 
   // ── GIF settings ─────────────────────────────────────────────────────────
-  const FPS = 15;
-  const FRAME_DELAY = Math.round(100 / FPS); // centiseconds (GIF time unit)
-  const TOTAL_FRAMES = Math.round(FPS * durationMs / 1000);
+  // 10 fps: smooth enough for GIF, keeps file size manageable.
+  const FPS = 10;
+  const FRAME_DELAY = Math.round(100 / FPS); // centiseconds
+  const TOTAL_FRAMES = Math.round((FPS * durationMs) / 1000);
 
   const gif = GIFEncoder();
 
-  // ── Capture loop via rAF — browser advances each source GIF each tick ───────
+  // ── Capture loop — rAF lets the browser advance each source GIF each tick ──
   await new Promise<void>((resolve) => {
     let captured = 0;
 
     function step() {
-      // 1. Static layers (background + strokes + stickers)
+      // 1. Static base (background + strokes + static stickers)
       ctx.clearRect(0, 0, sw, sh);
       ctx.drawImage(scaledBase, 0, 0);
 
-      // 2. Current frame of each animated GIF from the CORS-safe elements
+      // 2. Animated GIFs — drawn at scaled coordinates
       ctx.save();
       ctx.scale(scale, scale);
       for (const item of animatedItems) {
@@ -134,8 +141,8 @@ export async function exportAnimated(
         ctx.rotate((item.rotation * Math.PI) / 180);
         ctx.drawImage(img, -item.width / 2, -item.height / 2, item.width, item.height);
         ctx.restore();
-        ctx.globalAlpha = 1;
       }
+      ctx.globalAlpha = 1;
       ctx.restore();
 
       // 3. Per-frame quantise — each frame gets its own optimal 256-colour palette

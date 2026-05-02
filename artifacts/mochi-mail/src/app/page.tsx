@@ -261,12 +261,15 @@ export default function Home() {
     [setSelectedAsset],
   );
 
+  const [isExporting, setIsExporting] = useState(false);
+
   const handleExport = useCallback(() => {
-    if (canvasRef.current) {
-      void exportAnimated(canvasRef.current, placedItems, "mochimail_letter");
-      trackCanvasExport();
-    }
-  }, [placedItems, trackCanvasExport]);
+    if (!canvasRef.current || isExporting) return;
+    setIsExporting(true);
+    exportAnimated(canvasRef.current, placedItems, "mochimail_letter")
+      .finally(() => setIsExporting(false));
+    trackCanvasExport();
+  }, [placedItems, isExporting, trackCanvasExport]);
 
   const handleStoreAddToAssets = useCallback(
     (item: StoreItem) => {
@@ -730,6 +733,7 @@ export default function Home() {
           onRedo={() => canvasRef.current?.redo()}
           onClear={() => canvasRef.current?.clearCanvas()}
           onExport={handleExport}
+          isExporting={isExporting}
           stickers={stickers}
           washiTapes={washiTapes}
           papers={papers}

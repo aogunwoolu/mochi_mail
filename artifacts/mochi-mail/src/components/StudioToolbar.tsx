@@ -70,6 +70,7 @@ interface StudioToolbarProps {
   onRedo: () => void;
   onClear: () => void;
   onExport: () => void;
+  isExporting?: boolean;
   stickers: Sticker[];
   washiTapes: WashiTape[];
   papers: PaperBackground[];
@@ -163,7 +164,7 @@ function Divider() {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function StudioToolbar({
-  brushSettings, onBrushChange, onUndo, onRedo, onClear, onExport,
+  brushSettings, onBrushChange, onUndo, onRedo, onClear, onExport, isExporting = false,
   stickers, washiTapes, papers, customFonts, kitLibrary, storeItems,
   selectedAsset, selectedPaper, viewer,
   onSelectSticker, onSelectWashi, onSelectPaper, onDeselectAsset,
@@ -895,18 +896,27 @@ export default function StudioToolbar({
           {RedoIcon}
         </button>
         <button
-          onClick={onExport}
+          onClick={isExporting ? undefined : onExport}
           className="btn-smooth flex items-center justify-center rounded-2xl"
           style={{
             width: 48,
             height: 48,
-            background: "linear-gradient(135deg, var(--pink), var(--lavender))",
-            boxShadow: "0 6px 18px rgba(255,107,157,0.38)",
+            background: isExporting
+              ? "linear-gradient(135deg, rgba(255,107,157,0.5), rgba(167,139,250,0.5))"
+              : "linear-gradient(135deg, var(--pink), var(--lavender))",
+            boxShadow: isExporting ? "none" : "0 6px 18px rgba(255,107,157,0.38)",
+            cursor: isExporting ? "not-allowed" : "pointer",
           }}
-          title="Export PNG"
-          aria-label="Export PNG"
+          title={isExporting ? "Exporting…" : "Save / Export"}
+          aria-label={isExporting ? "Exporting…" : "Save / Export"}
+          aria-busy={isExporting}
         >
-          {ExportIcon}
+          {isExporting ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ animation: "spin 1s linear infinite" }}>
+              <circle cx="12" cy="12" r="9" stroke="white" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
+              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </svg>
+          ) : ExportIcon}
         </button>
       </div>
 
