@@ -363,7 +363,7 @@ export default function StudioToolbar({
   );
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-30">
+    <div className="pointer-events-none absolute inset-0 z-[60]">
 
       {/* ── Left toolbar (centered in canvas area above tab bar) ── */}
       <div
