@@ -26,7 +26,7 @@ function getAdminClient() {
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (chunk) => { data += chunk; });
+    req.on("data", (chunk: Buffer | string) => { data += String(chunk); });
     req.on("end", () => resolve(data));
     req.on("error", reject);
   });
