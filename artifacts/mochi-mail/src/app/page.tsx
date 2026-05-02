@@ -779,6 +779,7 @@ export default function Home() {
             const member = roomMembers.find((m) => m.presenceKey === artistId);
             if (member) jumpToMember(member);
           }}
+          onOpenOwnProfile={() => setAccountOpen(true)}
         />
 
         {/* Floating bottom tab bar — studio only */}

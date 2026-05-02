@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ViewerIdentity } from "@/types";
 import { getTrackingEnabled, setTrackingEnabled } from "@/lib/posthog";
 
@@ -113,9 +113,8 @@ interface AuthenticatedPanelProps {
   setWallpaper: (value: string) => void;
   youtubeUrl: string;
   setYoutubeUrl: (value: string) => void;
-  hasProfileChanges: boolean;
+  saveStatus: "idle" | "saving" | "saved";
   onOpenSpaces: () => void;
-  onSave: () => void;
   onLogOut: () => void;
   onUploadAvatar: (file: File | null) => void;
 }
@@ -139,7 +138,7 @@ interface GuestPanelProps {
 }
 
 function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
-  const authButtonLabel = props.hasProfileChanges ? "Save changes" : "Saved";
+  const saveLabel = props.saveStatus === "saving" ? "Saving…" : props.saveStatus === "saved" ? "✓ Saved" : "Auto-saved";
 
   return (
     <div className="space-y-3">
@@ -255,14 +254,18 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
         >
           🏠 My Space
         </button>
-        <button
-          onClick={props.onSave}
-          disabled={!props.hasProfileChanges}
-          className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold"
-          style={{ background: props.hasProfileChanges ? "var(--surface)" : "rgba(255,255,255,0.5)", color: "var(--foreground-soft)", border: "1px solid var(--border)", opacity: props.hasProfileChanges ? 1 : 0.6 }}
+        <div
+          className="flex items-center rounded-xl px-3 py-2 text-xs font-semibold transition-all"
+          style={{
+            background: props.saveStatus === "saved" ? "rgba(34,197,94,0.12)" : "rgba(255,255,255,0.5)",
+            color: props.saveStatus === "saved" ? "#15803d" : "var(--muted)",
+            border: "1px solid var(--border)",
+            minWidth: "5rem",
+            justifyContent: "center",
+          }}
         >
-          {authButtonLabel}
-        </button>
+          {saveLabel}
+        </div>
         <button
           onClick={props.onLogOut}
           className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold"
@@ -409,9 +412,17 @@ export default function AccountPanel({
   const [youtubeUrl, setYoutubeUrl] = useState(currentAccount?.youtubeUrl ?? "");
   const [accentColor, setAccentColor] = useState(currentAccount?.accentColor ?? "#ff6b9d");
   const [wallpaper, setWallpaper] = useState(currentAccount?.wallpaper ?? "");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(false);
+  const latestFieldsRef = useRef({ profileName, avatarUrl, bio, homeTitle, youtubeUrl, accentColor, wallpaper });
+  latestFieldsRef.current = { profileName, avatarUrl, bio, homeTitle, youtubeUrl, accentColor, wallpaper };
 
   useEffect(() => { setGuestName(viewer.name); }, [viewer.name]);
   useEffect(() => {
+    isMountedRef.current = false;
     setProfileName(currentAccount?.displayName ?? "");
     setAvatarUrl(currentAccount?.avatarUrl ?? "");
     setBio(currentAccount?.bio ?? "");
@@ -420,6 +431,32 @@ export default function AccountPanel({
     setAccentColor(currentAccount?.accentColor ?? "#ff6b9d");
     setWallpaper(currentAccount?.wallpaper ?? "");
   }, [currentAccount]);
+
+  useEffect(() => {
+    if (!isMountedRef.current) { isMountedRef.current = true; return; }
+    if (!currentAccount) return;
+    setSaveStatus("saving");
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const f = latestFieldsRef.current;
+      onUpdateAccount({
+        displayName: f.profileName.trim() || currentAccount.displayName,
+        avatarUrl: f.avatarUrl.trim(),
+        bio: f.bio.trim(),
+        homeTitle: f.homeTitle.trim(),
+        youtubeUrl: f.youtubeUrl.trim(),
+        accentColor: f.accentColor,
+        wallpaper: f.wallpaper.trim(),
+      });
+      setSaveStatus("saved");
+      savedTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2500);
+    }, 900);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileName, avatarUrl, bio, homeTitle, youtubeUrl, accentColor, wallpaper]);
 
   const handleGuestSave = () => { onRenameGuest(guestName); setError(""); };
 
@@ -493,9 +530,8 @@ export default function AccountPanel({
       setWallpaper={setWallpaper}
       youtubeUrl={youtubeUrl}
       setYoutubeUrl={setYoutubeUrl}
-      hasProfileChanges={hasProfileChanges}
+      saveStatus={saveStatus}
       onOpenSpaces={onOpenSpaces}
-      onSave={handleProfileSave}
       onLogOut={onLogOut}
       onUploadAvatar={(file) => { void handleAvatarUpload(file); }}
     />

@@ -98,6 +98,7 @@ interface StudioToolbarProps {
   collaborators: Collaborator[];
   selfCollaboratorId: string;
   onJumpToCollaborator: (artistId: string) => void;
+  onOpenOwnProfile: () => void;
 }
 
 // ── Tool button ───────────────────────────────────────────────────────────────
@@ -162,6 +163,163 @@ function Divider() {
   );
 }
 
+// ── Collaborator Avatars ───────────────────────────────────────────────────────
+
+function CollaboratorAvatars({
+  collaborators,
+  selfCollaboratorId,
+  onJumpToCollaborator,
+  onOpenOwnProfile,
+}: {
+  collaborators: Collaborator[];
+  selfCollaboratorId: string;
+  onJumpToCollaborator: (id: string) => void;
+  onOpenOwnProfile: () => void;
+}) {
+  const [popupId, setPopupId] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!popupId) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setPopupId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [popupId]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="pointer-events-auto absolute z-30 flex items-center gap-2"
+      style={{
+        right: "calc(1rem + env(safe-area-inset-right, 0px))",
+        top: "calc(1rem + env(safe-area-inset-top, 0px))",
+      }}
+    >
+      {collaborators.map((artist) => {
+        const isSelf = artist.id === selfCollaboratorId;
+        const initials = artist.name.split(" ").map((p) => p.charAt(0).toUpperCase()).join("").slice(0, 2) || "?";
+        const hasSpace = Boolean(artist.username);
+        const isPopupOpen = popupId === artist.id;
+
+        const avatarEl = (
+          <span
+            className="relative flex items-center justify-center overflow-hidden rounded-full"
+            style={{
+              width: 42,
+              height: 42,
+              background: "linear-gradient(135deg, #e8e0f0, #d1c4f8)",
+              border: `3px solid ${artist.color}`,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.16)",
+              flexShrink: 0,
+            }}
+          >
+            {artist.avatarUrl ? (
+              <img src={artist.avatarUrl} alt={artist.name} className="h-full w-full object-cover" />
+            ) : (
+              <span className="text-[11px] font-bold" style={{ color: "#6b4fa8" }}>{initials}</span>
+            )}
+            {isSelf && (
+              <span
+                className="absolute bottom-0 right-0 h-3 w-3 rounded-full"
+                style={{ background: "#22c55e", border: "2px solid white" }}
+              />
+            )}
+          </span>
+        );
+
+        return (
+          <div key={artist.id} className="relative flex flex-col items-center">
+            <button
+              onClick={() => {
+                if (isSelf) {
+                  onOpenOwnProfile();
+                } else {
+                  setPopupId(isPopupOpen ? null : artist.id);
+                }
+              }}
+              className="btn-smooth"
+              aria-label={isSelf ? "Open your profile" : `View ${artist.name}`}
+            >
+              {avatarEl}
+            </button>
+
+            {/* Self: always show hover tooltip */}
+            {isSelf && (
+              <div
+                className="pointer-events-none absolute top-full mt-2 whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-semibold opacity-0 shadow-lg transition-opacity hover:opacity-0 group-hover:opacity-0"
+                style={{
+                  background: "rgba(255,255,255,0.97)",
+                  color: "var(--foreground)",
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+                }}
+              >
+                {artist.name} (you)
+              </div>
+            )}
+
+            {/* Other user: click popup with name + space link */}
+            {!isSelf && isPopupOpen && (
+              <div
+                className="absolute top-full mt-2 min-w-[10rem] animate-fade-in rounded-2xl p-3 shadow-xl"
+                style={{
+                  background: "rgba(255,255,255,0.98)",
+                  border: "1px solid rgba(0,0,0,0.09)",
+                  boxShadow: "0 8px 28px rgba(80,40,120,0.16)",
+                  right: 0,
+                  zIndex: 50,
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-[10px] font-bold"
+                    style={{ background: "linear-gradient(135deg, #e8e0f0, #d1c4f8)", border: `2px solid ${artist.color}` }}
+                  >
+                    {artist.avatarUrl ? (
+                      <img src={artist.avatarUrl} alt={artist.name} className="h-full w-full object-cover" />
+                    ) : initials}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-bold" style={{ color: "var(--foreground)" }}>{artist.name}</p>
+                    {artist.username && (
+                      <p className="truncate text-[10px]" style={{ color: "var(--muted)" }}>@{artist.username}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2.5 flex flex-col gap-1.5">
+                  <button
+                    onClick={() => { onJumpToCollaborator(artist.id); setPopupId(null); }}
+                    className="btn-smooth w-full rounded-xl px-3 py-1.5 text-[11px] font-semibold"
+                    style={{ background: "var(--surface)", color: "var(--foreground-soft)", border: "1px solid var(--border)" }}
+                  >
+                    Jump to their cursor
+                  </button>
+                  {hasSpace && (
+                    <a
+                      href={`/space/${artist.username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setPopupId(null)}
+                      className="btn-smooth flex w-full items-center justify-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-semibold text-white"
+                      style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}
+                    >
+                      Visit their space ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function StudioToolbar({
@@ -173,7 +331,7 @@ export default function StudioToolbar({
   onDeleteSticker, onDeleteWashi, onDeletePaper, onDeleteCustomFont,
   onSaveSticker, onSaveWashi, onSaveCustomFont,
   onAddKitToLibrary, onRemoveKit, onPublishKit,
-  collaborators, selfCollaboratorId, onJumpToCollaborator,
+  collaborators, selfCollaboratorId, onJumpToCollaborator, onOpenOwnProfile,
 }: Readonly<StudioToolbarProps>) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<DrawerSection>("assets");
@@ -783,88 +941,12 @@ export default function StudioToolbar({
       )}
 
       {/* ── Collaborator avatars (top right) ──────────────────────────────── */}
-      <div
-        className="pointer-events-auto absolute z-30 flex items-center gap-2"
-        style={{
-          right: "calc(1rem + env(safe-area-inset-right, 0px))",
-          top: "calc(1rem + env(safe-area-inset-top, 0px))",
-        }}
-      >
-        {shownCollaborators.map((artist) => {
-          const isSelf = artist.id === selfCollaboratorId;
-          const initials = artist.name.split(" ").map((p) => p.charAt(0).toUpperCase()).join("").slice(0, 2) || "?";
-          const hasSpace = !isSelf && Boolean(artist.username);
-          const avatar = (
-            <span
-              className="relative flex items-center justify-center overflow-hidden rounded-full"
-              style={{
-                width: 42,
-                height: 42,
-                background: "linear-gradient(135deg, #e8e0f0, #d1c4f8)",
-                border: `3px solid ${artist.color}`,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.16)",
-                flexShrink: 0,
-              }}
-            >
-              {artist.avatarUrl ? (
-                <img src={artist.avatarUrl} alt={artist.name} className="h-full w-full object-cover" />
-              ) : (
-                <span className="text-[11px] font-bold" style={{ color: "#6b4fa8" }}>{initials}</span>
-              )}
-              {isSelf && (
-                <span
-                  className="absolute bottom-0 right-0 h-3 w-3 rounded-full"
-                  style={{ background: "#22c55e", border: "2px solid white" }}
-                />
-              )}
-            </span>
-          );
-          return (
-            <div key={artist.id} className="group relative flex flex-col items-center">
-              {hasSpace ? (
-                <a
-                  href={`/space/${artist.username}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    onJumpToCollaborator(artist.id);
-                    window.open(`/space/${artist.username}`, "_blank");
-                  }}
-                  className="btn-smooth"
-                  aria-label={`${artist.name}'s space`}
-                >
-                  {avatar}
-                </a>
-              ) : (
-                <button
-                  onClick={() => onJumpToCollaborator(artist.id)}
-                  className="btn-smooth"
-                  aria-label={isSelf ? `${artist.name} (you)` : `Jump to ${artist.name}`}
-                >
-                  {avatar}
-                </button>
-              )}
-              <div
-                className="pointer-events-none absolute top-full mt-2 whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-semibold opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
-                style={{
-                  background: "rgba(255,255,255,0.97)",
-                  color: "var(--foreground)",
-                  border: "1px solid rgba(0,0,0,0.08)",
-                  boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-                }}
-              >
-                {isSelf ? `${artist.name} (you)` : artist.name}
-                {hasSpace && (
-                  <span className="ml-1 text-[10px]" style={{ color: "var(--lavender)" }}>
-                    · visit space ↗
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <CollaboratorAvatars
+        collaborators={shownCollaborators}
+        selfCollaboratorId={selfCollaboratorId}
+        onJumpToCollaborator={onJumpToCollaborator}
+        onOpenOwnProfile={onOpenOwnProfile}
+      />
 
       {/* ── Action buttons (bottom right) ────────────────────────────────── */}
       <div
