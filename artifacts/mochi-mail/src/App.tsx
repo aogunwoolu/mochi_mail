@@ -6,6 +6,7 @@ import RoomsPage from "./pages/RoomsPage";
 import RoomInvitePage from "./pages/RoomInvitePage";
 import SpacePage from "./pages/SpacePage";
 import NotFound from "./pages/not-found";
+import { trackPageview } from "./lib/posthog";
 
 function SpaceRedirect({ username }: { username: string }) {
   const [, navigate] = useLocation();
@@ -15,18 +16,29 @@ function SpaceRedirect({ username }: { username: string }) {
   return null;
 }
 
+function PageviewTracker() {
+  const [location] = useLocation();
+  useEffect(() => {
+    trackPageview(location);
+  }, [location]);
+  return null;
+}
+
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route path="/rooms" component={RoomsPage} />
-      <Route path="/rooms/:inviteToken" component={RoomInvitePage} />
-      <Route path="/space" component={SpacePage} />
-      <Route path="/space/:username">
-        {(params) => <SpaceRedirect username={params.username ?? ""} />}
-      </Route>
-      <Route component={NotFound} />
-    </Switch>
+    <>
+      <PageviewTracker />
+      <Switch>
+        <Route path="/" component={Home} />
+        <Route path="/rooms" component={RoomsPage} />
+        <Route path="/rooms/:inviteToken" component={RoomInvitePage} />
+        <Route path="/space" component={SpacePage} />
+        <Route path="/space/:username">
+          {(params) => <SpaceRedirect username={params.username ?? ""} />}
+        </Route>
+        <Route component={NotFound} />
+      </Switch>
+    </>
   );
 }
 

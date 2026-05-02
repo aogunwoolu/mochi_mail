@@ -27,6 +27,7 @@ import {
   WashiTape,
   StoreItem,
 } from "@/types";
+import { useIdentify, useStudioAnalytics, useMailAnalytics, useStoreAnalytics } from "@/hooks/useAnalytics";
 
 const CANVAS_W = 6000;
 const CANVAS_H = 4800;
@@ -70,6 +71,16 @@ export default function Home() {
   });
 
   const { account, assets, mail, store } = useMochi();
+
+  // ── Analytics ─────────────────────────────────────────────────────────────
+  useIdentify(account.viewer.accountId ?? account.viewer.id, {
+    name: account.viewer.name,
+    username: account.viewer.username,
+    isGuest: !account.isAuthenticated,
+  });
+  const { trackToolSwitch, trackStickerPlaced, trackWashiPlaced, trackCanvasExport, trackTabChange } = useStudioAnalytics();
+  const { trackMailSent, trackMailComposeFocus } = useMailAnalytics();
+  const { trackItemAdded, trackItemPublished } = useStoreAnalytics();
   const {
     stickers,
     washiTapes,
@@ -211,8 +222,10 @@ export default function Home() {
     (asset: Sticker | WashiTape, x: number, y: number) => {
       const placed = placeItem(asset, x, y);
       if (placed) broadcastPlacedItemAdd(placed);
+      if ("opacity" in asset) trackWashiPlaced(asset.name);
+      else trackStickerPlaced(asset.name);
     },
-    [placeItem, broadcastPlacedItemAdd],
+    [placeItem, broadcastPlacedItemAdd, trackStickerPlaced, trackWashiPlaced],
   );
 
   const handleRemovePlacedItem = useCallback(
@@ -249,8 +262,11 @@ export default function Home() {
   );
 
   const handleExport = useCallback(() => {
-    if (canvasRef.current) void exportAnimated(canvasRef.current, placedItems, "mochimail_letter");
-  }, [placedItems]);
+    if (canvasRef.current) {
+      void exportAnimated(canvasRef.current, placedItems, "mochimail_letter");
+      trackCanvasExport();
+    }
+  }, [placedItems, trackCanvasExport]);
 
   const handleStoreAddToAssets = useCallback(
     (item: StoreItem) => {
@@ -272,8 +288,9 @@ export default function Home() {
           item.fontData.glyphWidth,
           item.fontData.glyphHeight,
         );
+      trackItemAdded(item.id, item.type, item.name);
     },
-    [addSticker, addWashiTape, addPaper, addStamp, addEnvelope, addCustomFont, setSelectedPaper],
+    [addSticker, addWashiTape, addPaper, addStamp, addEnvelope, addCustomFont, setSelectedPaper, trackItemAdded],
   );
 
   const handleStorePublish = useCallback(
@@ -289,8 +306,9 @@ export default function Home() {
         account.viewer.accountId ?? account.viewer.id,
         tags,
       );
+      trackItemPublished(itemType, item.name);
     },
-    [account.viewer, store],
+    [account.viewer, store, trackItemPublished],
   );
 
   // ── Infinite canvas scroll ────────────────────────────────────────────────
@@ -475,7 +493,7 @@ export default function Home() {
               ).map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => { setActiveTab(tab.id); trackTabChange(tab.id); }}
                   className="btn-smooth relative flex min-h-10 items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold"
                   style={{
                     background: activeTab === tab.id ? "var(--surface-hover)" : "transparent",
@@ -874,6 +892,7 @@ export default function Home() {
               onBack={() => setMailView("inbox")}
               onSend={(payload) => {
                 mail.sendLetter(payload);
+                trackMailSent({ speed: payload.speed, hasStamp: !!payload.stampName, hasCustomEnvelope: !!payload.envelopeName });
               }}
             />
           ) : (
@@ -885,7 +904,7 @@ export default function Home() {
               getDeliveryProgress={mail.getDeliveryProgress}
               getTimeRemaining={mail.getTimeRemaining}
               markAsRead={mail.markAsRead}
-              onCompose={() => setMailView("compose")}
+              onCompose={() => { setMailView("compose"); trackMailComposeFocus(); }}
             />
           )}
         </div>

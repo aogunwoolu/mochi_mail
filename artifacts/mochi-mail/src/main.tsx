@@ -2,6 +2,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { initPostHog, trackError } from "./lib/posthog";
+
+initPostHog();
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -14,6 +17,10 @@ class ErrorBoundary extends React.Component<
 
   static getDerivedStateFromError(error: Error) {
     return { error };
+  }
+
+  override componentDidCatch(error: Error, info: React.ErrorInfo) {
+    trackError(error, { component_stack: info.componentStack ?? "" });
   }
 
   override render() {
