@@ -288,15 +288,86 @@ export function useRoom({
           return;
         }
 
-        // Both failed — surface a helpful error.
-        const detail = e2 instanceof Error ? e2.message : (err instanceof Error ? err.message : "");
-        const isPrivate = detail === "private";
-        setPhase("error");
-        setError(
-          isPrivate
-            ? "This room is private. Ask the owner for their invite link."
-            : "Could not join this room. The link may be invalid or expired.",
-        );
+        // Both failed — if private, surface the error. Otherwise strip the
+        // stale token from the URL and fall back to the create-or-reuse flow
+        // so the user can always draw instead of being stuck on an error screen.
+        const detail =
+          (e2 as { message?: string } | null)?.message ??
+          (err as { message?: string } | null)?.message ??
+          "";
+        if (detail === "private") {
+          setPhase("error");
+          setError("This room is private. Ask the owner for their invite link.");
+          return;
+        }
+
+        // Stale / invalid token — strip it, warn the user briefly, then proceed
+        // to create or reuse a room so drawing is never blocked.
+        if (globalThis.history) {
+          const url = new URL(globalThis.location.href);
+          url.searchParams.delete("room");
+          globalThis.history.replaceState(null, "", url.toString());
+        }
+
+        // Reset the guard so the create-path can run
+        roomInitiatedRef.current = false;
+        setError("That invite link was invalid or expired — starting a fresh canvas.");
+
+        // Re-run the no-token create flow inline
+        setPhase("creating");
+        const supabase2 = createSupabaseBrowserClient();
+        const { data: { user: u2 } } = await supabase2.auth.getUser();
+        if (u2) {
+          const { data: existing2 } = await supabase2
+            .from("rooms")
+            .select("id, title, invite_token, is_public")
+            .eq("owner_id", u2.id)
+            .order("updated_at", { ascending: false })
+            .limit(1);
+          const room2 = existing2?.[0] as
+            | { id: string; title: string; invite_token: string; is_public: boolean }
+            | undefined;
+          if (room2) {
+            if (globalThis.history) {
+              const url2 = new URL(globalThis.location.href);
+              url2.searchParams.set("room", room2.invite_token);
+              globalThis.history.replaceState(null, "", url2.toString());
+            }
+            setActiveRoomId(room2.id);
+            setActiveRoomTitle(room2.title);
+            setActiveRoomToken(room2.invite_token);
+            setIsPublic(room2.is_public);
+            setIsOwner(true);
+            setPhase("drawing");
+            // Clear the transient warning after a moment
+            setTimeout(() => setError(null), 4000);
+            return;
+          }
+        }
+        // No existing room — create a new one
+        const { data: newRoom, error: createErr } = await (supabase2.rpc as Function)("create_room", {
+          p_title: "My Canvas",
+          p_description: "",
+          p_is_public: false,
+          p_password: null,
+        });
+        if (createErr || !newRoom?.[0]) {
+          fallbackToLocal();
+          return;
+        }
+        const { id: newId, invite_token: newToken } = newRoom[0] as { id: string; invite_token: string };
+        if (globalThis.history) {
+          const url3 = new URL(globalThis.location.href);
+          url3.searchParams.set("room", newToken);
+          globalThis.history.replaceState(null, "", url3.toString());
+        }
+        setActiveRoomId(newId);
+        setActiveRoomTitle("My Canvas");
+        setActiveRoomToken(newToken);
+        setIsPublic(false);
+        setIsOwner(true);
+        setPhase("drawing");
+        setTimeout(() => setError(null), 4000);
       })();
     }
   }, [hasSession, hydrated]);

@@ -99,6 +99,25 @@ export default function RoomControl({
     );
   }
 
+  // Transient warning while in drawing mode (e.g. stale link recovered)
+  if (phase === "drawing" && error) {
+    return (
+      <>
+        <div
+          className="flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
+          style={{
+            ...chipStyle,
+            border: "1px solid rgba(251,191,36,0.5)",
+            color: "#92400e",
+            background: "rgba(255,251,235,0.97)",
+          }}
+        >
+          <span>⚠ {error}</span>
+        </div>
+      </>
+    );
+  }
+
   return (
     <div
       className="flex items-center gap-1.5 rounded-full px-2 py-1.5"
