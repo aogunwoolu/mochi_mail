@@ -4,6 +4,7 @@ import { useAccount } from "@/hooks/useAccount";
 import { useSpaces } from "@/hooks/useSpaces";
 import SpaceStudio from "@/components/SpaceStudio";
 import { useState, useEffect, Suspense } from "react";
+import { parseSpaceConfig, bgToCss } from "@/lib/spaceConfig";
 
 function SpacePageInner() {
   const [, navigate] = useLocation();
@@ -30,7 +31,6 @@ function SpacePageInner() {
     }
   }, [requestedUser, spaces.spaces, selectedSpaceId]);
 
-  // Redirect guests to home — they need an account for a space
   useEffect(() => {
     if (account.hydrated && !account.hasSession) {
       navigate("/");
@@ -54,42 +54,16 @@ function SpacePageInner() {
 
   if (!account.hasSession) return null;
 
-  const pageWallpaper = selectedSpace?.wallpaper || account.viewer.wallpaper || "var(--bg)";
-  const pageAccent = selectedSpace?.accentColor || account.viewer.accentColor || "#ff6b9d";
+  const cfg = parseSpaceConfig(selectedSpace?.wallpaper ?? account.viewer.wallpaper);
+  const pageBg = bgToCss(cfg.bg);
+  const pageAccent = cfg.lineColor || selectedSpace?.accentColor || account.viewer.accentColor || "#ff6b9d";
 
   return (
     <div
       className="flex h-svh flex-col overflow-hidden"
-      style={
-        {
-          background: pageWallpaper,
-          "--pink": pageAccent,
-          "--accent": pageAccent,
-        } as React.CSSProperties
-      }
+      style={{ background: pageBg, "--pink": pageAccent, "--accent": pageAccent } as React.CSSProperties}
     >
-      {/* Header bar */}
-      <header
-        className="flex shrink-0 items-center gap-3 px-4 py-3 backdrop-blur-md"
-        style={{ borderBottom: "1px solid var(--border)", background: "rgba(255,255,255,0.55)" }}
-      >
-        <button
-          onClick={() => navigate("/")}
-          className="btn-smooth flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium"
-          style={{ color: "var(--muted-strong)", background: "var(--surface-active)" }}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Back to Studio
-        </button>
-        <span className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-          {account.viewer.name}&apos;s Space
-        </span>
-      </header>
-
-      {/* Main content */}
-      <div className="flex-1 overflow-hidden p-4">
+      <div className="flex-1 overflow-hidden">
         <SpaceStudio
           viewer={account.viewer}
           isAuthenticated={account.isAuthenticated}
@@ -103,6 +77,7 @@ function SpacePageInner() {
           onUpdateSpaceItem={spaces.updateSpaceItem}
           onRemoveSpaceItem={spaces.removeSpaceItem}
           onLeaveVisitorNote={spaces.leaveVisitorNote}
+          onNavigateBack={() => navigate("/")}
         />
       </div>
     </div>

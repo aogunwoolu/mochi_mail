@@ -356,9 +356,9 @@ export function useSpaces(
     if (!content) return;
     const supabase = createSupabaseBrowserClient();
     const item = makeItem("note", {
-      title: `${authorName}'s note`,
+      title: `From ${authorName}`,
       content,
-      color: "#fff0a8",
+      color: "visitor",
       x: 120 + Math.floor(Math.random() * 320),
       y: 120 + Math.floor(Math.random() * 220),
     });
