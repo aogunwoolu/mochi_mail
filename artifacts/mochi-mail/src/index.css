@@ -324,6 +324,11 @@ textarea::placeholder {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(-45deg); }
 }
+
+@keyframes mochi-toast-in {
+  0% { opacity: 0; transform: translateY(8px) scale(0.92); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
 .flag-up {
   animation: flag-up 0.5s ease-out forwards;
 }

@@ -190,6 +190,13 @@ export default function StudioToolbar({
   ]);
   const paletteInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const longPressTimers = useRef<(ReturnType<typeof setTimeout> | null)[]>([]);
+  const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showFeedback = useCallback((msg: string) => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    setFeedbackMsg(msg);
+    feedbackTimerRef.current = setTimeout(() => setFeedbackMsg(null), 2500);
+  }, []);
 
   useEffect(() => { setCustomColor(brushSettings.color); }, [brushSettings.color]);
 
@@ -290,11 +297,13 @@ export default function StudioToolbar({
 
   const addKitElement = useCallback((el: ScrapbookKitElement) => {
     onSaveSticker(el.name, el.imageData, el.width, el.height);
-  }, [onSaveSticker]);
+    showFeedback(`"${el.name}" added to your stickers`);
+  }, [onSaveSticker, showFeedback]);
 
   const addKitAll = useCallback((kit: ScrapbookKit) => {
     kit.elements.forEach((el) => onSaveSticker(el.name, el.imageData, el.width, el.height));
-  }, [onSaveSticker]);
+    showFeedback(`${kit.elements.length} element${kit.elements.length === 1 ? "" : "s"} from "${kit.name}" added`);
+  }, [onSaveSticker, showFeedback]);
 
   const setTool = useCallback((tool: BrushSettings["tool"]) => {
     onBrushChange({ tool });
@@ -372,6 +381,28 @@ export default function StudioToolbar({
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[60]">
+
+      {/* ── Kit action feedback toast ── */}
+      {feedbackMsg && (
+        <div
+          className="pointer-events-none absolute z-50"
+          style={{ left: 76, bottom: 96 }}
+        >
+          <div
+            className="flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold shadow-xl"
+            style={{
+              background: "linear-gradient(135deg, #ff6b9d, #a78bfa)",
+              color: "#fff",
+              boxShadow: "0 4px 20px rgba(167,139,250,0.4)",
+              maxWidth: 260,
+              animation: "mochi-toast-in 0.18s cubic-bezier(0.34,1.56,0.64,1)",
+            }}
+          >
+            <span style={{ fontSize: 14 }}>✓</span>
+            <span className="truncate">{feedbackMsg}</span>
+          </div>
+        </div>
+      )}
 
       {/* ── Left toolbar (centered in canvas area above tab bar) ── */}
       <div
@@ -949,9 +980,16 @@ export default function StudioToolbar({
                 addGifFromUrl={addGifFromUrl}
                 onAddKitElement={addKitElement}
                 onAddKit={addKitAll}
-                onAddKitToLibrary={onAddKitToLibrary}
+                onAddKitToLibrary={(kit) => {
+                  onAddKitToLibrary(kit);
+                  showFeedback(`"${kit.name}" saved to your library`);
+                }}
                 onRemoveKit={onRemoveKit}
-                onPublishKit={onPublishKit}
+                onPublishKit={(kit, toShop) => {
+                  onPublishKit(kit, toShop);
+                  if (toShop) showFeedback(`"${kit.name}" published to the shop!`);
+                  else showFeedback(`"${kit.name}" saved to your library`);
+                }}
                 kitLibrary={kitLibrary}
                 shopKits={storeItems.filter((i) => i.type === "kit")}
                 viewer={viewer}
