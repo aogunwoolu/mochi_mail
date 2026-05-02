@@ -1296,7 +1296,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               setTextOverlay(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
                 if (textOverlay.value.trim()) commitTextBlock(textOverlay.value, textOverlay.id);
                 setTextOverlay(null);
               } else if (e.key === "Escape") {
