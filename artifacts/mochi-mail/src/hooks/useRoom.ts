@@ -260,7 +260,28 @@ export function useRoom({
           return;
         }
 
-        // 2. Fallback: token might be a room UUID from the stable share link.
+        // 2. Direct table query — works even when the RPC is unavailable.
+        //    RLS already allows owners, members, and public-room visitors to read.
+        //    This is the most reliable recovery path on refresh.
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        const { data: directRoom } = await supabase
+          .from("rooms")
+          .select("id, title, invite_token, is_public, owner_id")
+          .eq("invite_token", token)
+          .maybeSingle();
+
+        if (directRoom) {
+          const userIsOwner = Boolean(currentUser && directRoom.owner_id === currentUser.id);
+          setActiveRoomId(directRoom.id);
+          setActiveRoomTitle(directRoom.title);
+          setActiveRoomToken(directRoom.invite_token);
+          setIsPublic(directRoom.is_public);
+          setIsOwner(userIsOwner);
+          setPhase("drawing");
+          return;
+        }
+
+        // 3. Fallback: token might be a room UUID from a legacy share link.
         //    join_room_by_id handles public rooms and existing members by ID.
         const { data: d2, error: e2 } = await (supabase.rpc as Function)("join_room_by_id", {
           p_room_id: token,
@@ -288,29 +309,16 @@ export function useRoom({
           return;
         }
 
-        // Both failed — if private, surface the error. Otherwise strip the
-        // stale token from the URL and fall back to the create-or-reuse flow
-        // so the user can always draw instead of being stuck on an error screen.
-        const detail =
-          (e2 as { message?: string } | null)?.message ??
-          (err as { message?: string } | null)?.message ??
-          "";
-        if (detail === "private") {
-          setPhase("error");
-          setError("This room is private. Ask the owner for their invite link.");
-          return;
-        }
-
-        // Stale / invalid token — strip it, warn the user briefly, then proceed
-        // to create or reuse a room so drawing is never blocked.
+        // All join attempts failed — strip the stale token and fall back to
+        // the create-or-reuse flow so drawing is never permanently blocked.
         if (globalThis.history) {
           const url = new URL(globalThis.location.href);
           url.searchParams.delete("room");
           globalThis.history.replaceState(null, "", url.toString());
         }
 
-        // Reset the guard so the create-path can run
-        roomInitiatedRef.current = false;
+        // Keep roomInitiatedRef=true so the effect doesn't double-fire;
+        // the create/reuse path runs inline below.
         setError("That invite link was invalid or expired — starting a fresh canvas.");
 
         // Re-run the no-token create flow inline
