@@ -98,8 +98,8 @@ function ToolBtn({
       <span
         className="flex items-center justify-center rounded-2xl transition-all"
         style={{
-          width: 52,
-          height: 52,
+          width: 44,
+          height: 44,
           background: active
             ? "linear-gradient(135deg, rgba(255,107,157,0.18), rgba(167,139,250,0.15))"
             : "transparent",
@@ -522,13 +522,14 @@ export default function StudioToolbar({
                 });
                 onDeselectAsset();
               }}
-              className="btn-smooth my-0.5 rounded-full transition-all"
+              className="btn-smooth rounded-full transition-all"
               style={{
-                width: selected ? 32 : 28,
-                height: selected ? 32 : 28,
+                width: selected ? 28 : 24,
+                height: selected ? 28 : 24,
+                margin: selected ? "2px 0" : "3px 0",
                 background: color,
                 boxShadow: selected
-                  ? `0 0 0 2.5px white, 0 0 0 4.5px ${color}`
+                  ? `0 0 0 2px white, 0 0 0 3.5px ${color}`
                   : color === "#ffffff"
                   ? "inset 0 0 0 1.5px rgba(0,0,0,0.15)"
                   : "0 2px 6px rgba(0,0,0,0.15)",
@@ -541,10 +542,11 @@ export default function StudioToolbar({
 
         {/* Custom color picker */}
         <label
-          className="btn-smooth my-0.5 flex cursor-pointer items-center justify-center overflow-hidden rounded-full"
+          className="btn-smooth flex cursor-pointer items-center justify-center overflow-hidden rounded-full"
           style={{
-            width: 28,
-            height: 28,
+            width: 24,
+            height: 24,
+            margin: "3px 0",
             background: "conic-gradient(from 0deg, #ff6b9d, #fb923c, #fbbf24, #6ee7b7, #67d4f1, #a78bfa, #ff6b9d)",
             boxShadow: "0 2px 6px rgba(0,0,0,0.12)",
           }}
@@ -567,46 +569,40 @@ export default function StudioToolbar({
           />
         </label>
 
-      </div>
-
-      {/* ── Brush size picker — floats beside toolbar when pen/eraser active ── */}
-      {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
-        <div
-          className="pointer-events-auto absolute left-20 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-2 px-2 py-3"
-          style={{
-            background: "rgba(255,255,255,0.96)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-            borderRadius: 18,
-            border: "1px solid rgba(186,156,214,0.25)",
-            boxShadow: "0 6px 20px rgba(143,109,178,0.13), 0 1px 4px rgba(0,0,0,0.06)",
-          }}
-        >
-          {([2, 5, 10, 18] as const).map((sz) => {
-            const active = brushSettings.size === sz;
-            const dot = Math.max(4, Math.min(sz + 2, 18));
-            return (
-              <button
-                key={sz}
-                onClick={() => onBrushChange({ size: sz })}
-                className="btn-smooth flex h-9 w-9 items-center justify-center rounded-xl"
-                style={{ background: active ? "rgba(255,107,157,0.13)" : "transparent" }}
-                title={`Size ${sz}`}
-                aria-label={`Brush size ${sz}`}
-              >
-                <span
-                  className="rounded-full"
+        {/* Brush size — compact dots, only on pen/eraser */}
+        {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
+          <>
+            <Divider />
+            {([2, 5, 10, 18] as const).map((sz) => {
+              const active = brushSettings.size === sz;
+              const dot = Math.max(4, Math.min(sz + 2, 16));
+              return (
+                <button
+                  key={sz}
+                  onClick={() => onBrushChange({ size: sz })}
+                  className="btn-smooth flex items-center justify-center rounded-xl"
                   style={{
-                    width: dot,
-                    height: dot,
-                    background: active ? "var(--pink)" : "rgba(100,80,130,0.35)",
+                    width: 36,
+                    height: 36,
+                    background: active ? "rgba(255,107,157,0.13)" : "transparent",
                   }}
-                />
-              </button>
-            );
-          })}
-        </div>
-      )}
+                  title={`Size ${sz}`}
+                  aria-label={`Brush size ${sz}`}
+                >
+                  <span
+                    className="rounded-full"
+                    style={{
+                      width: dot,
+                      height: dot,
+                      background: active ? "var(--pink)" : "rgba(100,80,130,0.35)",
+                    }}
+                  />
+                </button>
+              );
+            })}
+          </>
+        )}
+      </div>
 
       {/* ── Collaborator avatars (top right) ──────────────────────────────── */}
       <div
