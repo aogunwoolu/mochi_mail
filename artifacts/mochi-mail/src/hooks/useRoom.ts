@@ -61,6 +61,8 @@ function pickColor(seed: string): string {
 
 export interface UseRoomOptions {
   hasSession: boolean;
+  /** True once auth has been fully attempted (success or failure). */
+  hydrated: boolean;
   selfId: string;
   selfName: string;
   viewerAccountId?: string;
@@ -87,6 +89,7 @@ export interface UseRoomReturn {
 
 export function useRoom({
   hasSession,
+  hydrated,
   selfId,
   selfName,
   selfAvatarUrl,
@@ -103,6 +106,7 @@ export function useRoom({
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const lastCursorBroadcastRef = useRef(0);
+  const roomInitiatedRef = useRef(false);
   const selfColor = pickColor(selfId);
 
   const selfIdRef = useRef(selfId);
@@ -124,75 +128,111 @@ export function useRoom({
 
   // ── Step 1: Read URL → create or join room ─────────────────────────────────
   useEffect(() => {
-    if (!hasSession) return;
+    // If auth has been fully attempted but failed (anon auth disabled), run local-only.
+    if (!hasSession) {
+      if (hydrated && !roomInitiatedRef.current) {
+        roomInitiatedRef.current = true;
+        setActiveRoomId(null);
+        setActiveRoomTitle("My Canvas");
+        setActiveRoomToken(null);
+        setIsPublic(false);
+        setIsOwner(true);
+        setPhase("drawing");
+      }
+      return;
+    }
+
+    // Guard against double-firing when both hasSession and hydrated change.
+    if (roomInitiatedRef.current) return;
+    roomInitiatedRef.current = true;
 
     const token = new URLSearchParams(globalThis.location?.search ?? "")
       .get("room")
       ?.trim() ?? "";
 
+    const fallbackToLocal = () => {
+      setActiveRoomId(null);
+      setActiveRoomTitle("My Canvas");
+      setActiveRoomToken(null);
+      setIsPublic(false);
+      setIsOwner(true);
+      setPhase("drawing");
+    };
+
     if (!token) {
       // No room in URL: reuse most-recent owned room, or create a new private one
       setPhase("creating");
       const supabase = createSupabaseBrowserClient();
-      void (async () => {
-        const { data: { user } } = await supabase.auth.getUser();
 
-        // Look for an existing owned room before creating
-        if (user) {
-          const { data: existing } = await supabase
-            .from("rooms")
-            .select("id, title, invite_token, is_public")
-            .eq("owner_id", user.id)
-            .order("updated_at", { ascending: false })
-            .limit(1);
+      // Race the entire room-setup flow against a 5s timeout so the spinner
+      // never hangs indefinitely (e.g. when create_room RPC is slow or blocked).
+      const timeout = new Promise<void>((resolve) =>
+        setTimeout(() => { fallbackToLocal(); resolve(); }, 5000)
+      );
 
-          const room = existing?.[0] as
-            | { id: string; title: string; invite_token: string; is_public: boolean }
-            | undefined;
+      void Promise.race([
+        (async () => {
+          const { data: { user } } = await supabase.auth.getUser();
 
-          if (room) {
-            if (globalThis.history) {
-              const url = new URL(globalThis.location.href);
-              url.searchParams.set("room", room.invite_token);
-              globalThis.history.replaceState(null, "", url.toString());
+          // Look for an existing owned room before creating
+          if (user) {
+            const { data: existing } = await supabase
+              .from("rooms")
+              .select("id, title, invite_token, is_public")
+              .eq("owner_id", user.id)
+              .order("updated_at", { ascending: false })
+              .limit(1);
+
+            const room = existing?.[0] as
+              | { id: string; title: string; invite_token: string; is_public: boolean }
+              | undefined;
+
+            if (room) {
+              if (globalThis.history) {
+                const url = new URL(globalThis.location.href);
+                url.searchParams.set("room", room.invite_token);
+                globalThis.history.replaceState(null, "", url.toString());
+              }
+              setActiveRoomId(room.id);
+              setActiveRoomTitle(room.title);
+              setActiveRoomToken(room.invite_token);
+              setIsPublic(room.is_public);
+              setIsOwner(true);
+              setPhase("drawing");
+              return;
             }
-            setActiveRoomId(room.id);
-            setActiveRoomTitle(room.title);
-            setActiveRoomToken(room.invite_token);
-            setIsPublic(room.is_public);
-            setIsOwner(true);
-            setPhase("drawing");
+          }
+
+          // No existing room — create a new private one
+          const { data, error: err } = await (supabase.rpc as Function)("create_room", {
+            p_title: "My Canvas",
+            p_description: "",
+            p_is_public: false,
+            p_password: null,
+          });
+          if (err || !data?.[0]) {
+            // If room creation fails (e.g. RLS policy for anonymous users),
+            // fall back to local-only drawing mode — canvas still works without sync.
+            fallbackToLocal();
             return;
           }
-        }
+          const { id, invite_token } = data[0] as { id: string; invite_token: string };
 
-        // No existing room — create a new private one
-        const { data, error: err } = await (supabase.rpc as Function)("create_room", {
-          p_title: "My Canvas",
-          p_description: "",
-          p_is_public: false,
-          p_password: null,
-        });
-        if (err || !data?.[0]) {
-          setPhase("error");
-          setError("Failed to create your canvas. Please refresh.");
-          return;
-        }
-        const { id, invite_token } = data[0] as { id: string; invite_token: string };
+          if (globalThis.history) {
+            const url = new URL(globalThis.location.href);
+            url.searchParams.set("room", invite_token);
+            globalThis.history.replaceState(null, "", url.toString());
+          }
 
-        if (globalThis.history) {
-          const url = new URL(globalThis.location.href);
-          url.searchParams.set("room", invite_token);
-          globalThis.history.replaceState(null, "", url.toString());
-        }
-
-        setActiveRoomId(id);
-        setActiveRoomTitle("My Canvas");
-        setActiveRoomToken(invite_token);
-        setIsPublic(false);
-        setIsOwner(true);
-        setPhase("drawing");
-      })();
+          setActiveRoomId(id);
+          setActiveRoomTitle("My Canvas");
+          setActiveRoomToken(invite_token);
+          setIsPublic(false);
+          setIsOwner(true);
+          setPhase("drawing");
+        })(),
+        timeout,
+      ]);
     } else {
       // Token in URL: join the room (idempotent for owner/existing members)
       setPhase("joining");
@@ -222,7 +262,7 @@ export function useRoom({
         setPhase("drawing");
       })();
     }
-  }, [hasSession]);
+  }, [hasSession, hydrated]);
 
   // ── Step 2: Presence + cursor channel (active once room is ready) ──────────
   useEffect(() => {

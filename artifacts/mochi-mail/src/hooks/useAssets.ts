@@ -619,7 +619,8 @@ export function useAssets(user: ViewerIdentity) {
       }, { onConflict: "created_by,room_id" });
     if (error) {
       const message = String(error.message ?? "").toLowerCase();
-      if (message.includes("relation") || message.includes("permission") || message.includes("does not exist")) {
+      const code = String(error.code ?? "");
+      if (code === "42501" || message.includes("relation") || message.includes("permission") || message.includes("does not exist") || message.includes("row-level security")) {
         boardPersistenceDisabledRef.current = true;
         return;
       }
@@ -644,7 +645,8 @@ export function useAssets(user: ViewerIdentity) {
 
     if (error && error.code !== "PGRST116") {
       const message = String(error.message ?? "").toLowerCase();
-      if (message.includes("relation") || message.includes("permission") || message.includes("does not exist")) {
+      const code = String(error.code ?? "");
+      if (code === "42501" || message.includes("relation") || message.includes("permission") || message.includes("does not exist") || message.includes("row-level security")) {
         boardPersistenceDisabledRef.current = true;
         return null;
       }

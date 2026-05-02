@@ -128,6 +128,7 @@ export default function Home() {
     setRoomPublic,
   } = useRoom({
     hasSession: account.hasSession,
+    hydrated: account.hydrated,
     selfId: selfArtistId,
     selfName: mail.user.name,
     viewerAccountId: account.viewer.accountId,
