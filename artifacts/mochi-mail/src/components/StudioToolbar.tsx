@@ -365,87 +365,9 @@ export default function StudioToolbar({
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
 
-      {/* ── Asset drawer (bottom sheet) ──────────────────────────────────── */}
-      {drawerOpen && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="animate-fade-backdrop pointer-events-auto absolute inset-0 z-40"
-            style={{ background: "rgba(30,10,50,0.14)", backdropFilter: "blur(3px)" }}
-            onClick={() => setDrawerOpen(false)}
-          />
-          {/* Sheet */}
-          <div
-            className="pointer-events-auto absolute bottom-0 left-0 right-0 z-50 animate-slide-up overflow-hidden"
-            style={{
-              maxHeight: "76vh",
-              borderRadius: "24px 24px 0 0",
-              background: "rgba(255,255,255,0.98)",
-              boxShadow: "0 -8px 40px rgba(143,109,178,0.18), 0 -2px 8px rgba(0,0,0,0.06)",
-              border: "1px solid rgba(186,156,214,0.25)",
-              borderBottom: "none",
-            }}
-          >
-            {/* Drag handle */}
-            <div className="flex justify-center pt-3 pb-1">
-              <div
-                className="rounded-full"
-                style={{ width: 40, height: 4, background: "rgba(186,156,214,0.5)" }}
-              />
-            </div>
-            <div style={{ maxHeight: "calc(76vh - 20px)", overflowY: "auto" }}>
-              <StudioAssetDrawer
-                assetCount={assetCount}
-                activeSection={activeSection}
-                stickers={stickers}
-                washiTapes={washiTapes}
-                papers={papers}
-                customFonts={customFonts}
-                selectedAsset={selectedAsset}
-                selectedPaper={selectedPaper}
-                brushSettings={brushSettings}
-                selectedTextFont={selectedTextFont}
-                selectedTextSize={selectedTextSize}
-                customColor={customColor}
-                colorChoices={colorChoices}
-                gifQuery={gifQuery}
-                gifResults={gifResults}
-                gifLoading={gifLoading}
-                gifError={gifError}
-                gifUrlInput={gifUrlInput}
-                assetSearch={assetSearch}
-                onClose={() => setDrawerOpen(false)}
-                onSelectSection={setActiveSection}
-                onSelectSticker={onSelectSticker}
-                onSelectWashi={onSelectWashi}
-                onSelectPaper={onSelectPaper}
-                onDeselectAsset={onDeselectAsset}
-                onDeleteSticker={onDeleteSticker}
-                onDeleteWashi={onDeleteWashi}
-                onDeletePaper={onDeletePaper}
-                onDeleteCustomFont={onDeleteCustomFont}
-                onSaveSticker={onSaveSticker}
-                onSaveWashi={onSaveWashi}
-                onSaveCustomFont={onSaveCustomFont}
-                onBrushChange={onBrushChange}
-                onClear={onClear}
-                setCustomColor={setCustomColor}
-                setGifQuery={setGifQuery}
-                searchGifs={searchGifs}
-                addGifFromResult={addGifFromResult}
-                setGifUrlInput={setGifUrlInput}
-                addGifFromUrl={addGifFromUrl}
-                addScrapbookPack={addScrapbookPack}
-                setAssetSearch={setAssetSearch}
-              />
-            </div>
-          </div>
-        </>
-      )}
-
       {/* ── Left toolbar (centered in canvas area above tab bar) ── */}
       <div
-        className="pointer-events-none absolute left-3 z-30 flex items-center justify-center"
+        className="pointer-events-none absolute left-3 z-20 flex items-center justify-center"
         style={{ top: "1rem", bottom: "5.5rem" }}
       >
         <div
@@ -571,7 +493,7 @@ export default function StudioToolbar({
       {/* ── Brush size — floats to the right of the toolbar, same vertical center ── */}
       {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
         <div
-          className="pointer-events-none absolute left-[4.5rem] z-30 flex items-center"
+          className="pointer-events-none absolute left-[4.5rem] z-20 flex items-center"
           style={{ top: "1rem", bottom: "5.5rem" }}
         >
           <div
@@ -753,6 +675,84 @@ export default function StudioToolbar({
           {ExportIcon}
         </button>
       </div>
+
+      {/* ── Asset drawer — rendered LAST so it always paints above toolbar/buttons ── */}
+      {drawerOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="animate-fade-backdrop pointer-events-auto absolute inset-0 z-40"
+            style={{ background: "rgba(30,10,50,0.14)", backdropFilter: "blur(3px)" }}
+            onClick={() => setDrawerOpen(false)}
+          />
+          {/* Sheet */}
+          <div
+            className="pointer-events-auto absolute bottom-0 left-0 right-0 z-50 animate-slide-up overflow-hidden"
+            style={{
+              maxHeight: "76vh",
+              borderRadius: "24px 24px 0 0",
+              background: "rgba(255,255,255,0.98)",
+              boxShadow: "0 -8px 40px rgba(143,109,178,0.18), 0 -2px 8px rgba(0,0,0,0.06)",
+              border: "1px solid rgba(186,156,214,0.25)",
+              borderBottom: "none",
+            }}
+          >
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div
+                className="rounded-full"
+                style={{ width: 40, height: 4, background: "rgba(186,156,214,0.5)" }}
+              />
+            </div>
+            <div style={{ maxHeight: "calc(76vh - 20px)", overflowY: "auto" }}>
+              <StudioAssetDrawer
+                assetCount={assetCount}
+                activeSection={activeSection}
+                stickers={stickers}
+                washiTapes={washiTapes}
+                papers={papers}
+                customFonts={customFonts}
+                selectedAsset={selectedAsset}
+                selectedPaper={selectedPaper}
+                brushSettings={brushSettings}
+                selectedTextFont={selectedTextFont}
+                selectedTextSize={selectedTextSize}
+                customColor={customColor}
+                colorChoices={colorChoices}
+                gifQuery={gifQuery}
+                gifResults={gifResults}
+                gifLoading={gifLoading}
+                gifError={gifError}
+                gifUrlInput={gifUrlInput}
+                assetSearch={assetSearch}
+                onClose={() => setDrawerOpen(false)}
+                onSelectSection={setActiveSection}
+                onSelectSticker={onSelectSticker}
+                onSelectWashi={onSelectWashi}
+                onSelectPaper={onSelectPaper}
+                onDeselectAsset={onDeselectAsset}
+                onDeleteSticker={onDeleteSticker}
+                onDeleteWashi={onDeleteWashi}
+                onDeletePaper={onDeletePaper}
+                onDeleteCustomFont={onDeleteCustomFont}
+                onSaveSticker={onSaveSticker}
+                onSaveWashi={onSaveWashi}
+                onSaveCustomFont={onSaveCustomFont}
+                onBrushChange={onBrushChange}
+                onClear={onClear}
+                setCustomColor={setCustomColor}
+                setGifQuery={setGifQuery}
+                searchGifs={searchGifs}
+                addGifFromResult={addGifFromResult}
+                setGifUrlInput={setGifUrlInput}
+                addGifFromUrl={addGifFromUrl}
+                addScrapbookPack={addScrapbookPack}
+                setAssetSearch={setAssetSearch}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
