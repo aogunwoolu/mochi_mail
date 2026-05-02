@@ -445,18 +445,17 @@ export default function StudioToolbar({
 
       {/* ── Left floating toolbar ──────────────────────────────────────────── */}
       <div
-        className="pointer-events-auto absolute left-3 z-30 flex flex-col items-center gap-0.5 px-2 py-3"
+        className="pointer-events-auto absolute left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-0.5 px-2 py-3"
         style={{
-          top: "0.75rem",
-          bottom: "5.25rem",
+          maxHeight: "calc(100svh - 7rem)",
           overflowY: "auto",
+          scrollbarWidth: "none",
           background: "rgba(255,255,255,0.96)",
           backdropFilter: "blur(20px)",
           WebkitBackdropFilter: "blur(20px)",
           borderRadius: 22,
           border: "1px solid rgba(186,156,214,0.25)",
           boxShadow: "0 8px 32px rgba(143,109,178,0.16), 0 2px 8px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
-          scrollbarWidth: "none",
         }}
       >
         {/* Tools */}
@@ -568,40 +567,46 @@ export default function StudioToolbar({
           />
         </label>
 
-        {/* Brush size (only visible on pen/eraser) */}
-        {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
-          <>
-            <Divider />
-            <div className="flex flex-col items-center gap-1 py-1">
-              {([2, 4, 8, 14] as const).map((sz) => (
-                <button
-                  key={sz}
-                  onClick={() => onBrushChange({ size: sz })}
-                  className="btn-smooth flex items-center justify-center rounded-full"
-                  style={{
-                    width: 32,
-                    height: 32,
-                    background: brushSettings.size === sz ? "rgba(255,107,157,0.12)" : "transparent",
-                  }}
-                  title={`Size ${sz}`}
-                  aria-label={`Brush size ${sz}`}
-                >
-                  <span
-                    className="rounded-full"
-                    style={{
-                      width: sz + 2,
-                      height: sz + 2,
-                      minWidth: 4,
-                      minHeight: 4,
-                      background: brushSettings.size === sz ? "var(--pink)" : "rgba(100,80,130,0.45)",
-                    }}
-                  />
-                </button>
-              ))}
-            </div>
-          </>
-        )}
       </div>
+
+      {/* ── Brush size picker — floats beside toolbar when pen/eraser active ── */}
+      {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
+        <div
+          className="pointer-events-auto absolute left-20 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-2 px-2 py-3"
+          style={{
+            background: "rgba(255,255,255,0.96)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            borderRadius: 18,
+            border: "1px solid rgba(186,156,214,0.25)",
+            boxShadow: "0 6px 20px rgba(143,109,178,0.13), 0 1px 4px rgba(0,0,0,0.06)",
+          }}
+        >
+          {([2, 5, 10, 18] as const).map((sz) => {
+            const active = brushSettings.size === sz;
+            const dot = Math.max(4, Math.min(sz + 2, 18));
+            return (
+              <button
+                key={sz}
+                onClick={() => onBrushChange({ size: sz })}
+                className="btn-smooth flex h-9 w-9 items-center justify-center rounded-xl"
+                style={{ background: active ? "rgba(255,107,157,0.13)" : "transparent" }}
+                title={`Size ${sz}`}
+                aria-label={`Brush size ${sz}`}
+              >
+                <span
+                  className="rounded-full"
+                  style={{
+                    width: dot,
+                    height: dot,
+                    background: active ? "var(--pink)" : "rgba(100,80,130,0.35)",
+                  }}
+                />
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* ── Collaborator avatars (top right) ──────────────────────────────── */}
       <div
