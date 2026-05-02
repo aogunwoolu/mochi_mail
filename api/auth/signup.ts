@@ -76,7 +76,9 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const accentColor = randomFrom(ACCENT_CHOICES, username);
     const wallpaper = randomFrom(WALLPAPER_CHOICES, username + "w");
 
-    const { data: userData, error: createError } = await supabaseAdmin.auth.admin.createUser({
+    type AdminApi = { createUser(opts: Record<string, unknown>): Promise<{ data: { user: { id: string } | null }; error: { message: string } | null }> };
+    type AuthWithAdmin = { admin: AdminApi };
+    const { data: userData, error: createError } = await (supabaseAdmin.auth as unknown as AuthWithAdmin).admin.createUser({
       email,
       password,
       email_confirm: true,

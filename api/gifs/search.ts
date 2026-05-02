@@ -40,7 +40,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       url = `${GIFAPI_BASE_URL}/gifs/search?${new URLSearchParams({ api_key: GIFAPI_KEY, q, limit: "18", rating: "pg" })}`;
     }
 
-    const fetchRes = await fetch(url);
+    type HttpResponse = { ok: boolean; json(): Promise<unknown> };
+    const fetchRes = await (fetch(url) as unknown as Promise<HttpResponse>);
     if (!fetchRes.ok) {
       res.writeHead(502, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "search_failed" }));
