@@ -7,14 +7,20 @@ let client: SupabaseClient<Database> | null = null;
 export function createSupabaseBrowserClient(): SupabaseClient<Database> {
   if (client) return client;
 
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  // Support both VITE_ (Replit/standard) and NEXT_PUBLIC_ (Vercel legacy) prefixes.
+  const url =
+    import.meta.env.VITE_SUPABASE_URL ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey =
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   if (!url || !anonKey) {
     console.warn(
-      "[MochiMail] VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is not set. " +
-      "The app will run in offline/local-only mode. " +
-      "Set these environment variables in your deployment to enable accounts and sync."
+      "[MochiMail] Supabase env vars not found. " +
+      "Running in offline/local-only mode. " +
+      "Set VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (or the NEXT_PUBLIC_ equivalents) to enable accounts and sync."
     );
   }
 

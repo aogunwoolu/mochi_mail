@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { URL } from "node:url";
 
-const GIF_PROVIDER = (process.env.GIF_PROVIDER ?? "giphy").toLowerCase();
+const GIF_PROVIDER = (process.env.GIF_PROVIDER ?? process.env.NEXT_PUBLIC_GIF_PROVIDER ?? "giphy").toLowerCase();
 const GIPHY_KEY = process.env.GIPHY_API_KEY ?? "";
 const GIFAPI_KEY = process.env.GIFAPI_KEY ?? "";
 const GIFAPI_BASE_URL = process.env.GIFAPI_BASE_URL ?? "https://api.gifapi.com/v1";
