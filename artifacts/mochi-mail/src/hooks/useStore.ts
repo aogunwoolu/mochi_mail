@@ -50,12 +50,12 @@ function loadStore(key: string): StoreItem[] {
 
 function saveStore(items: StoreItem[]) {
   if (!globalThis.window) return;
-  localStorage.setItem(STORE_KEY, JSON.stringify(items));
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(items)); } catch { /* quota exceeded */ }
 }
 
 function saveStoreByKey(key: string, items: StoreItem[]) {
   if (!globalThis.window) return;
-  localStorage.setItem(key, JSON.stringify(items));
+  try { localStorage.setItem(key, JSON.stringify(items)); } catch { /* quota exceeded */ }
 }
 
 function loadCollection(key: string): string[] {
