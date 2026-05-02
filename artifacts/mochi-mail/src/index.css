@@ -239,13 +239,22 @@ textarea::placeholder {
   animation: gradient-shift 6s ease infinite;
 }
 
-/* Slide-up animation for asset sheet */
+/* Slide-up animation for asset bottom sheet */
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(100%); }
   to { opacity: 1; transform: translateY(0); }
 }
 .animate-slide-up {
-  animation: slide-up 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: slide-up 0.32s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Backdrop fade in */
+@keyframes fade-backdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-backdrop {
+  animation: fade-backdrop 0.22s ease-out;
 }
 
 /* Fade in animation */

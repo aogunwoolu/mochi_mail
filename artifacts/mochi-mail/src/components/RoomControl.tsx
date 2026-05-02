@@ -55,12 +55,15 @@ export default function RoomControl({
   if (phase === "creating" || phase === "joining") {
     return (
       <div
-        className="absolute left-4 top-3 z-50 flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
+        className="absolute z-50 flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
         style={{
-          background: "rgba(255,255,255,0.92)",
-          backdropFilter: "blur(10px)",
-          border: "1px solid var(--border)",
-          boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
+          left: "calc(4.5rem + env(safe-area-inset-left, 0px))",
+          top: "calc(0.75rem + env(safe-area-inset-top, 0px))",
+          background: "rgba(255,255,255,0.96)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          border: "1px solid rgba(186,156,214,0.25)",
+          boxShadow: "0 4px 16px rgba(143,109,178,0.12), 0 1px 4px rgba(0,0,0,0.07)",
           color: "var(--muted)",
         }}
       >
@@ -73,16 +76,23 @@ export default function RoomControl({
     );
   }
 
+  const chipStyle: React.CSSProperties = {
+    position: "absolute",
+    left: "calc(4.5rem + env(safe-area-inset-left, 0px))",
+    top: "calc(0.75rem + env(safe-area-inset-top, 0px))",
+    zIndex: 50,
+    background: "rgba(255,255,255,0.96)",
+    backdropFilter: "blur(16px)",
+    WebkitBackdropFilter: "blur(16px)",
+    border: "1px solid rgba(186,156,214,0.25)",
+    boxShadow: "0 4px 16px rgba(143,109,178,0.12), 0 1px 4px rgba(0,0,0,0.07)",
+  };
+
   if (phase === "error") {
     return (
       <div
-        className="absolute left-4 top-3 z-50 flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
-        style={{
-          background: "rgba(255,255,255,0.92)",
-          backdropFilter: "blur(10px)",
-          border: "1px solid #fca5a5",
-          color: "#b91c1c",
-        }}
+        className="flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
+        style={{ ...chipStyle, border: "1px solid rgba(252,165,165,0.6)", color: "#b91c1c" }}
       >
         {error ?? "Something went wrong"}
       </div>
@@ -91,13 +101,8 @@ export default function RoomControl({
 
   return (
     <div
-      className="absolute left-4 top-3 z-50 flex items-center gap-1.5 rounded-full px-2 py-1.5"
-      style={{
-        background: "rgba(255,255,255,0.92)",
-        backdropFilter: "blur(10px)",
-        border: "1px solid var(--border)",
-        boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
-      }}
+      className="flex items-center gap-1.5 rounded-full px-2 py-1.5"
+      style={chipStyle}
     >
       {/* Privacy badge — owner can click to toggle */}
       {isOwner ? (

@@ -370,8 +370,8 @@ export default function StudioToolbar({
         <>
           {/* Backdrop */}
           <div
-            className="pointer-events-auto absolute inset-0 z-40"
-            style={{ background: "rgba(0,0,0,0.12)", backdropFilter: "blur(2px)" }}
+            className="animate-fade-backdrop pointer-events-auto absolute inset-0 z-40"
+            style={{ background: "rgba(30,10,50,0.14)", backdropFilter: "blur(3px)" }}
             onClick={() => setDrawerOpen(false)}
           />
           {/* Sheet */}
@@ -445,14 +445,18 @@ export default function StudioToolbar({
 
       {/* ── Left floating toolbar ──────────────────────────────────────────── */}
       <div
-        className="pointer-events-auto absolute left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-0.5 px-2 py-3"
+        className="pointer-events-auto absolute left-3 z-30 flex flex-col items-center gap-0.5 px-2 py-3"
         style={{
+          top: "0.75rem",
+          bottom: "5.25rem",
+          overflowY: "auto",
           background: "rgba(255,255,255,0.96)",
           backdropFilter: "blur(20px)",
           WebkitBackdropFilter: "blur(20px)",
           borderRadius: 22,
           border: "1px solid rgba(186,156,214,0.25)",
           boxShadow: "0 8px 32px rgba(143,109,178,0.16), 0 2px 8px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
+          scrollbarWidth: "none",
         }}
       >
         {/* Tools */}

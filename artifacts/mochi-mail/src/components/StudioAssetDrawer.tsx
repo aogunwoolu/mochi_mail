@@ -137,42 +137,68 @@ export default function StudioAssetDrawer({
   const filteredFonts = useMemo(() => customFonts.filter((f) => f.name.toLowerCase().includes(query)), [customFonts, query]);
 
   return (
-    <div className="animate-slide-up" style={{ background: "#ffffff", borderTop: "1px solid rgba(0,0,0,0.08)", boxShadow: "0 -8px 24px rgba(0,0,0,0.08)" }}>
+    <div>
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 px-4 py-3" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="flex items-center justify-between gap-4 px-5 py-3.5">
         <div className="flex items-center gap-3">
-          <h3 className="text-sm font-bold tracking-tight" style={{ color: "var(--foreground)" }}>Studio</h3>
-          <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold" style={{ background: "rgba(167,139,250,0.12)", color: "var(--purple)" }}>
+          <h3 className="text-base font-bold tracking-tight" style={{ color: "var(--foreground)" }}>Studio</h3>
+          <span className="rounded-full px-2.5 py-0.5 text-[10px] font-semibold" style={{ background: "rgba(167,139,250,0.12)", color: "var(--lavender)" }}>
             {assetCount} items
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={onClear} className="btn-smooth rounded-lg px-3 py-1.5 text-xs font-medium" style={{ color: "var(--coral)" }}>Clear canvas</button>
-          <button onClick={onClose} className="btn-smooth flex h-8 w-8 items-center justify-center rounded-full text-base" style={{ background: "rgba(0,0,0,0.05)", color: "var(--muted-strong)" }} aria-label="Close">×</button>
+          <button
+            onClick={onClear}
+            className="btn-smooth rounded-xl px-3 py-1.5 text-xs font-semibold"
+            style={{ background: "rgba(251,146,60,0.1)", color: "var(--coral)" }}
+          >
+            Clear canvas
+          </button>
+          <button
+            onClick={onClose}
+            className="btn-smooth flex h-9 w-9 items-center justify-center rounded-full text-lg font-light"
+            style={{ background: "rgba(0,0,0,0.05)", color: "var(--muted-strong)" }}
+            aria-label="Close"
+          >
+            ×
+          </button>
         </div>
       </div>
 
       {/* Section tabs */}
-      <div className="flex gap-1 overflow-x-auto px-3 py-2" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)", scrollbarWidth: "none" }}>
+      <div
+        className="flex gap-1.5 overflow-x-auto px-4 pb-2"
+        style={{ scrollbarWidth: "none", borderBottom: "1px solid rgba(186,156,214,0.15)" }}
+      >
         {(["assets", "paper", "type", "extras", "fonts"] as DrawerSection[]).map((s) => (
           <SectionChip key={s} active={activeSection === s} label={SECTION_LABELS[s]} onClick={() => onSelectSection(s)} />
         ))}
       </div>
 
       {/* Search */}
-      <div className="px-4 py-2.5" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Library Search</p>
-        <div className="flex items-center gap-2 rounded-xl border px-3 py-2" style={{ borderColor: "rgba(0,0,0,0.1)", background: "rgba(0,0,0,0.03)" }}>
+      <div className="px-4 py-3" style={{ borderBottom: "1px solid rgba(186,156,214,0.12)" }}>
+        <div
+          className="flex items-center gap-2 rounded-2xl px-3.5 py-2.5"
+          style={{ background: "rgba(0,0,0,0.04)", border: "1px solid rgba(186,156,214,0.2)" }}
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
-            <circle cx="11" cy="11" r="8" stroke="#999" strokeWidth="2" />
-            <path d="M21 21l-4.35-4.35" stroke="#999" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="11" cy="11" r="8" stroke="#aaa" strokeWidth="2" />
+            <path d="M21 21l-4.35-4.35" stroke="#aaa" strokeWidth="2" strokeLinecap="round" />
           </svg>
-          <input value={assetSearch} onChange={(e) => setAssetSearch(e.target.value)} placeholder="Filter assets, paper, and fonts" className="w-full bg-transparent text-xs outline-none" style={{ color: "var(--foreground)" }} />
-          {assetSearch ? <button onClick={() => setAssetSearch("")} className="text-xs" style={{ color: "var(--muted)", flexShrink: 0 }} aria-label="Clear search">×</button> : null}
+          <input
+            value={assetSearch}
+            onChange={(e) => setAssetSearch(e.target.value)}
+            placeholder="Search stickers, paper, fonts…"
+            className="w-full bg-transparent text-sm outline-none"
+            style={{ color: "var(--foreground)" }}
+          />
+          {assetSearch ? (
+            <button onClick={() => setAssetSearch("")} className="text-sm leading-none" style={{ color: "var(--muted)", flexShrink: 0 }} aria-label="Clear search">×</button>
+          ) : null}
         </div>
       </div>
 
-      <div className="max-h-[65vh] overflow-y-auto px-4 py-4">
+      <div className="px-4 py-4">
         {/* ── Stickers & Tape ── */}
         {activeSection === "assets" && (
           <div className="grid gap-4 lg:grid-cols-2">
