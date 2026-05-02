@@ -886,8 +886,6 @@ export default function StudioToolbar({
                 selectedAsset={selectedAsset}
                 selectedPaper={selectedPaper}
                 brushSettings={brushSettings}
-                selectedTextFont={selectedTextFont}
-                selectedTextSize={selectedTextSize}
                 customColor={customColor}
                 colorChoices={colorChoices}
                 gifQuery={gifQuery}

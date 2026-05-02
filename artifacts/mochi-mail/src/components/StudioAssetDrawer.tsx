@@ -5,7 +5,7 @@ import FontTracerCreator from "./FontTracerCreator";
 import StickerCreator from "./StickerCreator";
 import WashiTapeCreator from "./WashiTapeCreator";
 
-export type DrawerSection = "assets" | "paper" | "type" | "extras" | "fonts";
+export type DrawerSection = "assets" | "paper" | "extras" | "fonts";
 
 export type GifSearchResult = {
   id: string;
@@ -16,32 +16,9 @@ export type GifSearchResult = {
   height: number;
 };
 
-const BUILTIN_TEXT_FONTS = [
-  { value: '"Space Mono", monospace', label: "Space Mono" },
-  { value: '"Arial", sans-serif', label: "Arial" },
-  { value: '"Helvetica", sans-serif', label: "Helvetica" },
-  { value: '"Verdana", sans-serif', label: "Verdana" },
-  { value: '"Tahoma", sans-serif', label: "Tahoma" },
-  { value: '"Trebuchet MS", sans-serif', label: "Trebuchet" },
-  { value: '"Segoe UI", sans-serif', label: "Segoe UI" },
-  { value: '"Gill Sans", sans-serif', label: "Gill Sans" },
-  { value: '"Georgia", serif', label: "Georgia" },
-  { value: '"Times New Roman", serif', label: "Times New Roman" },
-  { value: '"Garamond", serif', label: "Garamond" },
-  { value: '"Palatino", serif', label: "Palatino" },
-  { value: '"Didot", serif', label: "Didot" },
-  { value: '"Baskerville", serif', label: "Baskerville" },
-  { value: '"Courier New", monospace', label: "Courier New" },
-  { value: '"Lucida Console", monospace', label: "Lucida Console" },
-  { value: '"Impact", sans-serif', label: "Impact" },
-  { value: '"Comic Sans MS", cursive', label: "Comic Sans" },
-  { value: '"Brush Script MT", cursive', label: "Brush Script" },
-] as const;
-
 const SECTION_LABELS: Record<DrawerSection, string> = {
   assets: "Stickers & Tape",
   paper: "Paper",
-  type: "Text & Color",
   extras: "Extras",
   fonts: "Fonts",
 };
@@ -85,8 +62,6 @@ export interface StudioAssetDrawerProps {
   selectedAsset: Sticker | WashiTape | null;
   selectedPaper: PaperBackground | null;
   brushSettings: BrushSettings;
-  selectedTextFont: string;
-  selectedTextSize: number;
   customColor: string;
   colorChoices: string[];
   gifQuery: string;
@@ -122,7 +97,7 @@ export interface StudioAssetDrawerProps {
 
 export default function StudioAssetDrawer({
   assetCount, activeSection, stickers, washiTapes, papers, customFonts,
-  selectedAsset, selectedPaper, brushSettings, selectedTextFont, selectedTextSize,
+  selectedAsset, selectedPaper, brushSettings,
   customColor, colorChoices, gifQuery, gifResults, gifLoading, gifError, gifUrlInput,
   assetSearch, onClose, onSelectSection, onSelectSticker, onSelectWashi, onSelectPaper,
   onDeselectAsset, onDeleteSticker, onDeleteWashi, onDeletePaper, onDeleteCustomFont,
@@ -170,7 +145,7 @@ export default function StudioAssetDrawer({
         className="flex gap-1.5 overflow-x-auto px-4 pb-2"
         style={{ scrollbarWidth: "none", borderBottom: "1px solid rgba(186,156,214,0.15)" }}
       >
-        {(["assets", "paper", "type", "extras", "fonts"] as DrawerSection[]).map((s) => (
+        {(["assets", "paper", "extras", "fonts"] as DrawerSection[]).map((s) => (
           <SectionChip key={s} active={activeSection === s} label={SECTION_LABELS[s]} onClick={() => onSelectSection(s)} />
         ))}
       </div>
@@ -289,54 +264,6 @@ export default function StudioAssetDrawer({
                   })}
                 </div>
               )}
-          </div>
-        )}
-
-        {/* ── Type & Color ── */}
-        {activeSection === "type" && (
-          <div className="panel-soft p-4">
-            <SectionTitle title="Type & Color" note="Pick a pen color, choose a font, and set the text size." />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Color</p>
-                <div className="mb-3 flex items-center gap-2">
-                  <input type="color" value={customColor} onChange={(e) => { setCustomColor(e.target.value); onBrushChange({ color: e.target.value }); onDeselectAsset(); }} className="h-10 w-10 cursor-pointer rounded-lg border-0 bg-transparent p-0" />
-                  <input
-                    value={customColor}
-                    onChange={(e) => { setCustomColor(e.target.value); if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) { onBrushChange({ color: e.target.value }); onDeselectAsset(); } }}
-                    placeholder="#000000"
-                    className="w-full rounded-lg border px-2 py-2 text-xs outline-none"
-                    style={{ borderColor: "var(--border)", background: "white" }}
-                  />
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {colorChoices.map((color) => {
-                    const selected = brushSettings.color === color;
-                    return (
-                      <button
-                        key={color}
-                        onClick={() => { onBrushChange({ color, tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool }); onDeselectAsset(); }}
-                        className="btn-smooth rounded-full"
-                        style={{ width: selected ? 24 : 20, height: selected ? 24 : 20, background: color, boxShadow: getSwatchShadow(selected, color) }}
-                        title={color}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Type Settings</p>
-                <select value={selectedTextFont} onChange={(e) => onBrushChange({ textFont: e.target.value, tool: "text" })} className="mb-2 w-full rounded-lg border px-2 py-2 text-xs outline-none" style={{ borderColor: "var(--border)", background: "white" }}>
-                  {BUILTIN_TEXT_FONTS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-                  {customFonts.map((f) => <option key={f.id} value={`custom:${f.id}`}>{f.name}</option>)}
-                </select>
-                <div className="flex items-center gap-2">
-                  <input type="range" min={12} max={120} value={selectedTextSize} onChange={(e) => onBrushChange({ textSize: Number(e.target.value), tool: "text" })} className="flex-1" />
-                  <span className="w-10 text-right text-[10px] font-semibold" style={{ color: "var(--muted-strong)" }}>{selectedTextSize}px</span>
-                </div>
-              </div>
-            </div>
           </div>
         )}
 
