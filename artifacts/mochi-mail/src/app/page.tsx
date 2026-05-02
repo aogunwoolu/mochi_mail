@@ -8,7 +8,7 @@ import MailComposePanel from "@/components/MailComposePanel";
 import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
 import RoomControl from "@/components/RoomControl";
-import { FiEdit3, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
+import { FiEdit3, FiMail, FiShoppingBag, FiUsers, FiUser } from "react-icons/fi";
 import { exportAnimated } from "@/components/ExportUtil";
 import { useRoom } from "@/hooks/useRoom";
 import type { RoomMember } from "@/hooks/useRoom";
@@ -30,12 +30,6 @@ import {
 
 const CANVAS_W = 6000;
 const CANVAS_H = 4800;
-
-const TABS: { id: AppTab; label: string; icon: React.ReactNode }[] = [
-  { id: "studio", label: "Canvas", icon: <FiEdit3 /> },
-  { id: "mail", label: "Mail", icon: <FiMail /> },
-  { id: "store", label: "Shop", icon: <FiShoppingBag /> },
-];
 
 export default function Home() {
   const [, navigate] = useLocation();
@@ -139,9 +133,6 @@ export default function Home() {
     selfIdRef.current = selfArtistId;
   }, [selfArtistId]);
 
-  // ── Unified stroke sync (replaces useBoardSync + useStrokeChannel) ──────────
-  // Delta placed-item events from collaborators — add/remove directly without replacing the
-  // whole array, so local changes made since the last board-update aren't clobbered.
   const handleRemotePlacedItemAdd = useCallback(
     (item: PlacedSticker) => applySharedCanvasState({ placedItems: [...placedItems, item] }),
     [applySharedCanvasState, placedItems],
@@ -175,9 +166,6 @@ export default function Home() {
     loadBoardState,
   });
 
-  // ── Canvas stroke callbacks ───────────────────────────────────────────────────
-
-  // Called ~60 fps during a stroke — broadcast to collaborators
   const handleStrokeUpdate = useCallback(
     (
       strokeId: string,
@@ -192,7 +180,6 @@ export default function Home() {
     [broadcastStroke],
   );
 
-  // Called once on pointer-up — persist stroke to DB immediately
   const handleStrokeComplete = useCallback(
     (
       strokeId: string,
@@ -206,7 +193,6 @@ export default function Home() {
     [saveStroke],
   );
 
-  // Called when user undoes a stroke — delete from DB
   const handleUndoStroke = useCallback(
     (strokeId: string) => {
       void deleteStroke(strokeId);
@@ -214,15 +200,12 @@ export default function Home() {
     [deleteStroke],
   );
 
-  // Called when user redoes a stroke — re-insert to DB
   const handleRedoStroke = useCallback(
     (stroke: SyncStroke) => {
       void restoreStroke(stroke);
     },
     [restoreStroke],
   );
-
-  // ── Placed-item callbacks (broadcast immediately to collaborators) ────────────
 
   const handlePlaceAsset = useCallback(
     (asset: Sticker | WashiTape, x: number, y: number) => {
@@ -239,8 +222,6 @@ export default function Home() {
     },
     [removePlacedItem, broadcastPlacedItemRemove],
   );
-
-  // ── Asset callbacks ──────────────────────────────────────────────────────────
 
   const handleBrushChange = useCallback((update: Partial<BrushSettings>) => {
     setBrushSettings((prev) => ({ ...prev, ...update }));
@@ -312,7 +293,7 @@ export default function Home() {
     [account.viewer, store],
   );
 
-  // ── Infinite canvas scroll ───────────────────────────────────────────────────
+  // ── Infinite canvas scroll ────────────────────────────────────────────────
 
   const getViewportCenterWorld = useCallback(() => {
     const el = studioScrollRef.current;
@@ -396,6 +377,17 @@ export default function Home() {
       trackCursor(lastMouseWorldRef.current);
     };
 
+    const onTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (!touch) return;
+      const rect = el.getBoundingClientRect();
+      lastMouseWorldRef.current = {
+        x: el.scrollLeft + touch.clientX - rect.left + worldOffsetRef.current.x,
+        y: el.scrollTop + touch.clientY - rect.top + worldOffsetRef.current.y,
+      };
+      trackCursor(lastMouseWorldRef.current);
+    };
+
     const updateViewSize = () =>
       setViewSize({ w: el.clientWidth, h: el.clientHeight });
     updateViewSize();
@@ -405,6 +397,7 @@ export default function Home() {
     ro.observe(el);
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("mousemove", onMouseMove, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
     el.addEventListener("mouseleave", () => {
       lastMouseWorldRef.current = null;
     });
@@ -413,10 +406,9 @@ export default function Home() {
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("mousemove", onMouseMove);
+      el.removeEventListener("touchmove", onTouchMove);
     };
   }, [activeTab, trackCursor, shiftPlacedItems, getViewportCenterWorld]);
-
-  // ── Collaborator list ────────────────────────────────────────────────────────
 
   const remoteArtists = roomMembers.filter((m) => m.presenceKey !== selfArtistId);
   const artistList = mounted
@@ -444,116 +436,105 @@ export default function Home() {
 
   const unreadCount = mail.inbox.filter((l) => !l.read && mail.isDelivered(l)).length;
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  const isStudio = activeTab === "studio";
 
   return (
     <div className="relative z-10 flex h-svh flex-col overflow-hidden">
-      {/* Header */}
-      <header className="glass-strong shrink-0 px-4 py-2.5">
-        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div
-              className="h-10 w-10 rounded-xl bg-cover bg-center bg-no-repeat"
-              style={{ backgroundImage: "url('/brand-mark.svg')" }}
-            />
-            <div>
-              <h1 className="text-base font-bold leading-tight tracking-tight">MochiMail</h1>
-              <p
-                className="hidden text-[10px] tracking-widest sm:block"
-                style={{ color: "var(--muted)" }}
-              >
-                DIGITAL STATIONERY
-              </p>
+      {/* Header — hidden on studio (full-screen canvas) */}
+      {!isStudio && (
+        <header className="glass-strong shrink-0 px-4 py-3">
+          <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
+            {/* Logo */}
+            <div className="flex items-center gap-2.5">
+              <div
+                className="h-9 w-9 rounded-xl bg-cover bg-center bg-no-repeat"
+                style={{ backgroundImage: "url('/brand-mark.svg')" }}
+              />
+              <div>
+                <h1 className="text-base font-bold leading-tight tracking-tight">MochiMail</h1>
+                <p className="hidden text-[10px] tracking-widest sm:block" style={{ color: "var(--muted)" }}>
+                  DIGITAL STATIONERY
+                </p>
+              </div>
             </div>
-          </div>
 
-          <nav
-            className="flex rounded-xl p-1"
-            style={{ background: "var(--surface)" }}
-            aria-label="Main navigation"
-          >
-            {TABS.map((tab) => (
+            {/* Nav */}
+            <nav
+              className="flex rounded-2xl p-1"
+              style={{ background: "var(--surface)" }}
+              aria-label="Main navigation"
+            >
+              {(
+                [
+                  { id: "studio" as AppTab, label: "Canvas", icon: <FiEdit3 /> },
+                  { id: "mail" as AppTab, label: "Mail", icon: <FiMail /> },
+                  { id: "store" as AppTab, label: "Shop", icon: <FiShoppingBag /> },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className="btn-smooth relative flex min-h-10 items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold"
+                  style={{
+                    background: activeTab === tab.id ? "var(--surface-hover)" : "transparent",
+                    color: activeTab === tab.id ? "var(--foreground)" : "var(--muted)",
+                  }}
+                  aria-current={activeTab === tab.id ? "page" : undefined}
+                >
+                  {tab.icon}
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  {tab.id === "mail" && unreadCount > 0 && (
+                    <span
+                      className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
+                      style={{ background: "var(--pink)" }}
+                    >
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
+              ))}
               <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
-                style={{
-                  background:
-                    activeTab === tab.id ? "var(--surface-hover)" : "transparent",
-                  color: activeTab === tab.id ? "var(--foreground)" : "var(--muted)",
-                }}
-                aria-current={activeTab === tab.id ? "page" : undefined}
-                aria-label={tab.label}
+                onClick={() => navigate("/rooms")}
+                className="btn-smooth relative flex min-h-10 items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold"
+                style={{ color: "var(--muted)" }}
+                aria-label="Rooms"
               >
-                <span>{tab.icon}</span>
-                <span className="hidden sm:inline">{tab.label}</span>
-                {tab.id === "mail" && unreadCount > 0 && (
-                  <span
-                    className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
-                    style={{ background: "var(--pink)" }}
-                  >
-                    {unreadCount}
+                <FiUsers />
+                <span className="hidden sm:inline">Rooms</span>
+              </button>
+            </nav>
+
+            {/* Account */}
+            <button
+              onClick={() => setAccountOpen((p) => !p)}
+              className="btn-smooth flex items-center gap-2 rounded-2xl px-3 py-2"
+              style={{ background: "var(--surface)" }}
+            >
+              <span
+                className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl border"
+                style={{
+                  borderColor: "var(--border)",
+                  background: account.viewer.accentColor ?? "rgba(255,255,255,0.92)",
+                }}
+              >
+                {account.viewer.avatarUrl ? (
+                  <img src={account.viewer.avatarUrl} alt={account.viewer.name} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-xs font-bold">
+                    {account.hydrated ? account.viewer.name.slice(0, 2).toUpperCase() : "…"}
                   </span>
                 )}
-              </button>
-            ))}
-            <button
-              onClick={() => navigate("/rooms")}
-              className="btn-smooth relative flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold"
-              style={{ background: "transparent", color: "var(--muted)" }}
-              aria-label="Rooms"
-            >
-              <span>
-                <FiUsers />
               </span>
-              <span className="hidden sm:inline">Rooms</span>
+              <div className="hidden text-left sm:block">
+                <div className="text-xs font-semibold">{account.hydrated ? account.viewer.name : ""}</div>
+                <div className="text-[10px]" style={{ color: "var(--muted)" }}>{account.hydrated ? account.accountLabel : ""}</div>
+              </div>
             </button>
-          </nav>
-
-          <button
-            onClick={() => setAccountOpen((prev) => !prev)}
-            className="btn-smooth flex items-center gap-2 rounded-2xl px-3 py-2"
-            style={{ background: "var(--surface)" }}
-          >
-            <span
-              className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl border"
-              style={{
-                borderColor: "var(--border)",
-                background: account.viewer.accentColor ?? "rgba(255,255,255,0.92)",
-              }}
-            >
-              {account.viewer.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={account.viewer.avatarUrl}
-                  alt={account.viewer.name}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <span className="text-xs font-bold">
-                  {account.hydrated ? account.viewer.name.slice(0, 2).toUpperCase() : "…"}
-                </span>
-              )}
-            </span>
-            <div className="hidden text-left sm:block">
-              <div className="text-xs font-semibold">
-                {account.hydrated ? account.viewer.name : ""}
-              </div>
-              <div className="text-[10px]" style={{ color: "var(--muted)" }}>
-                {account.hydrated ? account.accountLabel : ""}
-              </div>
-              {account.hydrated && account.identityHelp ? (
-                <div
-                  className="max-w-64 text-[9px] leading-relaxed"
-                  style={{ color: "var(--coral)" }}
-                >
-                  {account.identityHelp}
-                </div>
-              ) : null}
-            </div>
-          </button>
-        </div>
-      </header>
+          </div>
+        </header>
+      )}
 
       {accountOpen ? (
         <AccountPanel
@@ -573,12 +554,12 @@ export default function Home() {
         />
       ) : null}
 
-      {/* Studio — stays mounted so the canvas is never destroyed */}
+      {/* ── Studio (full-screen, always mounted) ─────────────────────────── */}
       <div
         className="relative flex-1 overflow-hidden"
-        style={{ display: activeTab === "studio" ? "flex" : "none" }}
+        style={{ display: isStudio ? "flex" : "none" }}
       >
-        {/* Room control: share + public/private toggle (top-left) */}
+        {/* Room control chip — top left */}
         <RoomControl
           phase={roomPhase}
           isPublic={roomIsPublic}
@@ -591,7 +572,7 @@ export default function Home() {
         {/* Edge pointers for off-screen collaborators */}
         {viewSize.w > 0 &&
           remoteArtists.map((member) => {
-            const MARGIN = 48;
+            const MARGIN = 56;
             const vx = member.x - worldOffset.x - scrollPos.left;
             const vy = member.y - worldOffset.y - scrollPos.top;
             const isVisible =
@@ -632,7 +613,6 @@ export default function Home() {
                 }}
                 title={`Jump to ${member.name}`}
               >
-                {/* Avatar circle */}
                 <span
                   className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
                   style={{ background: "rgba(255,255,255,0.25)" }}
@@ -640,17 +620,9 @@ export default function Home() {
                   {initials}
                 </span>
                 <span className="max-w-20 truncate">{member.name}</span>
-                {/* Directional arrow */}
                 <svg
-                  width="8"
-                  height="8"
-                  viewBox="0 0 8 8"
-                  fill="none"
-                  style={{
-                    marginLeft: 2,
-                    transform: `rotate(${angleDeg}deg)`,
-                    flexShrink: 0,
-                  }}
+                  width="8" height="8" viewBox="0 0 8 8" fill="none"
+                  style={{ marginLeft: 2, transform: `rotate(${angleDeg}deg)`, flexShrink: 0 }}
                 >
                   <polygon points="8,4 2,1 3,4 2,7" fill="white" opacity="0.9" />
                 </svg>
@@ -692,7 +664,6 @@ export default function Home() {
               height={CANVAS_H}
             />
 
-            {/* Remote live-stroke overlay canvas */}
             <canvas
               ref={remoteStrokeCanvasRef}
               width={CANVAS_W}
@@ -701,7 +672,6 @@ export default function Home() {
               style={{ width: "100%", height: "100%" }}
             />
 
-            {/* Remote cursor indicators */}
             {remoteArtists.map((member) => {
               const x = member.x - worldOffset.x;
               const y = member.y - worldOffset.y;
@@ -713,13 +683,7 @@ export default function Home() {
                   className="pointer-events-none absolute"
                   style={{ left: x, top: y }}
                 >
-                  <svg
-                    width="14"
-                    height="18"
-                    viewBox="0 0 14 18"
-                    fill="none"
-                    style={{ display: "block" }}
-                  >
+                  <svg width="14" height="18" viewBox="0 0 14 18" fill="none" style={{ display: "block" }}>
                     <path
                       d="M1 1L1 14.5L4.2 10.8L6.6 17L8.8 16.1L6.3 9.8L11.2 9.8Z"
                       fill={member.color}
@@ -731,10 +695,7 @@ export default function Home() {
                   </svg>
                   <span
                     className="absolute left-4 top-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-                    style={{
-                      background: member.color,
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
-                    }}
+                    style={{ background: member.color, boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}
                   >
                     {member.name}
                   </span>
@@ -781,6 +742,95 @@ export default function Home() {
             if (member) jumpToMember(member);
           }}
         />
+
+        {/* Floating bottom tab bar — studio only */}
+        <nav
+          className="pointer-events-auto absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-full px-2 py-2"
+          style={{
+            background: "rgba(255,255,255,0.96)",
+            backdropFilter: "blur(24px)",
+            WebkitBackdropFilter: "blur(24px)",
+            border: "1px solid rgba(186,156,214,0.3)",
+            boxShadow: "0 8px 32px rgba(143,109,178,0.18), 0 2px 8px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+          }}
+          aria-label="Navigation"
+        >
+          {/* Canvas — active indicator */}
+          <span
+            className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-bold"
+            style={{
+              background: "linear-gradient(135deg, rgba(255,107,157,0.12), rgba(167,139,250,0.12))",
+              color: "var(--pink)",
+            }}
+          >
+            <FiEdit3 size={17} />
+            <span className="hidden sm:inline">Canvas</span>
+          </span>
+
+          <div className="mx-1 h-5 w-px shrink-0" style={{ background: "var(--border)" }} />
+
+          <button
+            onClick={() => setActiveTab("mail")}
+            className="btn-smooth relative flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
+            style={{ color: "var(--muted-strong)" }}
+            aria-label="Mail"
+          >
+            <FiMail size={17} />
+            <span className="hidden sm:inline">Mail</span>
+            {unreadCount > 0 && (
+              <span
+                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
+                style={{ background: "var(--pink)" }}
+              >
+                {unreadCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab("store")}
+            className="btn-smooth flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
+            style={{ color: "var(--muted-strong)" }}
+            aria-label="Shop"
+          >
+            <FiShoppingBag size={17} />
+            <span className="hidden sm:inline">Shop</span>
+          </button>
+
+          <button
+            onClick={() => navigate("/rooms")}
+            className="btn-smooth flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
+            style={{ color: "var(--muted-strong)" }}
+            aria-label="Rooms"
+          >
+            <FiUsers size={17} />
+            <span className="hidden sm:inline">Rooms</span>
+          </button>
+
+          <div className="mx-1 h-5 w-px shrink-0" style={{ background: "var(--border)" }} />
+
+          {/* Account */}
+          <button
+            onClick={() => setAccountOpen((p) => !p)}
+            className="btn-smooth flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2"
+            style={{
+              borderColor: account.viewer.accentColor ?? "var(--pink)",
+              background: account.viewer.accentColor ? `${account.viewer.accentColor}22` : "rgba(255,107,157,0.1)",
+            }}
+            aria-label="Account"
+            title={account.viewer.name}
+          >
+            {account.viewer.avatarUrl ? (
+              <img src={account.viewer.avatarUrl} alt={account.viewer.name} className="h-full w-full object-cover" />
+            ) : account.hydrated ? (
+              <span className="text-xs font-bold" style={{ color: account.viewer.accentColor ?? "var(--pink)" }}>
+                {account.viewer.name.slice(0, 2).toUpperCase()}
+              </span>
+            ) : (
+              <FiUser size={15} style={{ color: "var(--muted)" }} />
+            )}
+          </button>
+        </nav>
       </div>
 
       {/* Mail */}

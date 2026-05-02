@@ -39,55 +39,9 @@ function normalizeGifResults(payload: unknown): GifSearchResult[] {
   }).filter((item): item is GifSearchResult => item !== null);
 }
 
-// ── Toolbar customization ─────────────────────────────────────────────────────
-
-type ToolbarControlId = "pen" | "select" | "text" | "eraser" | "drawer" | "undo" | "redo" | "export";
-type ToolbarControl = { id: ToolbarControlId; label: string; enabled: boolean };
-
-const DEFAULT_TOOLBAR_CONTROLS: ToolbarControl[] = [
-  { id: "pen", label: "Pen", enabled: true },
-  { id: "select", label: "Select", enabled: true },
-  { id: "text", label: "Text", enabled: true },
-  { id: "eraser", label: "Eraser", enabled: true },
-  { id: "drawer", label: "Assets", enabled: true },
-  { id: "undo", label: "Undo", enabled: true },
-  { id: "redo", label: "Redo", enabled: true },
-  { id: "export", label: "Export", enabled: true },
-];
-
-function normalizeToolbarControls(value: unknown): ToolbarControl[] {
-  if (!Array.isArray(value)) return DEFAULT_TOOLBAR_CONTROLS;
-  const map = new Map(DEFAULT_TOOLBAR_CONTROLS.map((c) => [c.id, { ...c }]));
-  const ordered: ToolbarControl[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const id = (item as { id?: unknown }).id;
-    const enabled = (item as { enabled?: unknown }).enabled;
-    if (typeof id !== "string" || !map.has(id as ToolbarControlId)) continue;
-    const fallback = map.get(id as ToolbarControlId)!;
-    ordered.push({ ...fallback, enabled: typeof enabled === "boolean" ? enabled : fallback.enabled });
-    map.delete(id as ToolbarControlId);
-  }
-  for (const c of map.values()) ordered.push(c);
-  return ordered;
-}
-
-// ── Shared UI atoms ───────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type Collaborator = { id: string; name: string; color: string; avatarUrl?: string; username?: string };
-
-function RoundIconButton({ active = false, onClick, title, label, children }: Readonly<{ active?: boolean; onClick: () => void; title: string; label?: string; children: React.ReactNode }>) {
-  return (
-    <button onClick={onClick} className="btn-smooth flex flex-col items-center gap-0.5 px-1 py-1" title={title}>
-      <span className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: active ? "rgba(255,107,157,0.15)" : "rgba(255,255,255,0.7)", border: active ? "1.5px solid rgba(255,107,157,0.45)" : "1.5px solid rgba(0,0,0,0.07)" }}>
-        {children}
-      </span>
-      {label ? <span className="text-[9px] font-medium leading-tight" style={{ color: active ? "var(--pink)" : "var(--muted)" }}>{label}</span> : null}
-    </button>
-  );
-}
-
-// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface StudioToolbarProps {
   brushSettings: BrushSettings;
@@ -118,6 +72,68 @@ interface StudioToolbarProps {
   onJumpToCollaborator: (artistId: string) => void;
 }
 
+// ── Tool button ───────────────────────────────────────────────────────────────
+
+function ToolBtn({
+  active = false,
+  onClick,
+  title,
+  label,
+  children,
+}: Readonly<{
+  active?: boolean;
+  onClick: () => void;
+  title: string;
+  label?: string;
+  children: React.ReactNode;
+}>) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="btn-smooth flex flex-col items-center gap-1"
+      style={{ WebkitTapHighlightColor: "transparent" }}
+    >
+      <span
+        className="flex items-center justify-center rounded-2xl transition-all"
+        style={{
+          width: 52,
+          height: 52,
+          background: active
+            ? "linear-gradient(135deg, rgba(255,107,157,0.18), rgba(167,139,250,0.15))"
+            : "transparent",
+          border: active
+            ? "1.5px solid rgba(255,107,157,0.4)"
+            : "1.5px solid transparent",
+          boxShadow: active ? "0 2px 8px rgba(255,107,157,0.15)" : "none",
+        }}
+      >
+        {children}
+      </span>
+      {label ? (
+        <span
+          className="text-[9px] font-semibold leading-none tracking-wide"
+          style={{ color: active ? "var(--pink)" : "var(--muted)" }}
+        >
+          {label}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+// ── Divider ───────────────────────────────────────────────────────────────────
+
+function Divider() {
+  return (
+    <div
+      className="w-8 shrink-0 self-center"
+      style={{ height: 1, background: "rgba(186,156,214,0.25)" }}
+    />
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function StudioToolbar({
@@ -129,7 +145,6 @@ export default function StudioToolbar({
   collaborators, selfCollaboratorId, onJumpToCollaborator,
 }: Readonly<StudioToolbarProps>) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [customizeOpen, setCustomizeOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<DrawerSection>("assets");
   const [gifQuery, setGifQuery] = useState("cute sticker");
   const [gifResults, setGifResults] = useState<GifSearchResult[]>([]);
@@ -138,25 +153,17 @@ export default function StudioToolbar({
   const [gifUrlInput, setGifUrlInput] = useState("");
   const [customColor, setCustomColor] = useState(brushSettings.color);
   const [assetSearch, setAssetSearch] = useState("");
-  const [toolbarControls, setToolbarControls] = useState<ToolbarControl[]>(DEFAULT_TOOLBAR_CONTROLS);
-  const [userPalette, setUserPalette] = useState<string[]>([PASTEL_COLORS[2], PASTEL_COLORS[3], PASTEL_COLORS[4], PASTEL_COLORS[8]]);
+  const [userPalette, setUserPalette] = useState<string[]>([
+    PASTEL_COLORS[0],
+    PASTEL_COLORS[2],
+    PASTEL_COLORS[4],
+    PASTEL_COLORS[8],
+    "#1e1e2e",
+  ]);
 
   useEffect(() => { setCustomColor(brushSettings.color); }, [brushSettings.color]);
 
-  // Persist toolbar layout to localStorage
-  useEffect(() => {
-    if (!globalThis.window) return;
-    try {
-      const raw = globalThis.localStorage.getItem("mochimail_toolbar_controls");
-      if (raw) setToolbarControls(normalizeToolbarControls(JSON.parse(raw)));
-    } catch { setToolbarControls(DEFAULT_TOOLBAR_CONTROLS); }
-  }, []);
-  useEffect(() => {
-    if (!globalThis.window) return;
-    globalThis.localStorage.setItem("mochimail_toolbar_controls", JSON.stringify(toolbarControls));
-  }, [toolbarControls]);
-
-  // Persist custom color palette to localStorage
+  // Persist custom palette
   useEffect(() => {
     if (!globalThis.window) return;
     try {
@@ -164,8 +171,10 @@ export default function StudioToolbar({
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return;
-      const normalized = parsed.filter((c) => typeof c === "string" && /^#[0-9A-Fa-f]{6}$/.test(c)).slice(0, 4);
-      if (normalized.length === 4) setUserPalette(normalized as string[]);
+      const normalized = parsed
+        .filter((c) => typeof c === "string" && /^#[0-9A-Fa-f]{6}$/.test(c))
+        .slice(0, 5);
+      if (normalized.length >= 4) setUserPalette(normalized);
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
@@ -224,7 +233,7 @@ export default function StudioToolbar({
       const code = error instanceof Error ? error.message : "unknown";
       if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY not set on the server.");
       else if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY not set on the server.");
-      else if (code === "rate_limited") setGifError("Too many requests — please wait a moment and try again.");
+      else if (code === "rate_limited") setGifError("Too many requests — please wait a moment.");
       else setGifError("GIF search failed.");
     } finally {
       setGifLoading(false);
@@ -239,8 +248,8 @@ export default function StudioToolbar({
       .then((status: { ready?: boolean; error?: string }) => {
         if (status.ready === false) {
           const code = status.error ?? "unknown";
-          if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY is not configured on the server. Add it in Replit Secrets to enable GIF search.");
-          else if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY is not configured on the server. Add it in Replit Secrets to enable GIF search.");
+          if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY is not configured. Add it in Replit Secrets.");
+          else if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY is not configured. Add it in Replit Secrets.");
           else setGifError("GIF provider is not configured.");
         } else {
           void searchGifs();
@@ -249,7 +258,6 @@ export default function StudioToolbar({
       .catch(() => void searchGifs());
   }, [activeSection, gifResults.length, gifLoading, searchGifs]);
 
-  // Scrapbook pack: 3 canvas-drawn sticker shapes
   const addScrapbookPack = useCallback(() => {
     const make = (w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void) => {
       const canvas = document.createElement("canvas");
@@ -285,177 +293,448 @@ export default function StudioToolbar({
     if (["pen", "eraser", "text", "select"].includes(tool)) onDeselectAsset();
   }, [onBrushChange, onDeselectAsset]);
 
-  const moveControl = useCallback((id: ToolbarControlId, dir: -1 | 1) => {
-    setToolbarControls((prev) => {
-      const i = prev.findIndex((c) => c.id === id);
-      if (i === -1 || i + dir < 0 || i + dir >= prev.length) return prev;
-      const next = [...prev];
-      const [item] = next.splice(i, 1);
-      next.splice(i + dir, 0, item);
-      return next;
-    });
-  }, []);
-
-  const toggleControl = useCallback((id: ToolbarControlId) => {
-    setToolbarControls((prev) => {
-      const enabledCount = prev.filter((c) => c.enabled).length;
-      return prev.map((c) => c.id !== id ? c : c.enabled && enabledCount <= 1 ? c : { ...c, enabled: !c.enabled });
-    });
-  }, []);
-
   const isStickerActive = brushSettings.tool === "sticker" && selectedAsset !== null;
   const isWashiActive = brushSettings.tool === "washi" && selectedAsset !== null;
-  const activeControls = toolbarControls.filter((c) => c.enabled);
-  const shownCollaborators = collaborators.slice(0, 5);
+  const shownCollaborators = collaborators.slice(0, 6);
+
+  // Icon SVGs
+  const PenIcon = (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"
+        stroke={brushSettings.tool === "pen" && !isStickerActive && !isWashiActive ? "var(--pink)" : "#666"}
+        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  const TextIcon = (
+    <span
+      className="text-xl font-bold leading-none"
+      style={{ fontFamily: '"Space Mono", monospace', color: brushSettings.tool === "text" ? "var(--pink)" : "#666" }}
+    >
+      T
+    </span>
+  );
+  const SelectIcon = (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M6 2v15.5l3.5-3.1 2 3.9 1.8-0.9-2-3.9H17L6 2z"
+        stroke={brushSettings.tool === "select" ? "var(--pink)" : "#666"}
+        strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  const EraserIcon = (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path d="M20 20H7L3 16l10-10 7 7-3.5 3.5"
+        stroke={brushSettings.tool === "eraser" ? "var(--pink)" : "#666"}
+        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 17l4-4"
+        stroke={brushSettings.tool === "eraser" ? "var(--pink)" : "#666"}
+        strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+  const AssetsIcon = (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="3" width="7" height="7" rx="1.5"
+        stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5"
+        stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5"
+        stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5"
+        stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
+    </svg>
+  );
+  const UndoIcon = (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M3 7h10a6 6 0 0 1 0 12H9" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 7l4-4M3 7l4 4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  const RedoIcon = (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M21 7H11a6 6 0 0 0 0 12h4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21 7l-4-4M21 7l-4 4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+  const ExportIcon = (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M12 3v13" stroke="white" strokeWidth="2" strokeLinecap="round" />
+      <path d="M8 12l4 4 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 20h18" stroke="white" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
-      {/* Asset drawer */}
-      {drawerOpen && (
-        <div className="pointer-events-auto absolute bottom-0 left-0 right-0 z-40 max-h-[72vh] overflow-y-auto">
-          <StudioAssetDrawer
-            assetCount={assetCount} activeSection={activeSection}
-            stickers={stickers} washiTapes={washiTapes} papers={papers} customFonts={customFonts}
-            selectedAsset={selectedAsset} selectedPaper={selectedPaper}
-            brushSettings={brushSettings} selectedTextFont={selectedTextFont} selectedTextSize={selectedTextSize}
-            customColor={customColor} colorChoices={colorChoices}
-            gifQuery={gifQuery} gifResults={gifResults} gifLoading={gifLoading} gifError={gifError} gifUrlInput={gifUrlInput}
-            assetSearch={assetSearch}
-            onClose={() => setDrawerOpen(false)} onSelectSection={setActiveSection}
-            onSelectSticker={onSelectSticker} onSelectWashi={onSelectWashi} onSelectPaper={onSelectPaper} onDeselectAsset={onDeselectAsset}
-            onDeleteSticker={onDeleteSticker} onDeleteWashi={onDeleteWashi} onDeletePaper={onDeletePaper} onDeleteCustomFont={onDeleteCustomFont}
-            onSaveSticker={onSaveSticker} onSaveWashi={onSaveWashi} onSaveCustomFont={onSaveCustomFont}
-            onBrushChange={onBrushChange} onClear={onClear}
-            setCustomColor={setCustomColor} setGifQuery={setGifQuery} searchGifs={searchGifs}
-            addGifFromResult={addGifFromResult} setGifUrlInput={setGifUrlInput} addGifFromUrl={addGifFromUrl}
-            addScrapbookPack={addScrapbookPack} setAssetSearch={setAssetSearch}
-          />
-        </div>
-      )}
 
-      {/* Toolbar customization popover */}
-      {customizeOpen && (
-        <div className="pointer-events-auto absolute left-20 top-1/2 z-40 w-72 -translate-y-1/2 rounded-2xl border p-3" style={{ background: "var(--surface-active)", borderColor: "var(--border-strong)", boxShadow: "0 10px 28px rgba(0,0,0,0.16)" }}>
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Customize Toolbar</p>
-            <button onClick={() => setCustomizeOpen(false)} className="btn-smooth rounded-lg px-2 py-1 text-[10px]" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>Close</button>
-          </div>
-          <div className="space-y-2">
-            {toolbarControls.map((control, index) => (
-              <div key={control.id} className="flex items-center gap-2 rounded-xl border px-2 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-                <input type="checkbox" checked={control.enabled} onChange={() => toggleControl(control.id)} aria-label={`Toggle ${control.label}`} />
-                <span className="flex-1 text-xs font-semibold" style={{ color: "var(--muted-strong)" }}>{control.label}</span>
-                <button onClick={() => moveControl(control.id, -1)} disabled={index === 0} className="btn-smooth rounded-lg px-2 py-1 text-[10px]" style={{ background: "var(--surface-soft)", color: "var(--muted-strong)" }}>Up</button>
-                <button onClick={() => moveControl(control.id, 1)} disabled={index === toolbarControls.length - 1} className="btn-smooth rounded-lg px-2 py-1 text-[10px]" style={{ background: "var(--surface-soft)", color: "var(--muted-strong)" }}>Down</button>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 rounded-xl border p-2" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Left Menu Colors</p>
-            <div className="grid grid-cols-4 gap-2">
-              {userPalette.map((color, i) => (
-                <label key={`${color}-${i}`} className="flex flex-col items-center gap-1 text-[10px]" style={{ color: "var(--muted)" }}>
-                  <input type="color" value={color} onChange={(e) => setUserPalette((prev) => prev.map((c, idx) => idx === i ? e.target.value : c))} className="h-8 w-8 cursor-pointer rounded-full border-0 bg-transparent p-0" />
-                  {i + 1}
-                </label>
-              ))}
+      {/* ── Asset drawer (bottom sheet) ──────────────────────────────────── */}
+      {drawerOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="pointer-events-auto absolute inset-0 z-40"
+            style={{ background: "rgba(0,0,0,0.12)", backdropFilter: "blur(2px)" }}
+            onClick={() => setDrawerOpen(false)}
+          />
+          {/* Sheet */}
+          <div
+            className="pointer-events-auto absolute bottom-0 left-0 right-0 z-50 animate-slide-up overflow-hidden"
+            style={{
+              maxHeight: "76vh",
+              borderRadius: "24px 24px 0 0",
+              background: "rgba(255,255,255,0.98)",
+              boxShadow: "0 -8px 40px rgba(143,109,178,0.18), 0 -2px 8px rgba(0,0,0,0.06)",
+              border: "1px solid rgba(186,156,214,0.25)",
+              borderBottom: "none",
+            }}
+          >
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div
+                className="rounded-full"
+                style={{ width: 40, height: 4, background: "rgba(186,156,214,0.5)" }}
+              />
+            </div>
+            <div style={{ maxHeight: "calc(76vh - 20px)", overflowY: "auto" }}>
+              <StudioAssetDrawer
+                assetCount={assetCount}
+                activeSection={activeSection}
+                stickers={stickers}
+                washiTapes={washiTapes}
+                papers={papers}
+                customFonts={customFonts}
+                selectedAsset={selectedAsset}
+                selectedPaper={selectedPaper}
+                brushSettings={brushSettings}
+                selectedTextFont={selectedTextFont}
+                selectedTextSize={selectedTextSize}
+                customColor={customColor}
+                colorChoices={colorChoices}
+                gifQuery={gifQuery}
+                gifResults={gifResults}
+                gifLoading={gifLoading}
+                gifError={gifError}
+                gifUrlInput={gifUrlInput}
+                assetSearch={assetSearch}
+                onClose={() => setDrawerOpen(false)}
+                onSelectSection={setActiveSection}
+                onSelectSticker={onSelectSticker}
+                onSelectWashi={onSelectWashi}
+                onSelectPaper={onSelectPaper}
+                onDeselectAsset={onDeselectAsset}
+                onDeleteSticker={onDeleteSticker}
+                onDeleteWashi={onDeleteWashi}
+                onDeletePaper={onDeletePaper}
+                onDeleteCustomFont={onDeleteCustomFont}
+                onSaveSticker={onSaveSticker}
+                onSaveWashi={onSaveWashi}
+                onSaveCustomFont={onSaveCustomFont}
+                onBrushChange={onBrushChange}
+                onClear={onClear}
+                setCustomColor={setCustomColor}
+                setGifQuery={setGifQuery}
+                searchGifs={searchGifs}
+                addGifFromResult={addGifFromResult}
+                setGifUrlInput={setGifUrlInput}
+                addGifFromUrl={addGifFromUrl}
+                addScrapbookPack={addScrapbookPack}
+                setAssetSearch={setAssetSearch}
+              />
             </div>
           </div>
-        </div>
+        </>
       )}
 
-      {/* Left tool palette */}
-      <div className="pointer-events-auto absolute left-2 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-1 px-2 py-2.5 sm:left-4" style={{ background: "rgba(255,255,255,0.94)", borderRadius: 20, border: "1px solid rgba(0,0,0,0.08)", boxShadow: "0 8px 24px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06)" }}>
-        {activeControls.map((control) => {
-          if (control.id === "pen") return (
-            <RoundIconButton key="pen" active={brushSettings.tool === "pen" && !isStickerActive && !isWashiActive} onClick={() => setTool("pen")} title="Pen" label="Pen">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" stroke="#444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </RoundIconButton>
-          );
-          if (control.id === "text") return (
-            <RoundIconButton key="text" active={brushSettings.tool === "text"} onClick={() => setTool("text")} title="Text" label="Text">
-              <span className="text-sm font-bold" style={{ fontFamily: '"Space Mono", monospace', color: "#444" }}>T</span>
-            </RoundIconButton>
-          );
-          if (control.id === "select") return (
-            <RoundIconButton key="select" active={brushSettings.tool === "select"} onClick={() => setTool("select")} title="Select" label="Select">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 2v15.5l3.5-3.1 2 3.9 1.8-0.9-2-3.9H17L6 2z" stroke="#444" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </RoundIconButton>
-          );
-          if (control.id === "eraser") return (
-            <RoundIconButton key="eraser" active={brushSettings.tool === "eraser"} onClick={() => setTool("eraser")} title="Eraser" label="Erase">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M20 20H7L3 16l10-10 7 7-3.5 3.5" stroke="#444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><path d="M6 17l4-4" stroke="#444" strokeWidth="2" strokeLinecap="round" /></svg>
-            </RoundIconButton>
-          );
-          if (control.id === "drawer") return (
-            <RoundIconButton key="drawer" active={drawerOpen} onClick={() => setDrawerOpen((p) => !p)} title="Open Studio" label="Studio">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="#444" strokeWidth="2" /><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="#444" strokeWidth="2" /><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="#444" strokeWidth="2" /><rect x="14" y="14" width="7" height="7" rx="1.5" stroke="#444" strokeWidth="2" /></svg>
-            </RoundIconButton>
-          );
-          return null;
-        })}
+      {/* ── Left floating toolbar ──────────────────────────────────────────── */}
+      <div
+        className="pointer-events-auto absolute left-3 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-0.5 px-2 py-3"
+        style={{
+          background: "rgba(255,255,255,0.96)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderRadius: 22,
+          border: "1px solid rgba(186,156,214,0.25)",
+          boxShadow: "0 8px 32px rgba(143,109,178,0.16), 0 2px 8px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.9)",
+        }}
+      >
+        {/* Tools */}
+        <ToolBtn
+          active={brushSettings.tool === "pen" && !isStickerActive && !isWashiActive}
+          onClick={() => setTool("pen")}
+          title="Pen"
+          label="Pen"
+        >
+          {PenIcon}
+        </ToolBtn>
 
-        <div className="w-full" style={{ height: 1, background: "rgba(0,0,0,0.08)", margin: "2px 0" }} />
+        <ToolBtn
+          active={brushSettings.tool === "text"}
+          onClick={() => setTool("text")}
+          title="Text"
+          label="Text"
+        >
+          {TextIcon}
+        </ToolBtn>
 
-        {userPalette.map((color) => {
+        <ToolBtn
+          active={brushSettings.tool === "select"}
+          onClick={() => setTool("select")}
+          title="Select / move"
+          label="Select"
+        >
+          {SelectIcon}
+        </ToolBtn>
+
+        <ToolBtn
+          active={brushSettings.tool === "eraser"}
+          onClick={() => setTool("eraser")}
+          title="Eraser"
+          label="Erase"
+        >
+          {EraserIcon}
+        </ToolBtn>
+
+        <Divider />
+
+        {/* Asset drawer toggle */}
+        <ToolBtn
+          active={drawerOpen}
+          onClick={() => setDrawerOpen((p) => !p)}
+          title="Open studio assets"
+          label="Assets"
+        >
+          {AssetsIcon}
+        </ToolBtn>
+
+        <Divider />
+
+        {/* Color swatches */}
+        {userPalette.map((color, i) => {
           const selected = brushSettings.color === color;
           return (
-            <button key={color} onClick={() => { onBrushChange({ color, tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool }); onDeselectAsset(); }} className="btn-smooth rounded-full" style={{ width: 26, height: 26, background: color, boxShadow: getSwatchShadow(selected, color) }} title={color} />
+            <button
+              key={`${color}-${i}`}
+              onClick={() => {
+                onBrushChange({
+                  color,
+                  tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool,
+                });
+                onDeselectAsset();
+              }}
+              className="btn-smooth my-0.5 rounded-full transition-all"
+              style={{
+                width: selected ? 32 : 28,
+                height: selected ? 32 : 28,
+                background: color,
+                boxShadow: selected
+                  ? `0 0 0 2.5px white, 0 0 0 4.5px ${color}`
+                  : color === "#ffffff"
+                  ? "inset 0 0 0 1.5px rgba(0,0,0,0.15)"
+                  : "0 2px 6px rgba(0,0,0,0.15)",
+              }}
+              title={color}
+              aria-label={`Color ${color}`}
+            />
           );
         })}
 
-        <div className="w-full" style={{ height: 1, background: "rgba(0,0,0,0.08)", margin: "2px 0" }} />
+        {/* Custom color picker */}
+        <label
+          className="btn-smooth my-0.5 flex cursor-pointer items-center justify-center overflow-hidden rounded-full"
+          style={{
+            width: 28,
+            height: 28,
+            background: "conic-gradient(from 0deg, #ff6b9d, #fb923c, #fbbf24, #6ee7b7, #67d4f1, #a78bfa, #ff6b9d)",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.12)",
+          }}
+          title="Custom color"
+          aria-label="Pick custom color"
+        >
+          <input
+            type="color"
+            value={customColor}
+            onChange={(e) => {
+              setCustomColor(e.target.value);
+              onBrushChange({
+                color: e.target.value,
+                tool: brushSettings.tool === "eraser" ? "pen" : brushSettings.tool,
+              });
+              onDeselectAsset();
+            }}
+            className="absolute opacity-0"
+            style={{ width: 1, height: 1 }}
+          />
+        </label>
 
-        <RoundIconButton active={customizeOpen} onClick={() => setCustomizeOpen((p) => !p)} title="Customize toolbar" label="More">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 15.4a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8z" stroke="#444" strokeWidth="2" /><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.2 1.2 0 1 1-1.7 1.7l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V19a1.2 1.2 0 1 1-2.4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1.2 1.2 0 1 1-1.7-1.7l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H5a1.2 1.2 0 1 1 0-2.4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1.2 1.2 0 1 1 1.7-1.7l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V5a1.2 1.2 0 1 1 2.4 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a1.2 1.2 0 1 1 1.7 1.7l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6H19a1.2 1.2 0 1 1 0 2.4h-.2a1 1 0 0 0-.9.6z" stroke="#444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </RoundIconButton>
+        {/* Brush size (only visible on pen/eraser) */}
+        {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
+          <>
+            <Divider />
+            <div className="flex flex-col items-center gap-1 py-1">
+              {([2, 4, 8, 14] as const).map((sz) => (
+                <button
+                  key={sz}
+                  onClick={() => onBrushChange({ size: sz })}
+                  className="btn-smooth flex items-center justify-center rounded-full"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    background: brushSettings.size === sz ? "rgba(255,107,157,0.12)" : "transparent",
+                  }}
+                  title={`Size ${sz}`}
+                  aria-label={`Brush size ${sz}`}
+                >
+                  <span
+                    className="rounded-full"
+                    style={{
+                      width: sz + 2,
+                      height: sz + 2,
+                      minWidth: 4,
+                      minHeight: 4,
+                      background: brushSettings.size === sz ? "var(--pink)" : "rgba(100,80,130,0.45)",
+                    }}
+                  />
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Collaborator avatars (top right) */}
-      <div className="pointer-events-auto absolute z-30 flex gap-2" style={{ right: "calc(1rem + env(safe-area-inset-right, 0px))", top: "calc(1rem + env(safe-area-inset-top, 0px))" }}>
+      {/* ── Collaborator avatars (top right) ──────────────────────────────── */}
+      <div
+        className="pointer-events-auto absolute z-30 flex items-center gap-2"
+        style={{
+          right: "calc(1rem + env(safe-area-inset-right, 0px))",
+          top: "calc(1rem + env(safe-area-inset-top, 0px))",
+        }}
+      >
         {shownCollaborators.map((artist) => {
           const isSelf = artist.id === selfCollaboratorId;
           const initials = artist.name.split(" ").map((p) => p.charAt(0).toUpperCase()).join("").slice(0, 2) || "?";
           const hasSpace = !isSelf && Boolean(artist.username);
           const avatar = (
-            <span className="relative flex items-center justify-center overflow-hidden rounded-full" style={{ width: 38, height: 38, background: "linear-gradient(135deg, #e8e0f0, #d1c4f8)", border: `3px solid ${artist.color}`, boxShadow: "0 3px 10px rgba(0,0,0,0.14)", flexShrink: 0 }}>
-              {artist.avatarUrl ? <img src={artist.avatarUrl} alt={artist.name} className="h-full w-full object-cover" /> : <span className="text-[11px] font-bold" style={{ color: "#6b4fa8" }}>{initials}</span>}
-              {isSelf && <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full" style={{ background: "#22c55e", border: "2px solid white" }} />}
+            <span
+              className="relative flex items-center justify-center overflow-hidden rounded-full"
+              style={{
+                width: 42,
+                height: 42,
+                background: "linear-gradient(135deg, #e8e0f0, #d1c4f8)",
+                border: `3px solid ${artist.color}`,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.16)",
+                flexShrink: 0,
+              }}
+            >
+              {artist.avatarUrl ? (
+                <img src={artist.avatarUrl} alt={artist.name} className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-[11px] font-bold" style={{ color: "#6b4fa8" }}>{initials}</span>
+              )}
+              {isSelf && (
+                <span
+                  className="absolute bottom-0 right-0 h-3 w-3 rounded-full"
+                  style={{ background: "#22c55e", border: "2px solid white" }}
+                />
+              )}
             </span>
           );
           return (
             <div key={artist.id} className="group relative flex flex-col items-center">
               {hasSpace ? (
-                <a href={`/space/${artist.username}`} target="_blank" rel="noopener noreferrer" onClick={(e) => { e.preventDefault(); onJumpToCollaborator(artist.id); window.open(`/space/${artist.username}`, "_blank"); }} className="btn-smooth" aria-label={`${artist.name}'s space`}>{avatar}</a>
+                <a
+                  href={`/space/${artist.username}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onJumpToCollaborator(artist.id);
+                    window.open(`/space/${artist.username}`, "_blank");
+                  }}
+                  className="btn-smooth"
+                  aria-label={`${artist.name}'s space`}
+                >
+                  {avatar}
+                </a>
               ) : (
-                <button onClick={() => onJumpToCollaborator(artist.id)} className="btn-smooth" aria-label={isSelf ? `${artist.name} (you)` : `Jump to ${artist.name}`}>{avatar}</button>
+                <button
+                  onClick={() => onJumpToCollaborator(artist.id)}
+                  className="btn-smooth"
+                  aria-label={isSelf ? `${artist.name} (you)` : `Jump to ${artist.name}`}
+                >
+                  {avatar}
+                </button>
               )}
-              <div className="pointer-events-none absolute top-full mt-2 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] font-semibold opacity-0 shadow-lg transition-opacity group-hover:opacity-100" style={{ background: "rgba(255,255,255,0.96)", color: "var(--foreground)", border: "1px solid rgba(0,0,0,0.1)", boxShadow: "0 4px 12px rgba(0,0,0,0.12)" }}>
+              <div
+                className="pointer-events-none absolute top-full mt-2 whitespace-nowrap rounded-xl px-3 py-1.5 text-[11px] font-semibold opacity-0 shadow-lg transition-opacity group-hover:opacity-100"
+                style={{
+                  background: "rgba(255,255,255,0.97)",
+                  color: "var(--foreground)",
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
+                }}
+              >
                 {isSelf ? `${artist.name} (you)` : artist.name}
-                {hasSpace && <span className="ml-1 text-[10px]" style={{ color: "var(--purple)" }}>· visit space ↗</span>}
+                {hasSpace && (
+                  <span className="ml-1 text-[10px]" style={{ color: "var(--lavender)" }}>
+                    · visit space ↗
+                  </span>
+                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Undo / Redo / Export (bottom right) */}
-      <div className="pointer-events-auto absolute z-30 flex flex-col gap-2.5" style={{ right: "calc(1rem + env(safe-area-inset-right, 0px))", bottom: "calc(1rem + env(safe-area-inset-bottom, 0px))" }}>
-        {toolbarControls.some((c) => c.id === "undo" && c.enabled) && (
-          <button onClick={onUndo} className="btn-smooth flex h-12 w-12 items-center justify-center rounded-full" style={{ background: "rgba(255,255,255,0.95)", border: "1px solid rgba(0,0,0,0.1)", boxShadow: "0 4px 12px rgba(0,0,0,0.12)" }} title="Undo">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 7h10a6 6 0 0 1 0 12H9" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><path d="M3 7l4-4M3 7l4 4" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </button>
-        )}
-        {toolbarControls.some((c) => c.id === "redo" && c.enabled) && (
-          <button onClick={onRedo} className="btn-smooth flex h-12 w-12 items-center justify-center rounded-full" style={{ background: "rgba(255,255,255,0.95)", border: "1px solid rgba(0,0,0,0.1)", boxShadow: "0 4px 12px rgba(0,0,0,0.12)" }} title="Redo">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M21 7H11a6 6 0 0 0 0 12h4" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 7l-4-4M21 7l-4 4" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </button>
-        )}
-        {toolbarControls.some((c) => c.id === "export" && c.enabled) && (
-          <button onClick={onExport} className="btn-smooth flex h-12 w-12 items-center justify-center rounded-full" style={{ background: "var(--pink)", boxShadow: "0 4px 14px rgba(255,107,157,0.4)" }} title="Export PNG">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3v13" stroke="white" strokeWidth="2" strokeLinecap="round" /><path d="M8 12l4 4 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><path d="M3 20h18" stroke="white" strokeWidth="2" strokeLinecap="round" /></svg>
-          </button>
-        )}
+      {/* ── Action buttons (bottom right) ────────────────────────────────── */}
+      <div
+        className="pointer-events-auto absolute z-30 flex flex-col gap-2.5"
+        style={{
+          right: "calc(1rem + env(safe-area-inset-right, 0px))",
+          bottom: "calc(5.5rem + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
+        <button
+          onClick={onUndo}
+          className="btn-smooth flex items-center justify-center rounded-2xl"
+          style={{
+            width: 48,
+            height: 48,
+            background: "rgba(255,255,255,0.96)",
+            border: "1px solid rgba(186,156,214,0.25)",
+            boxShadow: "0 4px 16px rgba(143,109,178,0.14), 0 1px 4px rgba(0,0,0,0.07)",
+          }}
+          title="Undo"
+          aria-label="Undo"
+        >
+          {UndoIcon}
+        </button>
+        <button
+          onClick={onRedo}
+          className="btn-smooth flex items-center justify-center rounded-2xl"
+          style={{
+            width: 48,
+            height: 48,
+            background: "rgba(255,255,255,0.96)",
+            border: "1px solid rgba(186,156,214,0.25)",
+            boxShadow: "0 4px 16px rgba(143,109,178,0.14), 0 1px 4px rgba(0,0,0,0.07)",
+          }}
+          title="Redo"
+          aria-label="Redo"
+        >
+          {RedoIcon}
+        </button>
+        <button
+          onClick={onExport}
+          className="btn-smooth flex items-center justify-center rounded-2xl"
+          style={{
+            width: 48,
+            height: 48,
+            background: "linear-gradient(135deg, var(--pink), var(--lavender))",
+            boxShadow: "0 6px 18px rgba(255,107,157,0.38)",
+          }}
+          title="Export PNG"
+          aria-label="Export PNG"
+        >
+          {ExportIcon}
+        </button>
       </div>
     </div>
   );
