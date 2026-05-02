@@ -93,6 +93,9 @@ export default function StoreView({
     setShowPublish(false);
     setPublishTags("");
     setSelectedPublish(null);
+    // Reset filter so the newly published item is always visible
+    setFilterType("all");
+    setSearchQuery("");
   };
 
   return (
