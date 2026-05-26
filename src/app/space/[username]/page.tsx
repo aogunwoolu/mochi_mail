@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { SpaceView } from "../page";
+import { SpaceView } from "../SpaceView";
 
 export default function SpaceUsernamePage({ params }: { params: Promise<{ username: string }> }) {
   const { username } = use(params);
