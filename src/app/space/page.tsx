@@ -7,7 +7,7 @@ import SpaceStudio from "@/components/SpaceStudio";
 import { useState, useEffect, Suspense } from "react";
 import { parseSpaceConfig, bgToCss } from "@/lib/spaceConfig";
 
-export function SpaceView({ requestedUser }: { requestedUser: string }) {
+function SpaceView({ requestedUser }: { requestedUser: string }) {
   const router = useRouter();
   const account = useAccount();
   const spaces = useSpaces(account.accounts, account.currentAccount, requestedUser || undefined);
