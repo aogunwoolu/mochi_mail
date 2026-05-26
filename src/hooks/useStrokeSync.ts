@@ -504,9 +504,10 @@ export function useStrokeSync({
         tool,
         color,
         size,
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
         points: pts as unknown as Json,
         seq: Date.now(),
-      } as Database["public"]["Tables"]["board_strokes"]["Insert"]);
+      });
       if (error) {
         const msg = String(error.message ?? "").toLowerCase();
         if (
