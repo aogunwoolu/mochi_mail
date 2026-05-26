@@ -1,3 +1,14 @@
+export function strokeOpts(size: number, isEraser: boolean, last?: boolean) {
+  return {
+    size: isEraser ? size * 2.5 : size,
+    thinning: isEraser ? 0 : 0.5,
+    smoothing: 0.5,
+    streamline: 0.4,
+    simulatePressure: false as const,
+    ...(last !== undefined && { last }),
+  };
+}
+
 export function strokeToPath2D(stroke: number[][]): Path2D {
   const path = new Path2D();
   if (stroke.length < 2) return path;

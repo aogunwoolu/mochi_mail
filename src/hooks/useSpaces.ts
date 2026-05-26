@@ -1,5 +1,6 @@
 
-import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { generateId } from "@/lib/id";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { SpaceItem, SpaceItemType, UserSpace } from "@/types";
 import type { Database } from "@/types/database";
@@ -10,9 +11,6 @@ type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 type SpaceUpdate = Database["public"]["Tables"]["spaces"]["Update"];
 type SpaceItemUpdate = Database["public"]["Tables"]["space_items"]["Update"];
 
-function generateId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}-${Math.random().toString(36).slice(2, 8)}-${Math.random().toString(36).slice(2, 12)}`;
-}
 
 function rowToSpaceItem(row: SpaceItemRow): SpaceItem {
   return {
@@ -95,17 +93,18 @@ function buildSpace(
 }
 
 function toSpaceItemUpdate(patch: Partial<SpaceItem>): SpaceItemUpdate {
-  const dbPatch: SpaceItemUpdate = { updated_at: new Date().toISOString() };
-  if (patch.title !== undefined) dbPatch.title = patch.title;
-  if (patch.content !== undefined) dbPatch.content = patch.content;
-  if (patch.x !== undefined) dbPatch.x = patch.x;
-  if (patch.y !== undefined) dbPatch.y = patch.y;
-  if (patch.width !== undefined) dbPatch.width = patch.width;
-  if (patch.height !== undefined) dbPatch.height = patch.height;
-  if (patch.color !== undefined) dbPatch.color = patch.color;
-  if (patch.rotation !== undefined) dbPatch.rotation = patch.rotation;
-  if (patch.imageUrl !== undefined) dbPatch.image_url = patch.imageUrl;
-  return dbPatch;
+  return {
+    updated_at: new Date().toISOString(),
+    ...(patch.title !== undefined && { title: patch.title }),
+    ...(patch.content !== undefined && { content: patch.content }),
+    ...(patch.x !== undefined && { x: patch.x }),
+    ...(patch.y !== undefined && { y: patch.y }),
+    ...(patch.width !== undefined && { width: patch.width }),
+    ...(patch.height !== undefined && { height: patch.height }),
+    ...(patch.color !== undefined && { color: patch.color }),
+    ...(patch.rotation !== undefined && { rotation: patch.rotation }),
+    ...(patch.imageUrl !== undefined && { image_url: patch.imageUrl }),
+  };
 }
 
 export function useSpaces(
@@ -113,8 +112,6 @@ export function useSpaces(
   currentAccount: { id: string; displayName: string; username: string; bio: string; avatarUrl: string; youtubeUrl: string; accentColor: string; wallpaper: string; homeTitle: string } | null
 ) {
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
-  const pendingItemTimerRef = useRef<Record<string, number>>({});
-  const pendingItemPatchRef = useRef<Record<string, Partial<SpaceItem>>>({});
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -307,13 +304,6 @@ export function useSpaces(
   }, []);
 
   const removeSpaceItem = useCallback(async (spaceId: string, itemId: string) => {
-    const pendingTimer = pendingItemTimerRef.current[itemId];
-    if (pendingTimer) {
-      globalThis.clearTimeout(pendingTimer);
-      delete pendingItemTimerRef.current[itemId];
-      delete pendingItemPatchRef.current[itemId];
-    }
-
     const supabase = createSupabaseBrowserClient();
     await supabase.from("space_items").delete().eq("id", itemId);
 

@@ -387,7 +387,9 @@ export default function StickerCreator({ onSave }: StickerCreatorProps) {
       </div>
 
       {/* Name field */}
+      <label htmlFor="sticker-name" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Sticker name</label>
       <input
+        id="sticker-name"
         type="text"
         value={stickerName}
         onChange={(e) => setStickerName(e.target.value)}

@@ -39,6 +39,48 @@ function SectionTitle({ title, note }: { title: string; note?: string }) {
   );
 }
 
+function GifSkeletons() {
+  const heights = [72, 90, 60, 80, 68, 95];
+  return (
+    <div className="flex gap-1.5">
+      {[heights.filter((_, i) => i % 2 === 0), heights.filter((_, i) => i % 2 === 1)].map((col, ci) => (
+        <div key={ci} className="flex-1 flex flex-col gap-1.5">
+          {col.map((h, i) => (
+            <div key={i} className="w-full rounded-xl animate-pulse" style={{ height: h, background: "var(--border)" }} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function GifGrid({ results, onAdd }: { results: GifSearchResult[]; onAdd: (gif: GifSearchResult) => void }) {
+  return (
+    <div className="overflow-y-auto" style={{ maxHeight: 280, columns: 2, columnGap: 6 }}>
+      {results.map((gif) => (
+        <div key={gif.id} className="mb-1.5" style={{ breakInside: "avoid" }}>
+          <button
+            onClick={() => onAdd(gif)}
+            className="group relative w-full overflow-hidden rounded-xl btn-smooth block"
+            style={{ background: "var(--border)" }}
+            title={gif.title}
+          >
+            <img
+              src={gif.previewUrl}
+              alt={gif.title}
+              className="block w-full h-auto"
+              loading="lazy"
+            />
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 rounded-xl" style={{ background: "rgba(167,139,250,0.5)" }}>
+              <span className="text-white text-2xl font-bold drop-shadow-md leading-none">+</span>
+            </div>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SectionChip({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
     <button
@@ -296,35 +338,81 @@ export default function StudioAssetDrawer({
 
         {/* ── Extras (GIFs) ── */}
         {activeSection === "extras" && (
-          <div className="panel-soft p-4 flex flex-col gap-5">
+          <div className="panel-soft flex flex-col">
 
-            {/* GIF Search */}
-            <div>
-              <SectionTitle title="Animated GIFs" note="Search Giphy or paste a GIF URL to add it as a sticker." />
-              <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-                <div className="mb-2 flex gap-2">
-                  <input value={gifQuery} onChange={(e) => setGifQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") searchGifs(); }} placeholder="cats, sparkle, retro..." className="w-full rounded-lg border px-2 py-2 text-xs outline-none" style={{ borderColor: "var(--border)", background: "white" }} />
-                  <button onClick={searchGifs} className="btn-smooth rounded-lg px-3 py-2 text-xs font-semibold" style={{ background: "rgba(103,212,241,0.2)", color: "#0e7490" }}>Search</button>
-                </div>
-                {gifError && <p className="mb-2 text-[11px]" style={{ color: "var(--coral)" }}>{gifError}</p>}
-                {gifLoading && <p className="mb-2 text-[11px]" style={{ color: "var(--muted)" }}>Loading GIFs...</p>}
-                {gifResults.length > 0
-                  ? (
-                    <div className="mb-3 grid max-h-40 grid-cols-3 gap-2 overflow-y-auto">
-                      {gifResults.map((gif) => (
-                        <button key={gif.id} onClick={() => addGifFromResult(gif)} className="btn-smooth overflow-hidden rounded-lg border" style={{ borderColor: "var(--border)", background: "white" }} title={`Add ${gif.title}`}>
-                          <img src={gif.previewUrl} alt={gif.title} className="h-20 w-full object-cover" />
-                        </button>
-                      ))}
-                    </div>
-                  )
-                  : <p className="mb-3 text-[11px]" style={{ color: "var(--muted)" }}>Search for a GIF and click a result to add it.</p>}
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Or paste GIF URL</p>
-                <div className="flex gap-2">
-                  <input value={gifUrlInput} onChange={(e) => setGifUrlInput(e.target.value)} placeholder="https://...gif" className="w-full rounded-lg border px-2 py-2 text-xs outline-none" style={{ borderColor: "var(--border)", background: "white" }} />
-                  <button onClick={addGifFromUrl} className="btn-smooth rounded-lg px-3 py-2 text-xs font-semibold" style={{ background: "rgba(103,212,241,0.2)", color: "#0e7490" }}>Add</button>
-                </div>
+            {/* Search bar */}
+            <div className="px-4 pt-4 pb-3">
+              <div
+                className="flex items-center gap-2 rounded-2xl border px-3 py-2.5 transition-shadow focus-within:shadow-[0_0_0_2px_var(--lavender)]"
+                style={{ borderColor: "var(--border)", background: "white" }}
+              >
+                <svg className="shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: "var(--muted)" }}>
+                  <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                </svg>
+                <input
+                  value={gifQuery}
+                  onChange={(e) => setGifQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") searchGifs(); }}
+                  placeholder="cats · sparkle · kawaii · retro..."
+                  className="flex-1 min-w-0 bg-transparent text-xs outline-none"
+                  style={{ color: "var(--foreground)" }}
+                />
+                <button
+                  onClick={searchGifs}
+                  className="btn-smooth shrink-0 rounded-xl px-3 py-1.5 text-[11px] font-bold text-white"
+                  style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}
+                >
+                  Search
+                </button>
               </div>
+            </div>
+
+            {/* Results area */}
+            <div className="px-3 pb-2">
+              {gifError && !gifLoading && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs" style={{ background: "rgba(251,113,133,0.08)", color: "var(--coral)" }}>
+                  <span>⚠</span><span>{gifError}</span>
+                </div>
+              )}
+              {gifLoading
+                ? <GifSkeletons />
+                : gifResults.length > 0
+                  ? <GifGrid results={gifResults} onAdd={addGifFromResult} />
+                  : !gifError
+                    ? (
+                      <div className="py-10 text-center">
+                        <div className="text-4xl mb-2" style={{ opacity: 0.45 }}>✨</div>
+                        <p className="text-xs font-semibold" style={{ color: "var(--muted-strong)" }}>Search for something fun</p>
+                        <p className="text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>cats · sparkle · kawaii · retro</p>
+                      </div>
+                    )
+                    : null}
+            </div>
+
+            {/* Paste URL */}
+            <div className="mx-4 mb-4 rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Or paste a GIF URL</p>
+              <div className="flex gap-2">
+                <input
+                  value={gifUrlInput}
+                  onChange={(e) => setGifUrlInput(e.target.value)}
+                  placeholder="https://...gif"
+                  className="flex-1 rounded-xl border px-3 py-2 text-xs outline-none"
+                  style={{ borderColor: "var(--border)", background: "white" }}
+                />
+                <button
+                  onClick={addGifFromUrl}
+                  className="btn-smooth rounded-xl px-3 py-2 text-xs font-bold text-white"
+                  style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {/* Attribution (required by Giphy ToS) */}
+            <div className="pb-3 text-center">
+              <span className="text-[9px] font-medium tracking-wide" style={{ color: "var(--muted)", opacity: 0.45 }}>Powered by GIPHY</span>
             </div>
 
           </div>

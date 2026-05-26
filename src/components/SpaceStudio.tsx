@@ -1,4 +1,5 @@
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SpaceItem, SpaceItemType, UserSpace, ViewerIdentity } from "@/types";
 import {
@@ -14,11 +15,12 @@ import {
   isSticker,
   isPinnedItem,
   isVisitorNote,
-  itemCardBg,
   loadGoogleFont,
   parseSpaceConfig,
   spaceConfigToWallpaper,
 } from "@/lib/spaceConfig";
+
+const SpaceBoard = dynamic(() => import("./SpaceBoard"), { ssr: false });
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -37,16 +39,6 @@ interface SpaceStudioProps {
   onLeaveVisitorNote: (spaceId: string, authorName: string, message: string) => void;
   onNavigateBack: () => void;
 }
-
-type DragState = {
-  itemId: string;
-  startX: number;
-  startY: number;
-  originX: number;
-  originY: number;
-  liveX: number;
-  liveY: number;
-};
 
 type ActivePanel = "background" | "audio" | "font" | "add" | "settings" | null;
 
@@ -532,7 +524,6 @@ export default function SpaceStudio({
   onNavigateBack,
 }: Readonly<SpaceStudioProps>) {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [dragState, setDragState] = useState<DragState | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const [showVisitorNote, setShowVisitorNote] = useState(false);
   const [showSpacePicker, setShowSpacePicker] = useState(false);
@@ -582,45 +573,13 @@ export default function SpaceStudio({
     return () => document.removeEventListener("mousedown", handler);
   }, [activePanel, showSpacePicker]);
 
-  // Refs so drag handlers attached once on mount always see current values
-  const dragRef = useRef<DragState | null>(null);
-  const isOwnerRef = useRef(isOwner);
-  const selectedSpaceRef = useRef(selectedSpace);
-  const onUpdateSpaceItemRef = useRef(onUpdateSpaceItem);
-  useEffect(() => { isOwnerRef.current = isOwner; }, [isOwner]);
-  useEffect(() => { selectedSpaceRef.current = selectedSpace; }, [selectedSpace]);
-  useEffect(() => { onUpdateSpaceItemRef.current = onUpdateSpaceItem; }, [onUpdateSpaceItem]);
-
-  // Attach drag handlers ONCE on mount — no dependency on dragState so listeners
-  // never churn on pointermove, and pointerup can never be missed.
-  useEffect(() => {
-    const move = (e: PointerEvent) => {
-      const p = dragRef.current;
-      if (!p || !isOwnerRef.current) return;
-      const updated: DragState = {
-        ...p,
-        liveX: Math.max(8, p.originX + (e.clientX - p.startX)),
-        liveY: Math.max(8, p.originY + (e.clientY - p.startY)),
-      };
-      dragRef.current = updated;          // sync immediately so pointerup always reads latest
-      setDragState(updated);              // trigger re-render for visual position
-    };
-    const up = () => {
-      const p = dragRef.current;
-      const space = selectedSpaceRef.current;
-      dragRef.current = null;
-      setDragState(null);
-      if (p && space && isOwnerRef.current) {
-        onUpdateSpaceItemRef.current(space.id, p.itemId, { x: p.liveX, y: p.liveY });
-      }
-    };
-    globalThis.addEventListener("pointermove", move);
-    globalThis.addEventListener("pointerup", up);
-    return () => {
-      globalThis.removeEventListener("pointermove", move);
-      globalThis.removeEventListener("pointerup", up);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleItemChange = useCallback(
+    (itemId: string, patch: Partial<SpaceItem>) => {
+      if (!selectedSpace) return;
+      onUpdateSpaceItem(selectedSpace.id, itemId, patch);
+    },
+    [onUpdateSpaceItem, selectedSpace]
+  );
 
   const updateConfig = useCallback(
     (patch: Partial<SpaceConfig>) => onUpdateOwnSpace({ wallpaper: spaceConfigToWallpaper({ ...spaceConfig, ...patch }) }),
@@ -643,12 +602,6 @@ export default function SpaceStudio({
     const pinned = isPinnedItem(item);
     onUpdateSpaceItem(selectedSpace.id, item.id, { title: pinned ? displayTitle(item) : `📌 ${displayTitle(item)}` });
   }, [onUpdateSpaceItem, selectedSpace]);
-
-  // Pinned items first
-  const sortedItems = useMemo(
-    () => selectedSpace ? [...selectedSpace.items].sort((a, b) => (isPinnedItem(b) ? 1 : 0) - (isPinnedItem(a) ? 1 : 0)) : [],
-    [selectedSpace]
-  );
 
   if (!selectedSpace) {
     return (
@@ -780,146 +733,79 @@ export default function SpaceStudio({
       )}
 
       {/* ── Board ── */}
-      <div
-        className="relative flex-1 overflow-auto"
-        onClick={() => { setSelectedItemId(null); setShowSpacePicker(false); }}
-      >
-        <div className="relative" style={{ minHeight: 800, minWidth: 960, background: bgCssValue }}>
+      <div className="relative flex-1" style={{ background: bgCssValue }}>
 
-          {/* Ambient accent wash */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
+        {/* Ambient accent wash */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
 
-          {/* Profile card */}
-          <div
-            className="absolute left-8 top-8 max-w-[280px] overflow-hidden rounded-[24px] border shadow-[0_12px_32px_rgba(53,39,66,0.12)]"
-            style={{ borderColor: `${accent}44`, background: "rgba(255,255,255,0.84)", backdropFilter: "blur(12px)" }}
-          >
-            <div className="flex items-center gap-3 p-4">
-              {selectedSpace.avatarUrl ? (
-                <img src={selectedSpace.avatarUrl} alt={selectedSpace.ownerName} className="h-14 w-14 rounded-2xl border-2 object-cover shrink-0" style={{ borderColor: accent }} />
-              ) : (
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 text-xl font-bold text-white" style={{ borderColor: accent, background: accent }}>
-                  {selectedSpace.ownerName.slice(0, 1).toUpperCase()}
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="truncate font-bold" style={{ ...fontStyle, fontSize: Math.min((spaceConfig.font.size) + 2, 22) }}>
-                  {selectedSpace.title || selectedSpace.ownerName}
-                </p>
-                <p className="mt-0.5 truncate text-[11px]" style={{ color: "var(--muted)" }}>@{selectedSpace.slug}</p>
-                {selectedSpace.tagline ? (
-                  <p className="mt-1 text-xs leading-snug" style={{ color: "var(--foreground-soft)" }}>{selectedSpace.tagline}</p>
-                ) : null}
+        {/* tldraw infinite canvas — remounts on space change */}
+        <SpaceBoard
+          key={selectedSpace.id}
+          items={selectedSpace.items}
+          isOwner={isOwner}
+          onItemChange={handleItemChange}
+          onSelectItem={setSelectedItemId}
+          selectedItemId={selectedItemId}
+        />
+
+        {/* Profile card overlay */}
+        <div
+          className="absolute left-8 top-8 z-20 max-w-[280px] overflow-hidden rounded-[24px] border shadow-[0_12px_32px_rgba(53,39,66,0.12)]"
+          style={{ borderColor: `${accent}44`, background: "rgba(255,255,255,0.84)", backdropFilter: "blur(12px)" }}
+        >
+          <div className="flex items-center gap-3 p-4">
+            {selectedSpace.avatarUrl ? (
+              <img src={selectedSpace.avatarUrl} alt={selectedSpace.ownerName} className="h-14 w-14 rounded-2xl border-2 object-cover shrink-0" style={{ borderColor: accent }} />
+            ) : (
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 text-xl font-bold text-white" style={{ borderColor: accent, background: accent }}>
+                {selectedSpace.ownerName.slice(0, 1).toUpperCase()}
               </div>
-            </div>
-            {selectedSpace.aboutMe ? (
-              <p
-                className="border-t px-4 pb-3 pt-2 text-xs leading-relaxed"
-                style={{ borderColor: `${accent}22`, ...fontStyle, fontSize: Math.max(spaceConfig.font.size - 2, 11), color: spaceConfig.font.color }}
-              >
-                {selectedSpace.aboutMe}
+            )}
+            <div className="min-w-0">
+              <p className="truncate font-bold" style={{ ...fontStyle, fontSize: Math.min((spaceConfig.font.size) + 2, 22) }}>
+                {selectedSpace.title || selectedSpace.ownerName}
               </p>
-            ) : null}
+              <p className="mt-0.5 truncate text-[11px]" style={{ color: "var(--muted)" }}>@{selectedSpace.slug}</p>
+              {selectedSpace.tagline ? (
+                <p className="mt-1 text-xs leading-snug" style={{ color: "var(--foreground-soft)" }}>{selectedSpace.tagline}</p>
+              ) : null}
+            </div>
           </div>
-
-          {/* YouTube audio iframe + now-playing chip */}
-          {youtubeId ? (
-            <>
-              <iframe
-                src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&loop=${spaceConfig.audioLoop ? 1 : 0}&playlist=${youtubeId}&controls=0&mute=0`}
-                title="soundtrack"
-                allow="autoplay"
-                className="pointer-events-none absolute opacity-0"
-                style={{ width: 1, height: 1, left: -9999, top: -9999 }}
-              />
-              <div
-                className="absolute bottom-6 right-6 flex items-center gap-2 rounded-full border px-4 py-2"
-                style={{ borderColor: `${accent}55`, background: "rgba(255,255,255,0.90)", backdropFilter: "blur(12px)", boxShadow: "0 8px 20px rgba(53,39,66,0.12)" }}
-              >
-                <span aria-hidden>🎵</span>
-                <span className="text-[11px] font-semibold" style={{ color: accent }}>Now playing</span>
-                {isOwner && <span className="text-[10px]" style={{ color: "var(--muted)" }}>{spaceConfig.audioLoop ? "· loop" : "· once"}</span>}
-                <a href={selectedSpace.youtubeUrl} target="_blank" rel="noopener noreferrer"
-                  className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                  style={{ background: `${accent}22`, color: accent }}>
-                  Open
-                </a>
-              </div>
-            </>
+          {selectedSpace.aboutMe ? (
+            <p
+              className="border-t px-4 pb-3 pt-2 text-xs leading-relaxed"
+              style={{ borderColor: `${accent}22`, ...fontStyle, fontSize: Math.max(spaceConfig.font.size - 2, 11), color: spaceConfig.font.color }}
+            >
+              {selectedSpace.aboutMe}
+            </p>
           ) : null}
-
-          {/* Board items */}
-          {sortedItems.map((item) => {
-            const active = item.id === selectedItemId;
-            const sticker = isSticker(item);
-            const visitor = isVisitorNote(item);
-            const pinned = isPinnedItem(item);
-            const lx = dragState?.itemId === item.id ? dragState.liveX : item.x;
-            const ly = dragState?.itemId === item.id ? dragState.liveY : item.y;
-
-            return (
-              <div
-                key={item.id}
-                className="absolute select-none"
-                style={{
-                  left: lx, top: ly,
-                  width: item.width, height: item.height,
-                  transform: `rotate(${item.rotation}deg)`,
-                  zIndex: active ? 20 : pinned ? 8 : 3,
-                  cursor: isOwner ? (dragState?.itemId === item.id ? "grabbing" : "grab") : "default",
-                  touchAction: "none",
-                }}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  setSelectedItemId(item.id);
-                  if (!isOwner) return;
-                  const ds: DragState = { itemId: item.id, startX: e.clientX, startY: e.clientY, originX: item.x, originY: item.y, liveX: item.x, liveY: item.y };
-                  dragRef.current = ds;
-                  setDragState(ds);
-                }}
-                onClick={(e) => { e.stopPropagation(); setSelectedItemId(active ? null : item.id); setActivePanel(null); }}
-              >
-                {sticker ? (
-                  <div
-                    className="flex h-full w-full items-center justify-center"
-                    style={{ fontSize: Math.min(item.width, item.height) * 0.72, filter: active ? `drop-shadow(0 0 10px ${accent}99)` : "none" }}
-                  >
-                    {item.content}
-                  </div>
-                ) : (
-                  <div
-                    className="h-full w-full overflow-hidden rounded-3xl border p-3"
-                    style={{
-                      background: visitor ? "#fff8c4" : itemCardBg(item),
-                      borderColor: active ? accent : visitor ? "#e6d20088" : "rgba(53,39,66,0.08)",
-                      borderWidth: active ? 2 : 1,
-                      boxShadow: active
-                        ? `0 8px 28px ${accent}33, 0 2px 8px rgba(53,39,66,0.12)`
-                        : "0 6px 20px rgba(53,39,66,0.09)",
-                    }}
-                  >
-                    <div className="mb-1.5 flex items-center gap-1.5">
-                      {pinned && <span className="text-[11px] leading-none">📌</span>}
-                      {visitor && (
-                        <span className="rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider" style={{ background: "#fde68a", color: "#78350f" }}>visitor</span>
-                      )}
-                      <span className="truncate text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: "rgba(53,39,66,0.55)" }}>
-                        {displayTitle(item)}
-                      </span>
-                    </div>
-                    <div className="h-[calc(100%-1.4rem)] overflow-hidden" style={fontStyle}>
-                      {(item.type === "image" || item.type === "drawing") && item.imageUrl ? (
-                        <img src={item.imageUrl} alt={item.title} className="h-full w-full rounded-2xl object-cover" />
-                      ) : (
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{item.content}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
         </div>
+
+        {/* YouTube audio iframe + now-playing chip */}
+        {youtubeId ? (
+          <>
+            <iframe
+              src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&loop=${spaceConfig.audioLoop ? 1 : 0}&playlist=${youtubeId}&controls=0&mute=0`}
+              title="soundtrack"
+              allow="autoplay"
+              className="pointer-events-none absolute opacity-0"
+              style={{ width: 1, height: 1, left: -9999, top: -9999 }}
+            />
+            <div
+              className="absolute bottom-6 right-6 z-20 flex items-center gap-2 rounded-full border px-4 py-2"
+              style={{ borderColor: `${accent}55`, background: "rgba(255,255,255,0.90)", backdropFilter: "blur(12px)", boxShadow: "0 8px 20px rgba(53,39,66,0.12)" }}
+            >
+              <span aria-hidden>🎵</span>
+              <span className="text-[11px] font-semibold" style={{ color: accent }}>Now playing</span>
+              {isOwner && <span className="text-[10px]" style={{ color: "var(--muted)" }}>{spaceConfig.audioLoop ? "· loop" : "· once"}</span>}
+              <a href={selectedSpace.youtubeUrl} target="_blank" rel="noopener noreferrer"
+                className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                style={{ background: `${accent}22`, color: accent }}>
+                Open
+              </a>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* ── Visitor "Leave a note" button ── */}

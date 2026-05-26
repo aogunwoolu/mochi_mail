@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrushSettings, CustomFont, PASTEL_COLORS, PaperBackground, ScrapbookKit, ScrapbookKitElement, Sticker, StoreItem, ViewerIdentity, WashiTape } from "@/types";
 import StudioAssetDrawer, { type DrawerSection, type GifSearchResult } from "./StudioAssetDrawer";
-import { getSwatchShadow } from "@/lib/swatchUtils";
+import { toast } from "@/lib/toast";
 
 
 
@@ -218,11 +218,11 @@ function CollaboratorAvatars({
               flexShrink: 0,
             }}
           >
-            {artist.avatarUrl ? (
-              <img src={artist.avatarUrl} alt={artist.name} className="h-full w-full object-cover" />
-            ) : (
-              <span className="text-[11px] font-bold" style={{ color: "#6b4fa8" }}>{initials}</span>
-            )}
+            <img
+              src={artist.avatarUrl || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(artist.name || "guest")}`}
+              alt={artist.name}
+              className="h-full w-full object-cover"
+            />
             {isSelf && (
               <span
                 className="absolute bottom-0 right-0 h-3 w-3 rounded-full"
@@ -554,17 +554,16 @@ export default function StudioToolbar({
       {/* ── Kit action feedback toast ── */}
       {feedbackMsg && (
         <div
-          className="pointer-events-none absolute z-50"
-          style={{ left: 76, bottom: 96 }}
+          className="pointer-events-none absolute z-50 animate-mochi-toast"
+          style={{ left: 80, bottom: 100 }}
         >
           <div
             className="flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold shadow-xl"
             style={{
               background: "linear-gradient(135deg, #ff6b9d, #a78bfa)",
               color: "#fff",
-              boxShadow: "0 4px 20px rgba(167,139,250,0.4)",
-              maxWidth: 260,
-              animation: "mochi-toast-in 0.18s cubic-bezier(0.34,1.56,0.64,1)",
+              boxShadow: "0 6px 22px rgba(167,139,250,0.42)",
+              maxWidth: 280,
             }}
           >
             <span style={{ fontSize: 14 }}>✓</span>
@@ -579,7 +578,7 @@ export default function StudioToolbar({
         style={{ top: "1rem", bottom: "5.5rem" }}
       >
         <div
-          className="pointer-events-auto flex flex-col items-center gap-0.5 px-2 py-3"
+          className="animate-toolbar-in pointer-events-auto flex flex-col items-center gap-0.5 px-2 py-3"
           style={{
             maxHeight: "100%",
             overflowY: "auto",
@@ -746,7 +745,7 @@ export default function StudioToolbar({
           style={{ top: "1rem", bottom: "5.5rem" }}
         >
           <div
-            className="pointer-events-auto flex flex-col items-center gap-1 px-1.5 py-2"
+            className="animate-panel-in pointer-events-auto flex flex-col items-center gap-1 px-1.5 py-2"
             style={{
               background: "rgba(255,255,255,0.96)",
               backdropFilter: "blur(20px)",
@@ -794,7 +793,7 @@ export default function StudioToolbar({
           style={{ top: "1rem", bottom: "5.5rem" }}
         >
           <div
-            className="pointer-events-auto flex flex-col items-center gap-0.5 px-1.5 py-2"
+            className="animate-panel-in pointer-events-auto flex flex-col items-center gap-0.5 px-1.5 py-2"
             style={{
               background: "rgba(255,255,255,0.96)",
               backdropFilter: "blur(20px)",
@@ -958,8 +957,8 @@ export default function StudioToolbar({
         }}
       >
         <button
-          onClick={onUndo}
-          className="btn-smooth flex items-center justify-center rounded-2xl"
+          onClick={() => { onUndo(); toast("Undone", { icon: "undo" }); }}
+          className="btn-smooth btn-ripple flex items-center justify-center rounded-2xl"
           style={{
             width: 48,
             height: 48,
@@ -973,8 +972,8 @@ export default function StudioToolbar({
           {UndoIcon}
         </button>
         <button
-          onClick={onRedo}
-          className="btn-smooth flex items-center justify-center rounded-2xl"
+          onClick={() => { onRedo(); toast("Redone", { icon: "redo" }); }}
+          className="btn-smooth btn-ripple flex items-center justify-center rounded-2xl"
           style={{
             width: 48,
             height: 48,
@@ -989,7 +988,7 @@ export default function StudioToolbar({
         </button>
         <button
           onClick={isExporting ? undefined : onExport}
-          className="btn-smooth flex items-center justify-center rounded-2xl"
+          className="btn-smooth btn-ripple flex items-center justify-center rounded-2xl"
           style={{
             width: 48,
             height: 48,
@@ -1004,9 +1003,8 @@ export default function StudioToolbar({
           aria-busy={isExporting}
         >
           {isExporting ? (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ animation: "spin 1s linear infinite" }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="animate-spin">
               <circle cx="12" cy="12" r="9" stroke="white" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
-              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             </svg>
           ) : ExportIcon}
         </button>

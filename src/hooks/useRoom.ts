@@ -46,6 +46,62 @@ type CursorBroadcast = {
   username?: string;
 };
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// localStorage key used to remember the last room token across navigations.
+// Exported so the rooms page can read it when building the Back → canvas URL.
+// To let the user intentionally switch rooms: write a new token here then reload.
+export const ROOM_TOKEN_KEY = "mochi:room-token";
+
+function readSavedToken(): string {
+  try { return globalThis.localStorage?.getItem(ROOM_TOKEN_KEY) ?? ""; } catch { return ""; }
+}
+
+function saveToken(token: string): void {
+  try { globalThis.localStorage?.setItem(ROOM_TOKEN_KEY, token); } catch { /* ignore */ }
+}
+
+function clearSavedToken(): void {
+  try { globalThis.localStorage?.removeItem(ROOM_TOKEN_KEY); } catch { /* ignore */ }
+}
+
+type PersistedRoom = { id: string; title: string; invite_token: string; is_public: boolean };
+
+/**
+ * Returns the user's most recent owned room, or creates one if none exist.
+ * ownerName is used as the title prefix when creating: "Abi's Room".
+ * Pass the display name from the account hook so canvas and rooms page
+ * always create rooms with the same naming convention.
+ */
+async function findOrCreateRoom(
+  supabase: ReturnType<typeof createSupabaseBrowserClient>,
+  ownerName?: string,
+): Promise<PersistedRoom | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (user) {
+    // Always try to find an existing owned room first — never create duplicates.
+    const { data: existing } = await supabase
+      .from("rooms")
+      .select("id, title, invite_token, is_public")
+      .eq("owner_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+    const room = existing?.[0] as PersistedRoom | undefined;
+    if (room) return room;
+  }
+  // No existing room — create the user's first room.
+  // Title matches the rooms-page convention: "Abi's Room" or "My Room".
+  const title = ownerName ? `${ownerName}'s Room` : "My Room";
+  const { data, error } = await supabase.rpc("create_room", {
+    p_title: title,
+    p_description: "",
+    p_is_public: false,
+    p_password: null,
+  });
+  if (error || !data?.[0]) return null;
+  return data[0] as PersistedRoom;
+}
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const PRESENCE_COLORS = [
@@ -145,9 +201,11 @@ export function useRoom({
     if (roomInitiatedRef.current) return;
     roomInitiatedRef.current = true;
 
-    const token = new URLSearchParams(globalThis.location?.search ?? "")
-      .get("room")
-      ?.trim() ?? "";
+    // Prefer ?room= from the URL; fall back to the last token we saved in localStorage.
+    // This means navigating back to / (which strips the query string) still reopens
+    // the same room instead of creating a new one.
+    const urlToken = new URLSearchParams(globalThis.location?.search ?? "").get("room")?.trim() ?? "";
+    const token = urlToken || readSavedToken();
 
     const fallbackToLocal = () => {
       setActiveRoomId(null);
@@ -159,111 +217,74 @@ export function useRoom({
     };
 
     if (!token) {
-      // No room in URL: reuse most-recent owned room, or create a new private one
+      // No room in URL and no saved token: create (or reuse) a room for this user.
+      // This only runs on the very first visit or after clearSavedToken() is called.
       setPhase("creating");
       const supabase = createSupabaseBrowserClient();
 
-      // Race the entire room-setup flow against a 5s timeout so the spinner
-      // never hangs indefinitely (e.g. when create_room RPC is slow or blocked).
+      // Race the setup flow against a 5s timeout so the spinner never hangs indefinitely.
       const timeout = new Promise<void>((resolve) =>
         setTimeout(() => { fallbackToLocal(); resolve(); }, 5000)
       );
 
       void Promise.race([
         (async () => {
-          const { data: { user } } = await supabase.auth.getUser();
-
-          // Look for an existing owned room before creating
-          if (user) {
-            const { data: existing } = await supabase
-              .from("rooms")
-              .select("id, title, invite_token, is_public")
-              .eq("owner_id", user.id)
-              .order("updated_at", { ascending: false })
-              .limit(1);
-
-            const room = existing?.[0] as
-              | { id: string; title: string; invite_token: string; is_public: boolean }
-              | undefined;
-
-            if (room) {
-              if (globalThis.history) {
-                const url = new URL(globalThis.location.href);
-                url.searchParams.set("room", room.invite_token);
-                globalThis.history.replaceState(null, "", url.toString());
-              }
-              setActiveRoomId(room.id);
-              setActiveRoomTitle(room.title);
-              setActiveRoomToken(room.invite_token);
-              setIsPublic(room.is_public);
-              setIsOwner(true);
-              setPhase("drawing");
-              return;
-            }
-          }
-
-          // No existing room — create a new private one
-          const { data, error: err } = await (supabase.rpc as Function)("create_room", {
-            p_title: "My Canvas",
-            p_description: "",
-            p_is_public: false,
-            p_password: null,
-          });
-          if (err || !data?.[0]) {
-            // If room creation fails (e.g. RLS policy for anonymous users),
-            // fall back to local-only drawing mode — canvas still works without sync.
-            fallbackToLocal();
-            return;
-          }
-          const { id, invite_token } = data[0] as { id: string; invite_token: string };
-
+          const room = await findOrCreateRoom(supabase, selfName);
+          if (!room) { fallbackToLocal(); return; }
+          saveToken(room.invite_token); // remember for next visit
           if (globalThis.history) {
             const url = new URL(globalThis.location.href);
-            url.searchParams.set("room", invite_token);
+            url.searchParams.set("room", room.invite_token);
             globalThis.history.replaceState(null, "", url.toString());
           }
-
-          setActiveRoomId(id);
-          setActiveRoomTitle("My Canvas");
-          setActiveRoomToken(invite_token);
-          setIsPublic(false);
+          setActiveRoomId(room.id);
+          setActiveRoomTitle(room.title);
+          setActiveRoomToken(room.invite_token);
+          setIsPublic(room.is_public);
           setIsOwner(true);
           setPhase("drawing");
         })(),
         timeout,
       ]);
     } else {
-      // Token in URL: join the room (idempotent for owner/existing members).
-      // The token may be an invite_token (hex string) or a room UUID (stable link).
+      // Token in URL (?room=xxx): join or re-enter the room.
       setPhase("joining");
       const supabase = createSupabaseBrowserClient();
       void (async () => {
-        // 1. Try invite token first (the normal case)
-        const { data, error: err } = await (supabase.rpc as Function)("join_room_full", {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+
+        // ── Path 1: join_room_by_token ──────────────────────────────────────
+        // The only DB function that accepts invite tokens. Works for new joins
+        // and is idempotent (safe to call again if already a member/owner).
+        // No password here — if the room is password-protected, the user must
+        // arrive via /rooms/[token] which has the password form.
+        const { data: joinData, error: joinErr } = await supabase.rpc("join_room_by_token", {
           p_token: token,
+          p_password: null,
         });
 
-        if (!err && data?.[0]) {
-          const room = data[0] as {
-            room_id: string;
-            room_title: string;
-            is_public: boolean;
-            is_owner: boolean;
-            invite_token: string;
-          };
-          setActiveRoomId(room.room_id);
-          setActiveRoomTitle(room.room_title);
-          setActiveRoomToken(room.invite_token);
-          setIsPublic(room.is_public);
-          setIsOwner(room.is_owner);
-          setPhase("drawing");
-          return;
+        if (!joinErr && joinData?.[0]) {
+          // Fetch full room details now that we have membership (RLS will allow it).
+          const { data: room } = await supabase
+            .from("rooms")
+            .select("id, title, invite_token, is_public, owner_id")
+            .eq("id", joinData[0].room_id)
+            .single();
+          if (room) {
+            saveToken(room.invite_token); // persist so navigating back to / reopens this room
+            setActiveRoomId(room.id);
+            setActiveRoomTitle(room.title);
+            setActiveRoomToken(room.invite_token);
+            setIsPublic(room.is_public);
+            setIsOwner(Boolean(currentUser && room.owner_id === currentUser.id));
+            setPhase("drawing");
+            return;
+          }
         }
 
-        // 2. Direct table query — works even when the RPC is unavailable.
-        //    RLS already allows owners, members, and public-room visitors to read.
-        //    This is the most reliable recovery path on refresh.
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        // ── Path 2: direct table query ──────────────────────────────────────
+        // Catches owners and existing members refreshing the page — they already
+        // have RLS read access so no join RPC is needed.
         const { data: directRoom } = await supabase
           .from("rooms")
           .select("id, title, invite_token, is_public, owner_id")
@@ -271,110 +292,45 @@ export function useRoom({
           .maybeSingle();
 
         if (directRoom) {
-          const userIsOwner = Boolean(currentUser && directRoom.owner_id === currentUser.id);
+          saveToken(directRoom.invite_token); // persist so navigating back to / reopens this room
           setActiveRoomId(directRoom.id);
           setActiveRoomTitle(directRoom.title);
           setActiveRoomToken(directRoom.invite_token);
           setIsPublic(directRoom.is_public);
-          setIsOwner(userIsOwner);
+          setIsOwner(Boolean(currentUser && directRoom.owner_id === currentUser.id));
           setPhase("drawing");
           return;
         }
 
-        // 3. Fallback: token might be a room UUID from a legacy share link.
-        //    join_room_by_id handles public rooms and existing members by ID.
-        const { data: d2, error: e2 } = await (supabase.rpc as Function)("join_room_by_id", {
-          p_room_id: token,
-        });
-
-        if (!e2 && d2?.[0]) {
-          const room2 = d2[0] as {
-            room_id: string;
-            room_title: string;
-            is_public: boolean;
-            invite_token: string;
-          };
-          // Update URL to the invite token so future shares work correctly.
-          if (globalThis.history && room2.invite_token) {
-            const url = new URL(globalThis.location.href);
-            url.searchParams.set("room", room2.invite_token);
-            globalThis.history.replaceState(null, "", url.toString());
-          }
-          setActiveRoomId(room2.room_id);
-          setActiveRoomTitle(room2.room_title);
-          setActiveRoomToken(room2.invite_token);
-          setIsPublic(room2.is_public);
-          setIsOwner(false);
-          setPhase("drawing");
-          return;
-        }
-
-        // All join attempts failed — strip the stale token and fall back to
-        // the create-or-reuse flow so drawing is never permanently blocked.
+        // ── All paths failed ────────────────────────────────────────────────
+        // Token is genuinely invalid or expired (e.g. rotated by owner).
+        // Clear the saved token so future visits don't keep retrying it.
+        clearSavedToken();
         if (globalThis.history) {
           const url = new URL(globalThis.location.href);
           url.searchParams.delete("room");
           globalThis.history.replaceState(null, "", url.toString());
         }
-
-        // Keep roomInitiatedRef=true so the effect doesn't double-fire;
-        // the create/reuse path runs inline below.
         setError("That invite link was invalid or expired — starting a fresh canvas.");
-
-        // Re-run the no-token create flow inline
         setPhase("creating");
-        const supabase2 = createSupabaseBrowserClient();
-        const { data: { user: u2 } } = await supabase2.auth.getUser();
-        if (u2) {
-          const { data: existing2 } = await supabase2
-            .from("rooms")
-            .select("id, title, invite_token, is_public")
-            .eq("owner_id", u2.id)
-            .order("updated_at", { ascending: false })
-            .limit(1);
-          const room2 = existing2?.[0] as
-            | { id: string; title: string; invite_token: string; is_public: boolean }
-            | undefined;
-          if (room2) {
-            if (globalThis.history) {
-              const url2 = new URL(globalThis.location.href);
-              url2.searchParams.set("room", room2.invite_token);
-              globalThis.history.replaceState(null, "", url2.toString());
-            }
-            setActiveRoomId(room2.id);
-            setActiveRoomTitle(room2.title);
-            setActiveRoomToken(room2.invite_token);
-            setIsPublic(room2.is_public);
-            setIsOwner(true);
-            setPhase("drawing");
-            // Clear the transient warning after a moment
-            setTimeout(() => setError(null), 4000);
-            return;
+
+        const room = await findOrCreateRoom(supabase, selfName);
+        if (room) {
+          saveToken(room.invite_token);
+          if (globalThis.history) {
+            const url = new URL(globalThis.location.href);
+            url.searchParams.set("room", room.invite_token);
+            globalThis.history.replaceState(null, "", url.toString());
           }
-        }
-        // No existing room — create a new one
-        const { data: newRoom, error: createErr } = await (supabase2.rpc as Function)("create_room", {
-          p_title: "My Canvas",
-          p_description: "",
-          p_is_public: false,
-          p_password: null,
-        });
-        if (createErr || !newRoom?.[0]) {
+          setActiveRoomId(room.id);
+          setActiveRoomTitle(room.title);
+          setActiveRoomToken(room.invite_token);
+          setIsPublic(room.is_public);
+          setIsOwner(true);
+          setPhase("drawing");
+        } else {
           fallbackToLocal();
-          return;
         }
-        const { id: newId, invite_token: newToken } = newRoom[0] as { id: string; invite_token: string };
-        if (globalThis.history) {
-          const url3 = new URL(globalThis.location.href);
-          url3.searchParams.set("room", newToken);
-          globalThis.history.replaceState(null, "", url3.toString());
-        }
-        setActiveRoomId(newId);
-        setActiveRoomTitle("My Canvas");
-        setActiveRoomToken(newToken);
-        setIsPublic(false);
-        setIsOwner(true);
-        setPhase("drawing");
         setTimeout(() => setError(null), 4000);
       })();
     }

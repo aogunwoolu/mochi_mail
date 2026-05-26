@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Letter } from "@/types";
 import { FiEdit3, FiMail } from "react-icons/fi";
+import { toast } from "@/lib/toast";
 
 interface MailboxPanelProps {
   inbox: Letter[];
@@ -169,9 +170,12 @@ export default function MailboxPanel({
                   <div className={`overflow-hidden rounded-3xl ${mine ? "rounded-br-sm" : "rounded-bl-sm"}`} style={{ background: mine ? "rgba(255,107,157,0.08)" : "rgba(167,139,250,0.1)", border: `1px solid ${mine ? "rgba(255,107,157,0.22)" : "rgba(167,139,250,0.2)"}` }}>
                     {delivered ? (
                       <button
-                        className="block w-full text-left"
+                        className="block w-full text-left btn-smooth"
                         onClick={() => {
-                          if (!letter.read && !mine) markAsRead(letter.id);
+                          if (!letter.read && !mine) {
+                            markAsRead(letter.id);
+                            toast("Letter marked as read", { icon: "mail" });
+                          }
                           setViewLetter(letter);
                         }}
                       >

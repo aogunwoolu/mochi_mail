@@ -173,13 +173,38 @@ body::before {
 
 /* Smooth button transition */
 .btn-smooth {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.16s ease, box-shadow 0.18s ease;
 }
 .btn-smooth:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px) scale(1.04);
+  filter: brightness(1.05);
 }
 .btn-smooth:active {
-  transform: translateY(0px) scale(0.98);
+  transform: translateY(1px) scale(0.91);
+  filter: brightness(0.97);
+  transition-duration: 0.08s;
+}
+
+/* Ripple on active */
+.btn-ripple {
+  position: relative;
+  overflow: hidden;
+}
+.btn-ripple::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.38) 0%, transparent 65%);
+  opacity: 0;
+  transform: scale(0.2);
+  pointer-events: none;
+  border-radius: inherit;
+  transition: transform 0.38s ease-out, opacity 0.38s ease-out;
+}
+.btn-ripple:active::after {
+  opacity: 1;
+  transform: scale(2.2);
+  transition: none;
 }
 
 /* Keyboard accessibility */
@@ -241,20 +266,67 @@ textarea::placeholder {
 
 /* Slide-up animation for asset sheet */
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .animate-slide-up {
-  animation: slide-up 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: slide-up 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* Fade in animation */
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .animate-fade-in {
-  animation: fade-in 0.3s ease-out;
+  animation: fade-in 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Toolbar entrance (left side, scales in from left) */
+@keyframes toolbar-in {
+  from { opacity: 0; transform: translateX(-18px) scale(0.9); }
+  to   { opacity: 1; transform: translateX(0)     scale(1);   }
+}
+.animate-toolbar-in {
+  animation: toolbar-in 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Side panel slide in from left (brush size / text options) */
+@keyframes panel-slide-in {
+  from { opacity: 0; transform: translateX(-12px) scale(0.93); }
+  to   { opacity: 1; transform: translateX(0)     scale(1);    }
+}
+.animate-panel-in {
+  animation: panel-slide-in 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Tool active pop — brief scale bounce on the indicator */
+@keyframes tool-active {
+  0%   { transform: scale(0.8);  opacity: 0.6; }
+  55%  { transform: scale(1.14); opacity: 1;   }
+  100% { transform: scale(1);    opacity: 1;   }
+}
+.animate-tool-active {
+  animation: tool-active 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Toast slide in */
+@keyframes toast-in {
+  0%   { opacity: 0; transform: translateY(18px) scale(0.8);  }
+  60%  { opacity: 1; transform: translateY(-4px) scale(1.04); }
+  100% { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+.animate-toast-in {
+  animation: toast-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Toast slide out */
+@keyframes toast-out {
+  0%   { opacity: 1; transform: translateY(0)    scale(1);   }
+  100% { opacity: 0; transform: translateY(-10px) scale(0.9); }
+}
+.animate-toast-out {
+  animation: toast-out 0.24s cubic-bezier(0.4, 0, 1, 1) both;
 }
 
 /* Float animation for mail */
@@ -310,7 +382,63 @@ textarea::placeholder {
   }
 }
 
-/* Mailbox flag animation */
+/* ── Mochi Toast (legacy alias → new toast-in) ───────────────────────────── */
+.animate-mochi-toast {
+  animation: toast-in 0.32s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ── Wiggle (error shake) ────────────────────────────────────────────────── */
+@keyframes wiggle {
+  0%, 100% { transform: translateX(0); }
+  18%  { transform: translateX(-6px); }
+  36%  { transform: translateX(6px); }
+  54%  { transform: translateX(-5px); }
+  72%  { transform: translateX(4px); }
+  88%  { transform: translateX(-2px); }
+}
+.animate-wiggle {
+  animation: wiggle 0.46s ease-in-out;
+}
+
+/* ── Pop (success pulse) ─────────────────────────────────────────────────── */
+@keyframes pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.2); }
+  70%  { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+.animate-pop {
+  animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ── Ping dot (unread / activity) ───────────────────────────────────────── */
+@keyframes ping-once {
+  0%   { transform: scale(1); opacity: 1; }
+  60%  { transform: scale(2.2); opacity: 0; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.animate-ping-once {
+  animation: ping-once 0.55s ease-out forwards;
+}
+
+/* ── Spin (loading) ──────────────────────────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+/* ── Glow pulse (selected asset indicator) ──────────────────────────────── */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,107,157,0.5); }
+  50%       { box-shadow: 0 0 0 6px rgba(255,107,157,0); }
+}
+.animate-glow-pulse {
+  animation: glow-pulse 1.4s ease-in-out infinite;
+}
+
+/* ── Mailbox flag animation ──────────────────────────────────────────────── */
 @keyframes flag-up {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(-45deg); }

@@ -1,4 +1,5 @@
 
+import { generateId } from "@/lib/id";
 import type { ScrapbookKit, ScrapbookKitElement } from "@/types";
 
 // ── Canvas helpers ─────────────────────────────────────────────────────────────
@@ -387,9 +388,6 @@ export const BUILTIN_KIT_DEFS: BuiltInKitDef[] = [
 
 // ── Rendering helpers ─────────────────────────────────────────────────────────
 
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
 
 function renderElementDef(def: KitElementDef): ScrapbookKitElement {
   const canvas = document.createElement("canvas");

@@ -39,8 +39,8 @@ interface MochiAssets {
   addStamp: (name: string, imageData: string, width: number, height: number) => MailStamp;
   addEnvelope: (name: string, imageData: string, width: number, height: number) => EnvelopeStyle;
   addCustomFont: (name: string, glyphs: Record<string, string>, glyphWidth: number, glyphHeight: number) => CustomFont;
-  placeItem: (asset: Sticker | WashiTape, x: number, y: number) => PlacedSticker;
-  placeTextItem: (text: string, x: number, y: number, color: string, size: number, font: string) => PlacedSticker;
+  placeItem: (asset: Sticker | WashiTape, x: number, y: number, layerIndex?: number) => PlacedSticker;
+  placeTextItem: (text: string, x: number, y: number, color: string, size: number, font: string, layerIndex?: number) => PlacedSticker;
   applySharedCanvasState: (state: { placedItems?: PlacedSticker[]; selectedPaper?: PaperBackground | null }) => void;
   shiftPlacedItems: (dx: number, dy: number) => void;
   updatePlacedItem: (id: string, updates: Partial<PlacedSticker>) => void;
@@ -100,6 +100,8 @@ interface MochiStore {
     tags: string[]
   ) => void;
   publishKitToStore: (kit: ScrapbookKit, authorName: string, authorId: string, tags?: string[]) => StoreItem;
+  removeFromStore: (id: string) => void;
+  updateStoreItem: (id: string, updates: Partial<Pick<StoreItem, "name" | "tags">>) => void;
 }
 
 interface MochiAccountMethods {

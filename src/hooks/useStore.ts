@@ -1,14 +1,12 @@
 
 import { useState, useCallback, useEffect } from "react";
+import { generateId } from "@/lib/id";
 import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity, ScrapbookKit } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { Json } from "@/types/database";
 
 type VisualAsset = Sticker | WashiTape | PaperBackground | MailStamp | EnvelopeStyle;
 
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
 
 const STORE_KEY = "mochimail_store";
 const COLLECTION_KEY = "mochimail_store_collection";
@@ -47,11 +45,6 @@ function loadStore(key: string): StoreItem[] {
   }
 }
 
-function saveStore(items: StoreItem[]) {
-  if (!globalThis.window) return;
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(items)); } catch { /* quota exceeded */ }
-}
-
 function saveStoreByKey(key: string, items: StoreItem[]) {
   if (!globalThis.window) return;
   try { localStorage.setItem(key, JSON.stringify(items)); } catch { /* quota exceeded */ }
@@ -65,11 +58,6 @@ function loadCollection(key: string): string[] {
   } catch {
     return [];
   }
-}
-
-function saveCollection(ids: string[]) {
-  if (!globalThis.window) return;
-  try { localStorage.setItem(COLLECTION_KEY, JSON.stringify(ids)); } catch { /* quota exceeded */ }
 }
 
 function saveCollectionByKey(key: string, ids: string[]) {
@@ -475,6 +463,30 @@ export function useStore(user: ViewerIdentity) {
     [storeKey]
   );
 
+  const removeFromStore = useCallback(
+    (itemId: string) => {
+      setStoreItems((prev) => {
+        const updated = prev.filter((item) => item.id !== itemId);
+        saveStoreByKey(storeKey, updated);
+        return updated;
+      });
+    },
+    [storeKey]
+  );
+
+  const updateStoreItem = useCallback(
+    (itemId: string, updates: Partial<Pick<StoreItem, "name" | "tags">>) => {
+      setStoreItems((prev) => {
+        const updated = prev.map((item) =>
+          item.id === itemId ? { ...item, ...updates } : item
+        );
+        saveStoreByKey(storeKey, updated);
+        return updated;
+      });
+    },
+    [storeKey]
+  );
+
   const addToCollection = useCallback(
     (itemId: string) => {
       if (collection.includes(itemId)) return;
@@ -595,5 +607,7 @@ export function useStore(user: ViewerIdentity) {
     removeFromCollection,
     isInCollection,
     getStoreItemAsAsset,
+    removeFromStore,
+    updateStoreItem,
   };
 }

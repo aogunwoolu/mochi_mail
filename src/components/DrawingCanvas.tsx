@@ -9,7 +9,7 @@ import React, {
   useImperativeHandle,
 } from "react";
 import { getStroke } from "perfect-freehand";
-import { strokeToPath2D } from "@/lib/canvas/strokeUtils";
+import { strokeOpts, strokeToPath2D } from "@/lib/canvas/strokeUtils";
 import {
   BrushSettings,
   CustomFont,
@@ -66,7 +66,7 @@ interface DrawingCanvasProps {
   selectedAsset: Sticker | WashiTape | null;
   selectedPaper: PaperBackground | null;
   customFonts?: CustomFont[];
-  onPlaceAsset: (asset: Sticker | WashiTape, x: number, y: number) => void;
+  onPlaceAsset: (asset: Sticker | WashiTape, x: number, y: number, layerIndex?: number) => void;
   onAddTextItem?: (item: PlacedSticker) => PlacedSticker | void;
   onUpdatePlacedItem?: (id: string, updates: Partial<PlacedSticker>) => void;
   removePlacedItem?: (id: string) => void;
@@ -105,6 +105,16 @@ interface DrawingCanvasProps {
   onUndoStroke?: (strokeId: string) => void;
   /** Fired when the user redoes — sync layer should re-insert the stroke to DB. */
   onRedoStroke?: (stroke: LocalStrokeEntry) => void;
+  /** Fired whenever the selected item changes (id or null). */
+  onItemSelected?: (id: string | null) => void;
+  /** Externally-controlled selected item id. Synced into internal state. */
+  externalSelectedItemId?: string | null;
+  /** Where the pen-drawing layer sits relative to sticker layers. 0 = below all, layerCount = above all. */
+  drawingLayerIndex?: number;
+  /** layerIndex assigned to newly placed stickers/text. */
+  defaultLayerIndex?: number;
+  /** Max layer index the UI should allow (layerCount - 1). */
+  maxLayerIndex?: number;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -132,12 +142,18 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       onStrokeComplete,
       onUndoStroke,
       onRedoStroke,
+      onItemSelected,
+      externalSelectedItemId,
+      drawingLayerIndex = 0,
+      defaultLayerIndex = 0,
+      maxLayerIndex = 4,
     },
     ref,
   ) => {
     // ── Canvas refs ──────────────────────────────────────────────────────────
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const backgroundCanvasRef = useRef<HTMLCanvasElement>(null);
+    const belowOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
     const activeStrokeCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -159,12 +175,21 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     // ── Washi / select drag refs ─────────────────────────────────────────────
     const washiStartRef = useRef<{ x: number; y: number } | null>(null);
-    const preWashiStateRef = useRef<ImageData | null>(null);
     const changedDuringPointerRef = useRef(false);
     const selectionDragRef = useRef<{
       id: string;
       offsetX: number;
       offsetY: number;
+    } | null>(null);
+    const handleDragRef = useRef<{
+      type: "resize" | "rotate";
+      corner?: "nw" | "ne" | "sw" | "se";
+      startMouseX: number;
+      startMouseY: number;
+      startItem: PlacedSticker;
+      canvasRect: DOMRect;
+      scaleX: number;
+      scaleY: number;
     } | null>(null);
 
     // ── Misc ─────────────────────────────────────────────────────────────────
@@ -175,11 +200,37 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       value: string;
     } | null>(null);
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+
+    // Stable ref so selectItem closure never captures stale callback
+    const onItemSelectedRef = useRef(onItemSelected);
+    onItemSelectedRef.current = onItemSelected;
+
+    const selectItem = useCallback((id: string | null) => {
+      setSelectedItemId(id);
+      onItemSelectedRef.current?.(id);
+    }, []);
+
+    // Sync external selection → internal (e.g. layer panel clicking an item)
+    useEffect(() => {
+      if (externalSelectedItemId !== undefined) {
+        setSelectedItemId(externalSelectedItemId ?? null);
+      }
+    }, [externalSelectedItemId]);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const [displayScale, setDisplayScale] = useState(1);
     const assetImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const paperImageRef = useRef<HTMLImageElement | null>(null);
     // Stable ref so getCompositeCanvas closure always sees fresh placedItems
-    const placedItemsRef = useRef(placedItems);
-    placedItemsRef.current = placedItems;
+    // Items sorted by layerIndex (0=back → 4=front) — used for render + hit detection
+    const sortedByLayer = useMemo(
+      () => [...placedItems].sort((a, b) => (a.layerIndex ?? 2) - (b.layerIndex ?? 2)),
+      [placedItems],
+    );
+
+    // Stable ref so getCompositeCanvas / drawAnimatedLayer always see the correct render order
+    const placedItemsRef = useRef(sortedByLayer);
+    placedItemsRef.current = sortedByLayer;
     // DOM refs for animated <img> elements — these are in the live document so the
     // browser advances their GIF frames. drawAnimatedLayer() reads from here.
     const animatedImgRefsRef = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -205,13 +256,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       }
       for (const stroke of localStrokesRef.current) {
         const isEraser = stroke.tool === "eraser";
-        const outline = getStroke(stroke.pts, {
-          size: isEraser ? stroke.size * 2.5 : stroke.size,
-          thinning: isEraser ? 0 : 0.5,
-          smoothing: 0.5,
-          streamline: 0.4,
-          simulatePressure: false,
-        });
+        const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
         if (!outline.length) continue;
         ctx.save();
         if (isEraser) {
@@ -233,13 +278,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       const { tool, color, size } = brushSettings;
       const isEraser = tool === "eraser";
 
-      const stroke = getStroke(pts, {
-        size: isEraser ? size * 2.5 : size,
-        thinning: isEraser ? 0 : 0.5,
-        smoothing: 0.5,
-        streamline: 0.4,
-        simulatePressure: false,
-      });
+      const stroke = getStroke(pts, strokeOpts(size, isEraser));
 
       const path = strokeToPath2D(stroke);
 
@@ -271,14 +310,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         const uncommitted = pts.length - frozenPointCountRef.current;
         if (uncommitted > FREEZE_AT + LIVE_WINDOW) {
           const newFreezeEnd = pts.length - LIVE_WINDOW;
-          const headOutline = getStroke(pts.slice(0, newFreezeEnd), {
-            size,
-            thinning: 0.5,
-            smoothing: 0.5,
-            streamline: 0.4,
-            simulatePressure: false,
-            last: false,
-          });
+          const headOutline = getStroke(pts.slice(0, newFreezeEnd), strokeOpts(size, false, false));
           const mainCtx = canvasRef.current?.getContext("2d");
           if (mainCtx) {
             mainCtx.save();
@@ -292,13 +324,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
         const livePts = activeStrokePointsRef.current;
         const liveStart = Math.max(0, frozenPointCountRef.current - OVERLAP);
-        const liveOutline = getStroke(livePts.slice(liveStart), {
-          size,
-          thinning: 0.5,
-          smoothing: 0.5,
-          streamline: 0.4,
-          simulatePressure: false,
-        });
+        const liveOutline = getStroke(livePts.slice(liveStart), strokeOpts(size, false));
         activeCtx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
         activeCtx.save();
         activeCtx.fillStyle = color;
@@ -317,6 +343,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     // ── Preload asset images ──────────────────────────────────────────────────
     useEffect(() => {
+      const currentIds = new Set(placedItems.map((item) => item.id));
+      for (const id of assetImagesRef.current.keys()) {
+        if (!currentIds.has(id)) assetImagesRef.current.delete(id);
+      }
       placedItems.forEach((item) => {
         if (!assetImagesRef.current.has(item.id)) {
           const img = new Image();
@@ -339,13 +369,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     }, [selectedAsset]);
 
     // ── Overlay rendering (stickers / text) ──────────────────────────────────
-    const renderOverlay = useCallback(() => {
-      const overlay = overlayCanvasRef.current;
-      if (!overlay) return;
-      const ctx = overlay.getContext("2d");
-      if (!ctx) return;
-      ctx.clearRect(0, 0, overlay.width, overlay.height);
-
+    const renderItemsToCtx = useCallback((ctx: CanvasRenderingContext2D, items: PlacedSticker[]) => {
       const wrapLines = (text: string, maxWidth: number, font: string): string[] => {
         ctx.font = font;
         const lines: string[] = [];
@@ -367,7 +391,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         return lines;
       };
 
-      placedItems.forEach((item) => {
+      items.forEach((item) => {
         if (item.type === "text") {
           const fontSize = Math.max(10, item.textSize ?? 28);
           const fontFamily = item.textFont?.startsWith("custom:")
@@ -408,7 +432,24 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           ctx.globalAlpha = 1;
         }
       });
-    }, [placedItems]);
+    }, []);
+
+    const renderOverlay = useCallback(() => {
+      const aboveItems = sortedByLayer.filter((i) => (i.layerIndex ?? 0) >= drawingLayerIndex);
+      const belowItems = sortedByLayer.filter((i) => (i.layerIndex ?? 0) < drawingLayerIndex);
+
+      const above = overlayCanvasRef.current;
+      if (above) {
+        const ctx = above.getContext("2d");
+        if (ctx) { ctx.clearRect(0, 0, above.width, above.height); renderItemsToCtx(ctx, aboveItems); }
+      }
+
+      const below = belowOverlayCanvasRef.current;
+      if (below) {
+        const ctx = below.getContext("2d");
+        if (ctx) { ctx.clearRect(0, 0, below.width, below.height); renderItemsToCtx(ctx, belowItems); }
+      }
+    }, [sortedByLayer, drawingLayerIndex, renderItemsToCtx]);
 
     useEffect(() => { renderOverlay(); }, [renderOverlay]);
 
@@ -491,7 +532,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     useEffect(() => {
       renderBackground();
-    }, [width, height, renderBackground, backgroundOffsetX, backgroundOffsetY]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [width, height]);
 
     // ── Input helpers ─────────────────────────────────────────────────────────
     const getCanvasPoint = useCallback(
@@ -567,11 +609,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         const point = getCanvasPoint(e);
 
         if (brushSettings.tool === "text") {
-          const target = [...placedItems]
+          const target = [...sortedByLayer]
             .reverse()
             .find((item) => pointHitsItem(point.x, point.y, item));
           if (target?.type === "text") {
-            setSelectedItemId(target.id);
+            selectItem(target.id);
             setTextOverlay({ id: target.id, x: target.x, y: target.y, value: target.text ?? "" });
             return;
           }
@@ -595,9 +637,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             textColor: brushSettings.color,
             textSize,
             textFont,
+            layerIndex: defaultLayerIndex,
           };
           const created = onAddTextItem?.(newItem) ?? newItem;
-          setSelectedItemId(created.id);
+          selectItem(created.id);
           setTextOverlay({
             id: created.id,
             x: created.x,
@@ -608,15 +651,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         }
 
         if (brushSettings.tool === "select") {
-          const target = [...placedItems]
+          const target = [...sortedByLayer]
             .reverse()
             .find((item) => pointHitsItem(point.x, point.y, item));
           if (!target) {
-            setSelectedItemId(null);
+            selectItem(null);
             selectionDragRef.current = null;
             return;
           }
-          setSelectedItemId(target.id);
+          selectItem(target.id);
           selectionDragRef.current = {
             id: target.id,
             offsetX: point.x - target.x,
@@ -631,6 +674,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             selectedAsset,
             point.x - selectedAsset.width / 2,
             point.y - selectedAsset.height / 2,
+            defaultLayerIndex,
           );
           return;
         }
@@ -673,7 +717,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       },
       [
         getCanvasPoint,
-        placedItems,
+        sortedByLayer,
         pointHitsItem,
         selectedAsset,
         brushSettings.tool,
@@ -684,6 +728,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         onAddTextItem,
         onPlaceAsset,
         renderLoop,
+        selectItem,
       ],
     );
 
@@ -842,7 +887,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         preStrokeSnapshotRef.current = null;
         isDrawing.current = false;
         washiStartRef.current = null;
-        preWashiStateRef.current = null;
         selectionDragRef.current = null;
         changedDuringPointerRef.current = false;
       },
@@ -912,6 +956,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, w, h);
       }
+      if (belowOverlayCanvasRef.current) ctx.drawImage(belowOverlayCanvasRef.current, 0, 0);
       if (canvasRef.current) ctx.drawImage(canvasRef.current, 0, 0);
       if (activeStrokeCanvasRef.current) ctx.drawImage(activeStrokeCanvasRef.current, 0, 0);
       if (overlayCanvasRef.current) ctx.drawImage(overlayCanvasRef.current, 0, 0);
@@ -989,8 +1034,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (!imageData) return;
+        if (!imageData) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          return;
+        }
         const img = new Image();
         img.onload = () => {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1010,6 +1057,25 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         sessionBaseRef.current = null;
       };
     }, []);
+
+    // Track container CSS size so textarea font size matches canvas render scale
+    useEffect(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const obs = new ResizeObserver(([entry]) => {
+        if (entry.contentRect.width > 0) setDisplayScale(entry.contentRect.width / width);
+      });
+      obs.observe(el);
+      return () => obs.disconnect();
+    }, [width]);
+
+    // Auto-expand textarea height as user types
+    useEffect(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight}px`;
+    }, [textOverlay?.value]);
 
     // ── Imperative handle ─────────────────────────────────────────────────────
     useImperativeHandle(ref, () => ({
@@ -1038,33 +1104,18 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       : null;
 
     const animatedItems = useMemo(
-      () => placedItems.filter((item) => item.isAnimated),
-      [placedItems],
+      () => sortedByLayer.filter((item) => item.isAnimated),
+      [sortedByLayer],
     );
 
     const deleteItem = (id: string) => {
       (removePlacedItem ?? removeAnimatedSticker)?.(id);
-      setSelectedItemId(null);
+      selectItem(null);
     };
 
     const deleteSelectedItem = () => {
       if (!selectedItem) return;
       deleteItem(selectedItem.id);
-    };
-
-    const nudgeScale = (delta: number) => {
-      if (!selectedItem || !onUpdatePlacedItem) return;
-      const nextWidth = Math.max(24, Math.round(selectedItem.width * delta));
-      const nextHeight = Math.max(24, Math.round(selectedItem.height * delta));
-      if (selectedItem.type === "text") {
-        onUpdatePlacedItem(selectedItem.id, {
-          width: nextWidth,
-          height: nextHeight,
-          textSize: Math.max(10, Math.round((selectedItem.textSize ?? 28) * delta)),
-        });
-        return;
-      }
-      onUpdatePlacedItem(selectedItem.id, { width: nextWidth, height: nextHeight });
     };
 
     const nudgeRotation = (delta: number) => {
@@ -1073,6 +1124,105 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         rotation: ((selectedItem.rotation + delta) % 360 + 360) % 360,
       });
     };
+
+    const startHandleDrag = useCallback(
+      (
+        e: React.PointerEvent,
+        type: "resize" | "rotate",
+        corner?: "nw" | "ne" | "sw" | "se",
+      ) => {
+        if (!selectedItem || !onUpdatePlacedItem) return;
+        e.stopPropagation();
+        e.preventDefault();
+        const canvasEl = canvasRef.current;
+        if (!canvasEl) return;
+        const rect = canvasEl.getBoundingClientRect();
+        const scaleX = canvasEl.width / rect.width;
+        const scaleY = canvasEl.height / rect.height;
+        const startItem = { ...selectedItem };
+
+        handleDragRef.current = {
+          type,
+          corner,
+          startMouseX: (e.clientX - rect.left) * scaleX,
+          startMouseY: (e.clientY - rect.top) * scaleY,
+          startItem,
+          canvasRect: rect,
+          scaleX,
+          scaleY,
+        };
+
+        const onMove = (me: PointerEvent) => {
+          const drag = handleDragRef.current;
+          if (!drag) return;
+          const item = drag.startItem;
+          const R = (item.rotation * Math.PI) / 180;
+          const cosR = Math.cos(R);
+          const sinR = Math.sin(R);
+          const cx = item.x + item.width / 2;
+          const cy = item.y + item.height / 2;
+          const mouseX = (me.clientX - drag.canvasRect.left) * drag.scaleX;
+          const mouseY = (me.clientY - drag.canvasRect.top) * drag.scaleY;
+
+          if (drag.type === "rotate") {
+            const startAngle = Math.atan2(drag.startMouseY - cy, drag.startMouseX - cx);
+            const currentAngle = Math.atan2(mouseY - cy, mouseX - cx);
+            const delta = (currentAngle - startAngle) * (180 / Math.PI);
+            onUpdatePlacedItem(item.id, {
+              rotation: ((item.rotation + delta) % 360 + 360) % 360,
+            });
+            return;
+          }
+
+          // Resize: compute anchor corner (opposite of dragged corner)
+          const c = drag.corner!;
+          const getCornerScreen = (which: "nw" | "ne" | "sw" | "se") => {
+            const lx = which[1] === "e" ? item.width / 2 : -item.width / 2;
+            const ly = which[0] === "s" ? item.height / 2 : -item.height / 2;
+            return { x: cx + lx * cosR - ly * sinR, y: cy + lx * sinR + ly * cosR };
+          };
+          const opposites: Record<string, "nw" | "ne" | "sw" | "se"> = {
+            se: "nw", nw: "se", ne: "sw", sw: "ne",
+          };
+          const anchor = getCornerScreen(opposites[c]);
+
+          // d = vector from anchor to mouse in canvas space
+          const dx = mouseX - anchor.x;
+          const dy = mouseY - anchor.y;
+          // Rotate to local space
+          const localDx = dx * cosR + dy * sinR;
+
+          // For SE/NE the dragged corner is to the right (+x); for NW/SW it's to the left (-x)
+          const signX = c[1] === "e" ? 1 : -1;
+          const aspect = item.width / item.height;
+          const newW = Math.max(24, signX * localDx);
+          const newH = Math.max(24, newW / aspect);
+
+          // new center = anchor + rot(R) * (dragged corner's local position from center)
+          const dragLocalX = c[1] === "e" ? newW / 2 : -newW / 2;
+          const dragLocalY = c[0] === "s" ? newH / 2 : -newH / 2;
+          const newCX = anchor.x + dragLocalX * cosR - dragLocalY * sinR;
+          const newCY = anchor.y + dragLocalX * sinR + dragLocalY * cosR;
+
+          onUpdatePlacedItem(item.id, {
+            x: newCX - newW / 2,
+            y: newCY - newH / 2,
+            width: newW,
+            height: newH,
+          });
+        };
+
+        const onUp = () => {
+          handleDragRef.current = null;
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+        };
+
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+      },
+      [selectedItem, onUpdatePlacedItem],
+    );
 
     const commitTextBlock = useCallback(
       (text: string, id: string) => {
@@ -1108,6 +1258,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     // ── Render ────────────────────────────────────────────────────────────────
     return (
       <div
+        ref={containerRef}
         className={fillContainer ? "relative h-full w-full" : "relative"}
         style={fillContainer ? undefined : { width, height }}
       >
@@ -1117,6 +1268,13 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           height={height}
           className="absolute inset-0"
           style={{ imageRendering: "crisp-edges", width: "100%", height: "100%" }}
+        />
+        <canvas
+          ref={belowOverlayCanvasRef}
+          width={width}
+          height={height}
+          className="pointer-events-none absolute inset-0"
+          style={{ width: "100%", height: "100%" }}
         />
         <canvas
           ref={canvasRef}
@@ -1196,73 +1354,165 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
         {brushSettings.tool === "select" && selectedItem !== null ? (
           <>
+            {/* Rotated container: selection border + corner handles + rotation handle */}
             <div
-              className="pointer-events-none absolute border border-dashed"
               style={{
-                left: `${(selectedItem.x / width) * 100}%`,
-                top: `${(selectedItem.y / height) * 100}%`,
+                position: "absolute",
+                left: `${((selectedItem.x + selectedItem.width / 2) / width) * 100}%`,
+                top: `${((selectedItem.y + selectedItem.height / 2) / height) * 100}%`,
                 width: `${(selectedItem.width / width) * 100}%`,
                 height: `${(selectedItem.height / height) * 100}%`,
-                borderColor: "rgba(255,107,157,0.82)",
-                transform: `rotate(${selectedItem.rotation}deg)`,
+                transform: `translate(-50%, -50%) rotate(${selectedItem.rotation}deg)`,
                 transformOrigin: "center",
-                boxShadow: "0 0 0 1px rgba(255,255,255,0.7)",
-              }}
-            />
-            <div
-              className="absolute flex gap-1 rounded-lg border p-1"
-              style={{
-                left: `${((selectedItem.x + selectedItem.width) / width) * 100}%`,
-                top: `${(Math.max(0, selectedItem.y) / height) * 100}%`,
-                background: "rgba(255,255,255,0.92)",
-                borderColor: "rgba(167,139,250,0.35)",
-                boxShadow: "0 2px 12px rgba(143,109,178,0.22)",
+                pointerEvents: "none",
               }}
             >
-              <button
-                className="btn-smooth rounded px-2 py-1 text-xs"
-                style={{ background: "rgba(255,107,157,0.15)", color: "#b4236b" }}
-                onClick={() => nudgeScale(1.12)}
-                title="Enlarge"
+              {/* Selection border */}
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  border: "1.5px dashed rgba(109,40,217,0.6)",
+                  borderRadius: 3,
+                  boxShadow: "0 0 0 1px rgba(255,255,255,0.7)",
+                }}
+              />
+
+              {/* Rotation handle — above top-center */}
+              <div
+                style={{
+                  position: "absolute",
+                  left: "50%",
+                  top: -36,
+                  transform: "translateX(-50%)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  pointerEvents: "auto",
+                  cursor: "grab",
+                  touchAction: "none",
+                  userSelect: "none",
+                }}
+                onPointerDown={(e) => startHandleDrag(e, "rotate")}
               >
-                +
-              </button>
+                <div
+                  style={{
+                    width: 1,
+                    height: 22,
+                    background: "rgba(109,40,217,0.45)",
+                  }}
+                />
+                <div
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: "white",
+                    border: "2px solid rgba(109,40,217,0.75)",
+                    boxShadow: "0 1px 5px rgba(0,0,0,0.2)",
+                    marginTop: -1,
+                  }}
+                />
+              </div>
+
+              {/* Corner resize handles */}
+              {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+                <div
+                  key={corner}
+                  style={{
+                    position: "absolute",
+                    width: 10,
+                    height: 10,
+                    background: "white",
+                    border: "2px solid rgba(109,40,217,0.75)",
+                    borderRadius: 2,
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                    cursor: `${corner}-resize`,
+                    pointerEvents: "auto",
+                    touchAction: "none",
+                    userSelect: "none",
+                    ...(corner[0] === "n" ? { top: -5 } : { bottom: -5 }),
+                    ...(corner[1] === "w" ? { left: -5 } : { right: -5 }),
+                  }}
+                  onPointerDown={(e) => startHandleDrag(e, "resize", corner)}
+                />
+              ))}
+            </div>
+
+            {/* Non-rotated action toolbar — centered below item */}
+            <div
+              className="absolute flex items-center"
+              style={{
+                left: `${((selectedItem.x + selectedItem.width / 2) / width) * 100}%`,
+                top: `${((selectedItem.y + selectedItem.height) / height) * 100}%`,
+                transform: "translate(-50%, 10px)",
+                background: "rgba(255,255,255,0.97)",
+                border: "1px solid rgba(109,40,217,0.15)",
+                borderRadius: 24,
+                padding: "3px 6px",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.1), 0 1px 4px rgba(0,0,0,0.06)",
+                gap: 2,
+                zIndex: 20,
+                userSelect: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {/* Rotate CCW */}
               <button
-                className="btn-smooth rounded px-2 py-1 text-xs"
-                style={{ background: "rgba(103,212,241,0.18)", color: "#0e7490" }}
-                onClick={() => nudgeScale(0.9)}
-                title="Shrink"
-              >
-                -
-              </button>
-              <button
-                className="btn-smooth rounded px-2 py-1 text-xs"
-                style={{ background: "rgba(167,139,250,0.2)", color: "#6d28d9" }}
+                className="btn-smooth flex h-7 w-7 items-center justify-center rounded-full text-base transition-colors hover:bg-violet-50"
+                style={{ color: "#6d28d9" }}
                 onClick={() => nudgeRotation(-15)}
-                title="Rotate left"
+                title="Rotate left 15°"
               >
                 ↺
               </button>
+
+              {/* Rotate CW */}
               <button
-                className="btn-smooth rounded px-2 py-1 text-xs"
-                style={{ background: "rgba(167,139,250,0.2)", color: "#6d28d9" }}
+                className="btn-smooth flex h-7 w-7 items-center justify-center rounded-full text-base transition-colors hover:bg-violet-50"
+                style={{ color: "#6d28d9" }}
                 onClick={() => nudgeRotation(15)}
-                title="Rotate right"
+                title="Rotate right 15°"
               >
                 ↻
               </button>
-              <button
-                className="btn-smooth rounded px-2 py-1 text-xs"
-                style={{ background: "rgba(255,107,157,0.15)", color: "#b4236b" }}
-                onClick={deleteSelectedItem}
-                title="Remove"
-              >
-                x
-              </button>
-              {selectedItem.type === "text" ? (
+
+              <div style={{ width: 1, height: 18, background: "rgba(0,0,0,0.1)", margin: "0 2px" }} />
+
+              {/* Opacity slider — for stickers and washi */}
+              {selectedItem.type !== "text" && (
+                <div className="flex items-center gap-1" style={{ padding: "0 2px" }}>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      color: "#9ca3af",
+                      letterSpacing: "0.04em",
+                      fontFamily: "monospace",
+                      lineHeight: 1,
+                    }}
+                  >
+                    α
+                  </span>
+                  <input
+                    type="range"
+                    min={0.1}
+                    max={1}
+                    step={0.05}
+                    value={selectedItem.opacity}
+                    onChange={(e) =>
+                      onUpdatePlacedItem?.(selectedItem.id, {
+                        opacity: parseFloat(e.target.value),
+                      })
+                    }
+                    style={{ width: 52, accentColor: "#7c3aed", cursor: "pointer" }}
+                  />
+                </div>
+              )}
+
+              {/* Edit text — text items only */}
+              {selectedItem.type === "text" && (
                 <button
-                  className="btn-smooth rounded px-2 py-1 text-xs"
-                  style={{ background: "rgba(249,168,212,0.22)", color: "#9d174d" }}
+                  className="btn-smooth flex h-7 w-7 items-center justify-center rounded-full text-sm transition-colors hover:bg-pink-50"
+                  style={{ color: "#db2777" }}
                   onClick={() =>
                     setTextOverlay({
                       id: selectedItem.id,
@@ -1273,51 +1523,138 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                   }
                   title="Edit text"
                 >
-                  ✎
+                  ✏
                 </button>
+              )}
+
+              {/* Layer order buttons — move item between layer buckets (0=back … 4=front) */}
+              {onUpdatePlacedItem ? (
+                <>
+                  <div style={{ width: 1, height: 18, background: "rgba(0,0,0,0.1)", margin: "0 2px" }} />
+                  {(
+                    [
+                      { label: "↑↑", title: `Send to front (Layer ${maxLayerIndex + 1})`, newLayer: () => maxLayerIndex },
+                      { label: "↑",  title: "Send forward one layer",  newLayer: () => Math.min(maxLayerIndex, (selectedItem.layerIndex ?? 0) + 1) },
+                      { label: "↓",  title: "Send backward one layer", newLayer: () => Math.max(0, (selectedItem.layerIndex ?? 0) - 1) },
+                      { label: "↓↓", title: "Send to back (Layer 1)",  newLayer: () => 0 },
+                    ] as { label: string; title: string; newLayer: () => number }[]
+                  ).map(({ label, title, newLayer }) => (
+                    <button
+                      key={title}
+                      className="btn-smooth flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-colors hover:bg-violet-50"
+                      style={{ color: "#6d28d9", fontFamily: "monospace" }}
+                      onClick={() => onUpdatePlacedItem(selectedItem.id, { layerIndex: newLayer() })}
+                      title={title}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </>
               ) : null}
+
+              <div style={{ width: 1, height: 18, background: "rgba(0,0,0,0.1)", margin: "0 2px" }} />
+
+              {/* Delete */}
+              <button
+                className="btn-smooth flex h-7 w-7 items-center justify-center rounded-full text-lg font-medium transition-colors hover:bg-red-50"
+                style={{ color: "#dc2626" }}
+                onClick={deleteSelectedItem}
+                title="Delete"
+              >
+                ×
+              </button>
             </div>
           </>
         ) : null}
 
-        {textOverlay !== null && (
-          <textarea
-            autoFocus
-            value={textOverlay.value}
-            onChange={(e) =>
-              setTextOverlay((prev) => (prev ? { ...prev, value: e.target.value } : null))
-            }
-            onBlur={() => {
-              if (textOverlay.value.trim()) commitTextBlock(textOverlay.value, textOverlay.id);
-              setTextOverlay(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (textOverlay.value.trim()) commitTextBlock(textOverlay.value, textOverlay.id);
-                setTextOverlay(null);
-              } else if (e.key === "Escape") {
-                setTextOverlay(null);
-              }
-            }}
+        {brushSettings.tool === "text" && textOverlay === null && (
+          <div
+            className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2"
             style={{
-              position: "absolute",
-              left: `${(textOverlay.x / width) * 100}%`,
-              top: `${((textOverlay.y - textFontSize) / height) * 100}%`,
-              minWidth: "12%",
-              minHeight: "7%",
-              fontSize: `clamp(10px, ${(textFontSize / width) * 100}vw, 64px)`,
-              fontFamily: textFontFamily,
-              color: brushSettings.color,
-              background: "rgba(255,255,255,0.04)",
-              border: "1px dashed rgba(167,139,250,0.55)",
-              borderRadius: 4,
-              padding: "4px 6px",
-              outline: "none",
-              lineHeight: 1.4,
-              resize: "both",
+              background: "rgba(167,139,250,0.12)",
+              border: "1px dashed rgba(167,139,250,0.5)",
+              borderRadius: 20,
+              padding: "3px 14px",
+              fontSize: 11,
+              color: "rgba(109,40,217,0.85)",
+              fontFamily: "monospace",
+              whiteSpace: "nowrap",
+              zIndex: 10,
             }}
-          />
+          >
+            Click anywhere to add text · Enter for new line · Ctrl+Enter to finish
+          </div>
+        )}
+
+        {textOverlay !== null && (
+          <>
+            <textarea
+              ref={textareaRef}
+              autoFocus
+              value={textOverlay.value}
+              placeholder="Type here…"
+              onChange={(e) =>
+                setTextOverlay((prev) => (prev ? { ...prev, value: e.target.value } : null))
+              }
+              onBlur={() => {
+                const txt = textOverlay.value.trim();
+                if (txt) commitTextBlock(txt, textOverlay.id);
+                else (removePlacedItem ?? removeAnimatedSticker)?.(textOverlay.id);
+                setTextOverlay(null);
+                selectItem(null);
+              }}
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" && (e.ctrlKey || e.metaKey)) || e.key === "Escape") {
+                  e.preventDefault();
+                  const txt = textOverlay.value.trim();
+                  if (txt) commitTextBlock(txt, textOverlay.id);
+                  else (removePlacedItem ?? removeAnimatedSticker)?.(textOverlay.id);
+                  setTextOverlay(null);
+                  selectItem(null);
+                }
+                // plain Enter inserts a newline (default textarea behaviour)
+              }}
+              style={{
+                position: "absolute",
+                left: `${(textOverlay.x / width) * 100}%`,
+                top: `${(textOverlay.y / height) * 100}%`,
+                width: `${Math.max(160, textFontSize * 8 * displayScale)}px`,
+                minHeight: `${Math.max(32, textFontSize * 2 * displayScale)}px`,
+                fontSize: `${Math.max(10, Math.round(textFontSize * displayScale))}px`,
+                fontFamily: textFontFamily,
+                color: brushSettings.color,
+                background: "rgba(255,255,255,0.94)",
+                border: "2px solid rgba(167,139,250,0.7)",
+                borderRadius: 8,
+                padding: "6px 10px",
+                outline: "none",
+                lineHeight: 1.45,
+                resize: "none",
+                overflow: "hidden",
+                boxShadow: "0 4px 20px rgba(167,139,250,0.25), 0 1px 6px rgba(0,0,0,0.08)",
+                zIndex: 50,
+                whiteSpace: "pre-wrap",
+              }}
+            />
+            <div
+              className="pointer-events-none absolute"
+              style={{
+                left: `${(textOverlay.x / width) * 100}%`,
+                top: `calc(${(textOverlay.y / height) * 100}% - 22px)`,
+                fontSize: 10,
+                color: "rgba(109,40,217,0.7)",
+                fontFamily: "monospace",
+                whiteSpace: "nowrap",
+                background: "rgba(255,255,255,0.85)",
+                borderRadius: 6,
+                padding: "1px 7px",
+                border: "1px solid rgba(167,139,250,0.3)",
+                zIndex: 50,
+              }}
+            >
+              Ctrl+Enter to finish · Esc to cancel
+            </div>
+          </>
         )}
       </div>
     );

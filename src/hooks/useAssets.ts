@@ -1,221 +1,108 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { generateId } from "@/lib/id";
 import { Sticker, WashiTape, PlacedSticker, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity, ScrapbookKit } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { Json } from "@/types/database";
 
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+// Runs `draw` on a new canvas and returns a PNG data URL (or "" if canvas is unavailable).
+function renderToCanvas(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  draw(ctx);
+  return canvas.toDataURL("image/png");
 }
 
-function createPaperPattern(
-  name: string,
-  base: string,
-  lineMinor: string,
-  lineMajor: string
-): PaperBackground {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1200;
-  canvas.height = 800;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return {
-      id: generateId(),
-      name,
-      imageData: "",
-      width: canvas.width,
-      height: canvas.height,
-    };
-  }
+const PAPER_W = 1200;
+const PAPER_H = 800;
 
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const step = 24;
-  const majorEvery = 5;
-  for (let y = 0, row = 0; y <= canvas.height; y += step, row += 1) {
-    ctx.strokeStyle = row % majorEvery === 0 ? lineMajor : lineMinor;
-    ctx.lineWidth = row % majorEvery === 0 ? 1.4 : 0.7;
-    ctx.beginPath();
-    ctx.moveTo(0, y + 0.5);
-    ctx.lineTo(canvas.width, y + 0.5);
-    ctx.stroke();
-  }
-  for (let x = 0, col = 0; x <= canvas.width; x += step, col += 1) {
-    ctx.strokeStyle = col % majorEvery === 0 ? lineMajor : lineMinor;
-    ctx.lineWidth = col % majorEvery === 0 ? 1.4 : 0.7;
-    ctx.beginPath();
-    ctx.moveTo(x + 0.5, 0);
-    ctx.lineTo(x + 0.5, canvas.height);
-    ctx.stroke();
-  }
-
-  return {
-    id: generateId(),
-    name,
-    imageData: canvas.toDataURL("image/png"),
-    width: canvas.width,
-    height: canvas.height,
-  };
+function createPaperPattern(name: string, base: string, lineMinor: string, lineMajor: string): PaperBackground {
+  const imageData = renderToCanvas(PAPER_W, PAPER_H, (ctx) => {
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, PAPER_W, PAPER_H);
+    const step = 24;
+    const majorEvery = 5;
+    for (let y = 0, row = 0; y <= PAPER_H; y += step, row += 1) {
+      ctx.strokeStyle = row % majorEvery === 0 ? lineMajor : lineMinor;
+      ctx.lineWidth = row % majorEvery === 0 ? 1.4 : 0.7;
+      ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(PAPER_W, y + 0.5); ctx.stroke();
+    }
+    for (let x = 0, col = 0; x <= PAPER_W; x += step, col += 1) {
+      ctx.strokeStyle = col % majorEvery === 0 ? lineMajor : lineMinor;
+      ctx.lineWidth = col % majorEvery === 0 ? 1.4 : 0.7;
+      ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, PAPER_H); ctx.stroke();
+    }
+  });
+  return { id: generateId(), name, imageData, width: PAPER_W, height: PAPER_H };
 }
 
 function createLinedPaper(name: string, base: string, lineColor: string, accentColor: string): PaperBackground {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1200;
-  canvas.height = 800;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return {
-      id: generateId(),
-      name,
-      imageData: "",
-      width: canvas.width,
-      height: canvas.height,
-    };
-  }
-
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.strokeStyle = accentColor;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(110.5, 0);
-  ctx.lineTo(110.5, canvas.height);
-  ctx.stroke();
-
-  for (let y = 92; y < canvas.height; y += 42) {
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 1.25;
-    ctx.beginPath();
-    ctx.moveTo(0, y + 0.5);
-    ctx.lineTo(canvas.width, y + 0.5);
-    ctx.stroke();
-  }
-
-  return {
-    id: generateId(),
-    name,
-    imageData: canvas.toDataURL("image/png"),
-    width: canvas.width,
-    height: canvas.height,
-  };
+  const imageData = renderToCanvas(PAPER_W, PAPER_H, (ctx) => {
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, PAPER_W, PAPER_H);
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(110.5, 0); ctx.lineTo(110.5, PAPER_H); ctx.stroke();
+    for (let y = 92; y < PAPER_H; y += 42) {
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 1.25;
+      ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(PAPER_W, y + 0.5); ctx.stroke();
+    }
+  });
+  return { id: generateId(), name, imageData, width: PAPER_W, height: PAPER_H };
 }
 
 function createDottedPaper(name: string, base: string, dotColor: string): PaperBackground {
-  const canvas = document.createElement("canvas");
-  canvas.width = 1200;
-  canvas.height = 800;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return {
-      id: generateId(),
-      name,
-      imageData: "",
-      width: canvas.width,
-      height: canvas.height,
-    };
-  }
-
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = dotColor;
-  for (let y = 28; y < canvas.height; y += 32) {
-    for (let x = 28; x < canvas.width; x += 32) {
-      ctx.beginPath();
-      ctx.arc(x, y, 1.8, 0, Math.PI * 2);
-      ctx.fill();
+  const imageData = renderToCanvas(PAPER_W, PAPER_H, (ctx) => {
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, PAPER_W, PAPER_H);
+    ctx.fillStyle = dotColor;
+    for (let y = 28; y < PAPER_H; y += 32) {
+      for (let x = 28; x < PAPER_W; x += 32) {
+        ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fill();
+      }
     }
-  }
-
-  return {
-    id: generateId(),
-    name,
-    imageData: canvas.toDataURL("image/png"),
-    width: canvas.width,
-    height: canvas.height,
-  };
+  });
+  return { id: generateId(), name, imageData, width: PAPER_W, height: PAPER_H };
 }
 
 function createStampAsset(name: string, glyph: string, bgA: string, bgB: string): MailStamp {
-  const canvas = document.createElement("canvas");
-  canvas.width = 140;
-  canvas.height = 160;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return { id: generateId(), name, imageData: "", width: canvas.width, height: canvas.height };
-  }
-
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, bgA);
-  gradient.addColorStop(1, bgB);
-  ctx.fillStyle = gradient;
-  ctx.fillRect(8, 8, canvas.width - 16, canvas.height - 16);
-
-  ctx.setLineDash([10, 6]);
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  ctx.lineWidth = 4;
-  ctx.strokeRect(14, 14, canvas.width - 28, canvas.height - 28);
-  ctx.setLineDash([]);
-
-  ctx.font = "64px serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "rgba(255,255,255,0.96)";
-  ctx.fillText(glyph, canvas.width / 2, canvas.height / 2 + 4);
-
-  return {
-    id: generateId(),
-    name,
-    imageData: canvas.toDataURL("image/png"),
-    width: canvas.width,
-    height: canvas.height,
-  };
+  const imageData = renderToCanvas(140, 160, (ctx) => {
+    const gradient = ctx.createLinearGradient(0, 0, 140, 160);
+    gradient.addColorStop(0, bgA);
+    gradient.addColorStop(1, bgB);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(8, 8, 124, 144);
+    ctx.setLineDash([10, 6]);
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(14, 14, 112, 132);
+    ctx.setLineDash([]);
+    ctx.font = "64px serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(255,255,255,0.96)";
+    ctx.fillText(glyph, 70, 84);
+  });
+  return { id: generateId(), name, imageData, width: 140, height: 160 };
 }
 
 function createEnvelopeAsset(name: string, body: string, flap: string, accent: string): EnvelopeStyle {
-  const canvas = document.createElement("canvas");
-  canvas.width = 820;
-  canvas.height = 520;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    return { id: generateId(), name, imageData: "", width: canvas.width, height: canvas.height };
-  }
-
-  ctx.fillStyle = body;
-  ctx.beginPath();
-  ctx.roundRect(40, 110, 740, 320, 28);
-  ctx.fill();
-
-  ctx.fillStyle = flap;
-  ctx.beginPath();
-  ctx.moveTo(60, 128);
-  ctx.lineTo(410, 315);
-  ctx.lineTo(760, 128);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = "rgba(255,255,255,0.45)";
-  ctx.beginPath();
-  ctx.moveTo(60, 408);
-  ctx.lineTo(410, 236);
-  ctx.lineTo(760, 408);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.roundRect(40, 110, 740, 320, 28);
-  ctx.stroke();
-
-  return {
-    id: generateId(),
-    name,
-    imageData: canvas.toDataURL("image/png"),
-    width: canvas.width,
-    height: canvas.height,
-  };
+  const imageData = renderToCanvas(820, 520, (ctx) => {
+    ctx.fillStyle = body;
+    ctx.beginPath(); ctx.roundRect(40, 110, 740, 320, 28); ctx.fill();
+    ctx.fillStyle = flap;
+    ctx.beginPath(); ctx.moveTo(60, 128); ctx.lineTo(410, 315); ctx.lineTo(760, 128); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.beginPath(); ctx.moveTo(60, 408); ctx.lineTo(410, 236); ctx.lineTo(760, 408); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.roundRect(40, 110, 740, 320, 28); ctx.stroke();
+  });
+  return { id: generateId(), name, imageData, width: 820, height: 520 };
 }
 
 function getDefaultPapers(): PaperBackground[] {
@@ -496,7 +383,7 @@ export function useAssets(user: ViewerIdentity) {
     return font;
   }, []);
 
-  const placeItem = useCallback((asset: Sticker | WashiTape, x: number, y: number) => {
+  const placeItem = useCallback((asset: Sticker | WashiTape, x: number, y: number, layerIndex?: number) => {
     const isWashi = "opacity" in asset;
     const placed: PlacedSticker = {
       id: generateId(),
@@ -510,12 +397,13 @@ export function useAssets(user: ViewerIdentity) {
       type: isWashi ? "washi" : "sticker",
       opacity: isWashi ? asset.opacity : 1,
       isAnimated: !isWashi && Boolean(asset.isAnimated),
+      ...(layerIndex !== undefined ? { layerIndex } : {}),
     };
     setPlacedItems((prev) => [...prev, placed]);
     return placed;
   }, []);
 
-  const placeTextItem = useCallback((text: string, x: number, y: number, color: string, size: number, font: string) => {
+  const placeTextItem = useCallback((text: string, x: number, y: number, color: string, size: number, font: string, layerIndex?: number) => {
     const safeText = text.trim();
     const lines = safeText ? safeText.split("\n") : [""];
     const width = Math.max(180, Math.min(680, Math.max(...lines.map((line) => line.length), 6) * size * 0.62));
@@ -535,6 +423,7 @@ export function useAssets(user: ViewerIdentity) {
       textColor: color,
       textSize: size,
       textFont: font,
+      ...(layerIndex !== undefined ? { layerIndex } : {}),
     };
     setPlacedItems((prev) => [...prev, placed]);
     return placed;
@@ -610,7 +499,7 @@ export function useAssets(user: ViewerIdentity) {
       setPlacedItems(state.placedItems);
     }
 
-    if (state.selectedPaper !== null && state.selectedPaper !== undefined) {
+    if (state.selectedPaper != null) {
       const selected: PaperBackground = state.selectedPaper;
       setPapers((prev) => {
         if (prev.some((paper) => paper.id === selected.id)) return prev;

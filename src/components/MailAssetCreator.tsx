@@ -149,7 +149,9 @@ export default function MailAssetCreator({
         </button>
       </div>
 
+      <label htmlFor="asset-name" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Name</label>
       <input
+        id="asset-name"
         type="text"
         value={name}
         onChange={(e) => setName(e.target.value)}

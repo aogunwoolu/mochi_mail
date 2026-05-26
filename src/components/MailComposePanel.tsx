@@ -1,11 +1,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DrawingCanvas, { DrawingCanvasHandle } from "./DrawingCanvas";
+import LayerPanel from "./LayerPanel";
 import FontTracerCreator from "./FontTracerCreator";
 import StickerCreator from "./StickerCreator";
 import WashiTapeCreator from "./WashiTapeCreator";
 import MailAssetCreator from "./MailAssetCreator";
-import { FiArrowLeft, FiClock, FiEdit3, FiImage, FiMove, FiPenTool, FiRotateCcw, FiRotateCw, FiSend, FiTrash2, FiType } from "react-icons/fi";
+import { FiArrowLeft, FiClock, FiLayers, FiMove, FiPenTool, FiRotateCcw, FiRotateCw, FiSend, FiTrash2, FiType } from "react-icons/fi";
+import { toast } from "@/lib/toast";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   BrushSettings,
@@ -212,6 +214,12 @@ export default function MailComposePanel({
     stampImageData?: string;
     stampStyle: string;
   } | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  const [receiverShake, setReceiverShake] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [showLayerPanel, setShowLayerPanel] = useState(true);
+  const [layerCount, setLayerCount] = useState(1);
+  const [drawingLayerIndex, setDrawingLayerIndex] = useState(0);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
@@ -250,7 +258,7 @@ export default function MailComposePanel({
     setEnvelopePlacedItems(updater);
   }, [activeSurface]);
 
-  const placeItem = useCallback((asset: Sticker | WashiTape, x: number, y: number) => {
+  const placeItem = useCallback((asset: Sticker | WashiTape, x: number, y: number, layerIndex?: number) => {
     const isWashi = "opacity" in asset;
     const nextItem: PlacedSticker = {
       id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
@@ -264,6 +272,7 @@ export default function MailComposePanel({
       type: isWashi ? "washi" : "sticker",
       opacity: isWashi ? asset.opacity : 1,
       isAnimated: !isWashi && Boolean(asset.isAnimated),
+      ...(layerIndex !== undefined ? { layerIndex } : {}),
     };
     setActivePlacedItems((prev) => [...prev, nextItem]);
   }, [setActivePlacedItems]);
@@ -281,9 +290,20 @@ export default function MailComposePanel({
     return item;
   }, [setActivePlacedItems]);
 
+  const handleItemSelected = useCallback((id: string | null) => {
+    setSelectedItemId(id);
+  }, []);
+
+  // Reset selection when switching surfaces so stale ids don't linger
+  const handleSurfaceChange = useCallback((surface: ComposeSurface) => {
+    setActiveSurface(surface);
+    setSelectedItemId(null);
+  }, []);
+
   const clearActiveSurface = useCallback(() => {
     activeCanvasRef.current?.clearCanvas();
     setActivePlacedItems(() => []);
+    toast("Canvas cleared!", { icon: "clear" });
   }, [activeCanvasRef, setActivePlacedItems]);
 
   const searchGifs = useCallback(async () => {
@@ -332,6 +352,7 @@ export default function MailComposePanel({
     const image = await loadImage(src);
     onSaveSticker(title?.trim() || "Mail GIF", src, image.naturalWidth || 180, image.naturalHeight || 180, true);
     setToolDrawer("stickers");
+    toast("GIF saved as sticker!", { icon: "image" });
   }, [onSaveSticker]);
 
   const createLetterCanvas = useCallback(() => {
@@ -390,52 +411,65 @@ export default function MailComposePanel({
   }, [receiver, selectedStamp, stampStyle]);
 
   const handleSend = useCallback(async () => {
-    if (!receiver.trim()) return;
-    const letterCanvas = createLetterCanvas();
-    const envelopeCanvas = await createEnvelopeCanvas();
-    if (!letterCanvas || !envelopeCanvas) return;
+    if (!receiver.trim()) {
+      setReceiverShake(true);
+      globalThis.setTimeout(() => setReceiverShake(false), 500);
+      toast("Add a recipient first!", { variant: "error", icon: "warning" });
+      return;
+    }
+    setIsSending(true);
+    try {
+      const letterCanvas = createLetterCanvas();
+      const envelopeCanvas = await createEnvelopeCanvas();
+      if (!letterCanvas || !envelopeCanvas) return;
 
-    const letterImageData = letterCanvas.toDataURL("image/png");
-    const envelopeImageData = envelopeCanvas.toDataURL("image/png");
-    const payload: LetterSendPayload = {
-      receiverName: receiver.trim(),
-      imageData: letterImageData,
-      speed,
-      stampStyle,
-      stampImageData: selectedStamp?.imageData ?? makeEmojiStampPreview(stampStyle),
-      stampName: selectedStamp?.name ?? `Emoji ${stampStyle}`,
-      envelopeImageData,
-      envelopeName: selectedEnvelope?.name ?? "Envelope",
-    };
+      const letterImageData = letterCanvas.toDataURL("image/png");
+      const envelopeImageData = envelopeCanvas.toDataURL("image/png");
+      const payload: LetterSendPayload = {
+        receiverName: receiver.trim(),
+        imageData: letterImageData,
+        speed,
+        stampStyle,
+        stampImageData: selectedStamp?.imageData ?? makeEmojiStampPreview(stampStyle),
+        stampName: selectedStamp?.name ?? `Emoji ${stampStyle}`,
+        envelopeImageData,
+        envelopeName: selectedEnvelope?.name ?? "Envelope",
+      };
 
-    onSend(payload);
-    setSendPreview({
-      receiverName: receiver.trim(),
-      letterImageData,
-      envelopeImageData,
-      stampImageData: payload.stampImageData,
-      stampStyle,
-    });
+      onSend(payload);
+      toast(`Letter sent to ${receiver.trim()}!`, { icon: "mail" });
+      setSendPreview({
+        receiverName: receiver.trim(),
+        letterImageData,
+        envelopeImageData,
+        stampImageData: payload.stampImageData,
+        stampStyle,
+      });
 
-    globalThis.setTimeout(() => {
-      setSendPreview(null);
-      setReceiver("");
-      setLetterPlacedItems([]);
-      setEnvelopePlacedItems([]);
-      letterCanvasRef.current?.clearCanvas();
-      envelopeCanvasRef.current?.clearCanvas();
-      onBack?.();
-    }, 1800);
+      globalThis.setTimeout(() => {
+        setSendPreview(null);
+        setReceiver("");
+        setLetterPlacedItems([]);
+        setEnvelopePlacedItems([]);
+        letterCanvasRef.current?.clearCanvas();
+        envelopeCanvasRef.current?.clearCanvas();
+        onBack?.();
+      }, 1800);
+    } finally {
+      setIsSending(false);
+    }
   }, [createEnvelopeCanvas, createLetterCanvas, onBack, onSend, receiver, selectedEnvelope?.name, selectedStamp, speed, stampStyle]);
 
   const handleSelectSticker = useCallback((sticker: Sticker) => {
     setSelectedAsset(sticker);
     setBrushSettings((prev) => ({ ...prev, tool: "sticker" }));
+    toast("Sticker selected — click to place!", { icon: "sticker" });
   }, []);
 
   const handleSelectWashi = useCallback((washi: WashiTape) => {
     setSelectedAsset(washi);
     setBrushSettings((prev) => ({ ...prev, tool: "washi" }));
+    toast("Washi tape selected — click to place!", { icon: "ribbon" });
   }, []);
 
   const activeFontOptions = useMemo(
@@ -518,7 +552,8 @@ export default function MailComposePanel({
                 placeholder="Recipient name..."
                 maxLength={30}
                 autoComplete="off"
-                className="input-soft w-full px-3 py-2 text-sm outline-none"
+                className={`input-soft w-full px-3 py-2 text-sm outline-none transition-all${receiverShake ? " animate-wiggle" : ""}`}
+                style={receiverShake ? { borderColor: "rgba(231,76,126,0.7)", boxShadow: "0 0 0 3px rgba(231,76,126,0.2)" } : undefined}
               />
               {showSuggestions && filteredSuggestions.length > 0 ? (
                 <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-2xl border shadow-xl" style={{ background: "var(--glass)", borderColor: "var(--border-strong)", backdropFilter: "blur(12px)" }}>
@@ -555,23 +590,37 @@ export default function MailComposePanel({
                 Decorate both the letter and its envelope before you send it.
               </p>
             </div>
-            <div className="flex rounded-2xl p-1" style={{ background: "var(--surface)" }}>
-              {(["letter", "envelope"] as const).map((surface) => {
-                const active = activeSurface === surface;
-                return (
-                  <button
-                    key={surface}
-                    onClick={() => setActiveSurface(surface)}
-                    className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em]"
-                    style={{
-                      background: active ? "rgba(255,107,157,0.14)" : "transparent",
-                      color: active ? "var(--pink)" : "var(--muted)",
-                    }}
-                  >
-                    {surface === "letter" ? "Letter" : "Envelope"}
-                  </button>
-                );
-              })}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowLayerPanel((v) => !v)}
+                title={showLayerPanel ? "Hide layers" : "Show layers"}
+                className="btn-smooth inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold"
+                style={{
+                  background: showLayerPanel ? "rgba(167,139,250,0.16)" : "var(--surface)",
+                  color: showLayerPanel ? "var(--lavender)" : "var(--muted)",
+                }}
+              >
+                <FiLayers size={13} />
+                Layers
+              </button>
+              <div className="flex rounded-2xl p-1" style={{ background: "var(--surface)" }}>
+                {(["letter", "envelope"] as const).map((surface) => {
+                  const active = activeSurface === surface;
+                  return (
+                    <button
+                      key={surface}
+                      onClick={() => handleSurfaceChange(surface)}
+                      className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em]"
+                      style={{
+                        background: active ? "rgba(255,107,157,0.14)" : "transparent",
+                        color: active ? "var(--pink)" : "var(--muted)",
+                      }}
+                    >
+                      {surface === "letter" ? "Letter" : "Envelope"}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -588,6 +637,8 @@ export default function MailComposePanel({
                 onAddTextItem={placeTextItem}
                 removePlacedItem={removeAnimatedSticker}
                 onUpdatePlacedItem={updatePlacedItem}
+                onItemSelected={handleItemSelected}
+                externalSelectedItemId={activeSurface === "letter" ? selectedItemId : null}
                 width={1200}
                 height={900}
                 fillContainer
@@ -605,6 +656,8 @@ export default function MailComposePanel({
                 onAddTextItem={placeTextItem}
                 removePlacedItem={removeAnimatedSticker}
                 onUpdatePlacedItem={updatePlacedItem}
+                onItemSelected={handleItemSelected}
+                externalSelectedItemId={activeSurface === "envelope" ? selectedItemId : null}
                 width={1200}
                 height={900}
                 fillContainer
@@ -623,6 +676,21 @@ export default function MailComposePanel({
                 )}
               </div>
             </div>
+
+            {/* Layer panel — overlays the canvas, always rendered so it tracks both surfaces */}
+            {showLayerPanel && (
+              <LayerPanel
+                items={activeSurface === "letter" ? letterPlacedItems : envelopePlacedItems}
+                selectedItemId={selectedItemId}
+                onSelectItem={(id) => {
+                  setSelectedItemId(id);
+                  if (id) setBrushSettings((prev) => ({ ...prev, tool: "select" }));
+                }}
+                onUpdateItem={updatePlacedItem}
+                onDeleteItem={removeAnimatedSticker}
+                onHide={() => setShowLayerPanel(false)}
+              />
+            )}
           </div>
         </div>
 
@@ -758,7 +826,7 @@ export default function MailComposePanel({
                     <div className="grid grid-cols-2 gap-2">
                       {papers.map((paper) => (
                         <div key={paper.id} className="group relative">
-                          <button onClick={() => setSelectedPaper(paper)} className="btn-smooth overflow-hidden rounded-2xl border" style={{ borderColor: selectedPaper?.id === paper.id ? "rgba(255,107,157,0.45)" : "var(--border)" }}>
+                          <button onClick={() => { setSelectedPaper(paper); toast(`Paper: ${paper.name}`, { icon: "sparkle" }); }} className="btn-smooth overflow-hidden rounded-2xl border" style={{ borderColor: selectedPaper?.id === paper.id ? "rgba(255,107,157,0.45)" : "var(--border)" }}>
                             <img src={paper.imageData} alt={paper.name} className="aspect-[4/3] w-full object-cover" />
                           </button>
                           <div className="mt-1 truncate text-[11px] font-medium">{paper.name}</div>
@@ -775,7 +843,7 @@ export default function MailComposePanel({
                     <div className="space-y-2">
                       {envelopes.map((envelope) => (
                         <div key={envelope.id} className="group relative">
-                          <button onClick={() => setSelectedEnvelope(envelope)} className="btn-smooth overflow-hidden rounded-2xl border" style={{ borderColor: selectedEnvelope?.id === envelope.id ? "rgba(255,107,157,0.45)" : "var(--border)" }}>
+                          <button onClick={() => { setSelectedEnvelope(envelope); toast(`Envelope: ${envelope.name}`, { icon: "sparkle" }); }} className="btn-smooth overflow-hidden rounded-2xl border" style={{ borderColor: selectedEnvelope?.id === envelope.id ? "rgba(255,107,157,0.45)" : "var(--border)" }}>
                             <img src={envelope.imageData} alt={envelope.name} className="aspect-[4/3] w-full object-cover" />
                           </button>
                           <div className="mt-1 truncate text-[11px] font-medium">{envelope.name}</div>
@@ -797,7 +865,7 @@ export default function MailComposePanel({
                   <div className="grid grid-cols-3 gap-2">
                     {stamps.map((stamp) => (
                       <div key={stamp.id} className="group relative">
-                        <button onClick={() => setSelectedStamp(stamp)} className="btn-smooth overflow-hidden rounded-2xl border bg-white" style={{ borderColor: selectedStamp?.id === stamp.id ? "rgba(255,107,157,0.45)" : "var(--border)" }}>
+                        <button onClick={() => { setSelectedStamp(stamp); toast(`Stamp: ${stamp.name}`, { icon: "sparkle" }); }} className="btn-smooth overflow-hidden rounded-2xl border bg-white" style={{ borderColor: selectedStamp?.id === stamp.id ? "rgba(255,107,157,0.45)" : "var(--border)" }}>
                           <img src={stamp.imageData} alt={stamp.name} className="aspect-[7/8] w-full object-cover" />
                         </button>
                         {stamps.length > 1 ? (
@@ -821,9 +889,10 @@ export default function MailComposePanel({
             {toolDrawer === "gifs" ? (
               <div className="space-y-3">
                 <div>
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--muted)" }}>Search GIFs</p>
+                  <label htmlFor="gif-search" className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--muted)" }}>Search GIFs</label>
                   <div className="flex gap-2">
                     <input
+                      id="gif-search"
                       value={gifQuery}
                       onChange={(e) => setGifQuery(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") { gifSearchedRef.current = true; void searchGifs(); } }}
@@ -878,8 +947,26 @@ export default function MailComposePanel({
               ))}
             </div>
           </div>
-          <button onClick={() => void handleSend()} disabled={!receiver.trim()} className="btn-smooth rounded-2xl px-6 py-3 text-sm font-semibold text-white disabled:opacity-40 inline-flex items-center gap-2" style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
-            {stampStyle} <FiSend /> Send
+          <button
+            onClick={() => void handleSend()}
+            disabled={isSending}
+            className="btn-smooth btn-ripple rounded-2xl px-6 py-3 text-sm font-semibold text-white disabled:opacity-60 inline-flex items-center gap-2"
+            style={{
+              background: "linear-gradient(135deg, var(--pink), var(--lavender))",
+              boxShadow: isSending ? "none" : "0 6px 20px rgba(255,107,157,0.4)",
+              minWidth: 120,
+            }}
+          >
+            {isSending ? (
+              <>
+                <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="white" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
+                </svg>
+                Sealing…
+              </>
+            ) : (
+              <><span>{stampStyle}</span> <FiSend /> Send</>
+            )}
           </button>
         </div>
       </div>

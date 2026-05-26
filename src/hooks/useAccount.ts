@@ -1,6 +1,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { generateId } from "@/lib/id";
 import type { User } from "@supabase/supabase-js";
+import { uniqueNamesGenerator } from "unique-names-generator";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { ViewerIdentity } from "@/types";
 import type { Database } from "@/types/database";
@@ -16,25 +18,62 @@ const WALLPAPER_CHOICES = [
   "linear-gradient(145deg, rgba(246,241,255,0.96), rgba(226,223,255,0.92), rgba(255,245,252,0.96))",
 ];
 
-function randomFrom<T>(items: readonly T[], seed: string): T {
+function seededPickFrom<T>(items: readonly T[], seed: string): T {
   const index = Math.abs(seed.split("").reduce((acc, ch) => acc + (ch.codePointAt(0) ?? 0), 0)) % items.length;
   return items[index];
 }
 
+const GUEST_NAME_STARTS = ["Mochi", "Doodle", "Pastel", "Cloud", "Star", "Paper", "Tea", "Ribbon"];
+const GUEST_NAME_ENDS = ["Fox", "Bun", "Sprite", "Comet", "Bear", "Note", "Bloom", "Sketch"];
+
 function generateGuestName(): string {
-  const starts = ["Mochi", "Doodle", "Pastel", "Cloud", "Star", "Paper", "Tea", "Ribbon"];
-  const ends = ["Fox", "Bun", "Sprite", "Comet", "Bear", "Note", "Bloom", "Sketch"];
-  const seed = Math.random().toString(36).slice(2);
-  return `${randomFrom(starts, seed)}_${randomFrom(ends, seed + "t")}${Math.floor(Math.random() * 90 + 10)}`;
+  const base = uniqueNamesGenerator({ dictionaries: [GUEST_NAME_STARTS, GUEST_NAME_ENDS], separator: "_", length: 2 });
+  return `${base}${Math.floor(Math.random() * 90 + 10)}`;
 }
 
 const GUEST_NAME_KEY = "mochimail_guest_name";
 const GUEST_ID_KEY = "mochimail_guest_id";
+const ANON_TOKENS_KEY = "mochimail_anon_tokens";
 const AUTH_EMAIL_DOMAIN = "mochimail.app";
+
+function saveAnonTokens(session: { access_token: string; refresh_token: string }) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(ANON_TOKENS_KEY, JSON.stringify(session)); } catch { /* quota */ }
+}
+
+function clearAnonTokens() {
+  if (typeof window === "undefined") return;
+  try { localStorage.removeItem(ANON_TOKENS_KEY); } catch { /* ignore */ }
+}
+
+async function tryRestoreAnonSession(
+  supabase: ReturnType<typeof createSupabaseBrowserClient>
+): Promise<User | null> {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(ANON_TOKENS_KEY);
+  if (!raw) return null;
+  try {
+    const tokens = JSON.parse(raw) as { access_token: string; refresh_token: string };
+    const { data, error } = await supabase.auth.setSession(tokens);
+    if (error || !data.user || !isAnonymousUser(data.user)) {
+      clearAnonTokens();
+      return null;
+    }
+    if (data.session) saveAnonTokens(data.session);
+    return data.user;
+  } catch {
+    clearAnonTokens();
+    return null;
+  }
+}
 
 function isAnonymousUser(user: User | null): boolean {
   if (!user) return false;
-  return user.identities?.some((identity) => identity.provider === "anonymous") ?? false;
+  // Supabase v2 exposes is_anonymous directly; fall back to checking identities
+  if ((user as unknown as { is_anonymous?: boolean }).is_anonymous === true) return true;
+  // No linked identities = not a converted full account
+  if (!user.identities || user.identities.length === 0) return true;
+  return user.identities.every((identity) => identity.provider === "anonymous");
 }
 
 function sanitizeUsername(value: string): string {
@@ -54,8 +93,8 @@ function buildProfileInsert(user: User): ProfileInsert {
     sanitizeUsername(emailName) ||
     `mochi_${user.id.slice(0, 8)}`;
   const displayName = getMetadataText(metadata, "display_name") || username;
-  const accentColor = getMetadataText(metadata, "accent_color") || randomFrom(ACCENT_CHOICES, username);
-  const wallpaper = getMetadataText(metadata, "wallpaper") || randomFrom(WALLPAPER_CHOICES, username + "w");
+  const accentColor = getMetadataText(metadata, "accent_color") || seededPickFrom(ACCENT_CHOICES, username);
+  const wallpaper = getMetadataText(metadata, "wallpaper") || seededPickFrom(WALLPAPER_CHOICES, username + "w");
   const avatarUrl = getMetadataText(metadata, "avatar_url") || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(displayName)}`;
   const bio = getMetadataText(metadata, "bio") || "Artist, collector, and letter sender.";
 
@@ -72,7 +111,7 @@ function buildProfileInsert(user: User): ProfileInsert {
 
 function loadGuestIdentity(): { id: string; name: string } {
   if (globalThis.window === undefined) return { id: "", name: "" };
-  const id = sessionStorage.getItem(GUEST_ID_KEY) ?? `guest_${Math.random().toString(36).slice(2)}`;
+  const id = sessionStorage.getItem(GUEST_ID_KEY) ?? `guest_${generateId()}`;
   const name = localStorage.getItem(GUEST_NAME_KEY) ?? generateGuestName();
   sessionStorage.setItem(GUEST_ID_KEY, id);
   localStorage.setItem(GUEST_NAME_KEY, name);
@@ -97,7 +136,16 @@ export function useAccount() {
     supabase.auth.getSession().then(async ({ data }) => {
       const existingUser = data.session?.user ?? null;
       if (existingUser) {
+        if (isAnonymousUser(existingUser) && data.session) saveAnonTokens(data.session);
         setAuthUser(existingUser);
+        setHydrated(true);
+        return;
+      }
+
+      // Try to restore a previously created anonymous session before creating a new one.
+      const restored = await tryRestoreAnonSession(supabase);
+      if (restored) {
+        setAuthUser(restored);
         setHydrated(true);
         return;
       }
@@ -111,6 +159,7 @@ export function useAccount() {
         return;
       }
 
+      if (anonData.session) saveAnonTokens(anonData.session);
       setAnonymousAuthWarning(null);
       setAuthUser(anonData.user ?? null);
       setHydrated(true);
@@ -119,20 +168,26 @@ export function useAccount() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = session?.user ?? null;
       if (nextUser) {
+        if (isAnonymousUser(nextUser) && session) saveAnonTokens(session);
+        else if (!isAnonymousUser(nextUser)) clearAnonTokens();
         setAnonymousAuthWarning(null);
         setAuthUser(nextUser);
         return;
       }
 
-      void supabase.auth.signInAnonymously().then(({ data: anonData, error: anonError }) => {
-        if (anonError) {
-          console.warn("[Account] Could not restore anonymous session:", anonError.message);
-          setAnonymousAuthWarning(anonError.message);
-          setAuthUser(null);
-          return;
-        }
-        setAnonymousAuthWarning(null);
-        setAuthUser(anonData.user ?? null);
+      void tryRestoreAnonSession(supabase).then((restored) => {
+        if (restored) { setAuthUser(restored); return; }
+        void supabase.auth.signInAnonymously().then(({ data: anonData, error: anonError }) => {
+          if (anonError) {
+            console.warn("[Account] Could not restore anonymous session:", anonError.message);
+            setAnonymousAuthWarning(anonError.message);
+            setAuthUser(null);
+            return;
+          }
+          if (anonData.session) saveAnonTokens(anonData.session);
+          setAnonymousAuthWarning(null);
+          setAuthUser(anonData.user ?? null);
+        });
       });
     });
 
@@ -140,7 +195,7 @@ export function useAccount() {
   }, []);
 
   useEffect(() => {
-    if (!authUser) { setProfile(null); setProfileLoading(false); return; }
+    if (!authUser || isAnonymousUser(authUser)) { setProfile(null); setProfileLoading(false); return; }
     setProfileLoading(true);
     const supabase = createSupabaseBrowserClient();
     let cancelled = false;
@@ -181,7 +236,6 @@ export function useAccount() {
 
   const viewer = useMemo<ViewerIdentity>(() => {
     if (authUser && profile) {
-      const anonymous = isAnonymousUser(authUser);
       return {
         id: authUser.id,
         accountId: authUser.id,
@@ -192,10 +246,12 @@ export function useAccount() {
         accentColor: profile.accent_color ?? undefined,
         wallpaper: profile.wallpaper ?? undefined,
         youtubeUrl: profile.youtube_url ?? undefined,
-        isGuest: anonymous,
+        isGuest: false,
       };
     }
-    return { id: guestId, name: guestName, isGuest: true };
+    // Anonymous Supabase user: use their stable ID so mail/assets are consistent,
+    // but treat them as a guest (no space, no public profile).
+    return { id: authUser?.id ?? guestId, name: guestName, isGuest: true };
   }, [authUser, profile, guestId, guestName]);
 
   const currentAccount = useMemo(

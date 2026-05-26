@@ -2,11 +2,13 @@
 import React, { useState } from "react";
 import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle } from "@/types";
 import { exportImageAsset, exportFont } from "@/lib/exportAsset";
+import MyStorefront from "./MyStorefront";
 
 type StoreFilterType = "all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope" | "kit";
 
 interface StoreViewProps {
   storeItems: StoreItem[];
+  allStoreItems: StoreItem[];
   filterType: StoreFilterType;
   setFilterType: (type: StoreFilterType) => void;
   searchQuery: string;
@@ -23,6 +25,11 @@ interface StoreViewProps {
   userEnvelopes: EnvelopeStyle[];
   userFonts: CustomFont[];
   onPublish: (item: Sticker | WashiTape | PaperBackground | CustomFont | MailStamp | EnvelopeStyle, itemType: StoreItem["type"], tags: string[]) => void;
+  // For My Storefront
+  currentUserId: string;
+  isGuest: boolean;
+  onUpdateStoreItem: (id: string, updates: Partial<Pick<StoreItem, "name" | "tags">>) => void;
+  onRemoveFromStore: (id: string) => void;
 }
 
 function filterLabel(type: StoreFilterType): string {
@@ -48,6 +55,7 @@ function itemTypeLabel(type: StoreItem["type"]): string {
 
 export default function StoreView({
   storeItems,
+  allStoreItems,
   filterType,
   setFilterType,
   searchQuery,
@@ -63,7 +71,12 @@ export default function StoreView({
   userEnvelopes,
   userFonts,
   onPublish,
+  currentUserId,
+  isGuest,
+  onUpdateStoreItem,
+  onRemoveFromStore,
 }: Readonly<StoreViewProps>) {
+  const [storeView, setStoreView] = useState<"community" | "mine">("community");
   const [showPublish, setShowPublish] = useState(false);
   const [publishTags, setPublishTags] = useState("");
   const [selectedPublish, setSelectedPublish] = useState<{ id: string; type: StoreItem["type"] } | null>(null);
@@ -99,16 +112,66 @@ export default function StoreView({
     setSearchQuery("");
   };
 
+  const myItems = allStoreItems.filter((item) => item.authorId === currentUserId);
+
   return (
     <div className="animate-fade-in panel p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-bold">Community Store</h2>
+          <h2 className="text-lg font-bold">
+            {storeView === "community" ? "Community Store" : "My Storefront"}
+          </h2>
           <p className="text-xs" style={{ color: "var(--muted)" }}>
-            Share your stickers, washi tape, papers, stamps, envelopes, and custom fonts.
+            {storeView === "community"
+              ? "Share your stickers, washi tape, papers, stamps, envelopes, and custom fonts."
+              : "Manage everything you've published to the store."}
           </p>
         </div>
+        {/* View toggle */}
+        <div className="flex rounded-xl p-0.5" style={{ background: "var(--surface)" }}>
+          <button
+            onClick={() => setStoreView("community")}
+            className="btn-smooth rounded-lg px-3 py-1.5 text-xs font-semibold"
+            style={{
+              background: storeView === "community" ? "var(--surface-hover)" : "transparent",
+              color: storeView === "community" ? "var(--foreground)" : "var(--muted)",
+            }}
+          >
+            Browse
+          </button>
+          <button
+            onClick={() => setStoreView("mine")}
+            className="btn-smooth flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold"
+            style={{
+              background: storeView === "mine" ? "var(--surface-hover)" : "transparent",
+              color: storeView === "mine" ? "var(--foreground)" : "var(--muted)",
+            }}
+          >
+            My Shop
+            {myItems.length > 0 && (
+              <span
+                className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
+                style={{ background: "var(--lavender)" }}
+              >
+                {myItems.length}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* My Storefront view */}
+      {storeView === "mine" && (
+        <MyStorefront
+          myItems={myItems}
+          isGuest={isGuest}
+          onUpdate={onUpdateStoreItem}
+          onRemove={onRemoveFromStore}
+        />
+      )}
+
+      {storeView === "community" && (
+      <>
       {/* Search + Filter bar */}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
@@ -205,7 +268,7 @@ export default function StoreView({
       )}
 
       {/* Store Grid */}
-      {storeItems.length === 0 ? (
+      {storeView === "community" && storeItems.length === 0 ? (
         <div className="py-16 text-center">
           <div className="text-5xl opacity-40">🏪</div>
           <div className="mt-3 text-sm" style={{ color: "var(--muted)" }}>
@@ -360,6 +423,8 @@ export default function StoreView({
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );

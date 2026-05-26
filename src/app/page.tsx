@@ -5,13 +5,15 @@ import { useState, useRef, useCallback, useEffect, useSyncExternalStore } from "
 import { useRouter } from "next/navigation";
 import AccountPanel from "@/components/AccountPanel";
 import DrawingCanvas, { DrawingCanvasHandle } from "@/components/DrawingCanvas";
+import LayerPanel from "@/components/LayerPanel";
 import StudioToolbar from "@/components/StudioToolbar";
 import MailComposePanel from "@/components/MailComposePanel";
 import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
 import RoomControl from "@/components/RoomControl";
-import { FiEdit3, FiMail, FiShoppingBag, FiUsers, FiUser } from "react-icons/fi";
+import { FiEdit3, FiLayers, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
 import { exportCanvas } from "@/components/ExportUtil";
+import { toast } from "@/lib/toast";
 import { useRoom } from "@/hooks/useRoom";
 import type { RoomMember } from "@/hooks/useRoom";
 import { useStrokeSync } from "@/hooks/useStrokeSync";
@@ -221,8 +223,8 @@ export default function Home() {
   );
 
   const handlePlaceAsset = useCallback(
-    (asset: Sticker | WashiTape, x: number, y: number) => {
-      const placed = placeItem(asset, x, y);
+    (asset: Sticker | WashiTape, x: number, y: number, layerIndex?: number) => {
+      const placed = placeItem(asset, x, y, layerIndex);
       if (placed) broadcastPlacedItemAdd(placed);
       if ("opacity" in asset) trackWashiPlaced(asset.name);
       else trackStickerPlaced(asset.name);
@@ -246,6 +248,7 @@ export default function Home() {
     (s: Sticker) => {
       setSelectedAsset(s);
       setBrushSettings((prev) => ({ ...prev, tool: "sticker" }));
+      toast(`${s.name} selected — click to place!`, { icon: "sticker" });
     },
     [setSelectedAsset],
   );
@@ -254,6 +257,7 @@ export default function Home() {
     (w: WashiTape) => {
       setSelectedAsset(w);
       setBrushSettings((prev) => ({ ...prev, tool: "washi" }));
+      toast(`${w.name} selected — click to place!`, { icon: "ribbon" });
     },
     [setSelectedAsset],
   );
@@ -264,11 +268,18 @@ export default function Home() {
   );
 
   const [isExporting, setIsExporting] = useState(false);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [showLayerPanel, setShowLayerPanel] = useState(true);
+  const [layerCount, setLayerCount] = useState(1);
+  const [drawingLayerIndex, setDrawingLayerIndex] = useState(0);
+
 
   const handleExport = useCallback(() => {
     if (!canvasRef.current || isExporting) return;
     setIsExporting(true);
     exportCanvas(canvasRef.current, placedItems, "mochimail_letter")
+      .then(() => toast("Canvas saved!", { icon: "save" }))
+      .catch(() => toast("Export failed — try again", { variant: "error", icon: "warning" }))
       .finally(() => setIsExporting(false));
     trackCanvasExport();
   }, [placedItems, isExporting, trackCanvasExport]);
@@ -296,6 +307,7 @@ export default function Home() {
           item.fontData.glyphHeight,
         );
       trackItemAdded(item.id, item.type, item.name);
+      toast(`${item.name} added to your studio!`, { icon: "sparkle" });
       setActiveTab("studio");
       setTriggerOpenAssets((n) => n + 1);
     },
@@ -316,6 +328,7 @@ export default function Home() {
         tags,
       );
       trackItemPublished(itemType, item.name);
+      toast(`${item.name} published to the shop!`, { icon: "store" });
     },
     [account.viewer, store, trackItemPublished],
   );
@@ -536,28 +549,19 @@ export default function Home() {
             {/* Account */}
             <button
               onClick={() => setAccountOpen((p) => !p)}
-              className="btn-smooth flex items-center gap-2 rounded-2xl px-3 py-2"
-              style={{ background: "var(--surface)" }}
+              className="btn-smooth flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl border-2"
+              style={{
+                borderColor: account.viewer.accentColor ?? "var(--border)",
+                background: account.viewer.accentColor ? `${account.viewer.accentColor}22` : "var(--surface)",
+              }}
+              title={account.hydrated ? account.viewer.name : "Account"}
+              aria-label="Account"
             >
-              <span
-                className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl border"
-                style={{
-                  borderColor: "var(--border)",
-                  background: account.viewer.accentColor ?? "rgba(255,255,255,0.92)",
-                }}
-              >
-                {account.viewer.avatarUrl ? (
-                  <img src={account.viewer.avatarUrl} alt={account.viewer.name} className="h-full w-full object-cover" />
-                ) : (
-                  <span className="text-xs font-bold">
-                    {account.hydrated ? account.viewer.name.slice(0, 2).toUpperCase() : "…"}
-                  </span>
-                )}
-              </span>
-              <div className="hidden text-left sm:block">
-                <div className="text-xs font-semibold">{account.hydrated ? account.viewer.name : ""}</div>
-                <div className="text-[10px]" style={{ color: "var(--muted)" }}>{account.hydrated ? account.accountLabel : ""}</div>
-              </div>
+              <img
+                src={account.viewer.avatarUrl || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(account.viewer.name || "mochimail")}`}
+                alt={account.viewer.name}
+                className="h-full w-full object-cover"
+              />
             </button>
           </div>
         </header>
@@ -674,21 +678,28 @@ export default function Home() {
               onPlaceAsset={handlePlaceAsset}
               onAddTextItem={(item) => {
                 const placed = placeTextItem(
-                  item.text ?? "Text",
+                  item.text ?? "",
                   item.x,
                   item.y,
                   item.textColor ?? brushSettings.color,
                   item.textSize ?? 32,
                   item.textFont ?? '"Space Mono", monospace',
+                  item.layerIndex ?? layerCount - 1,
                 );
                 if (placed) broadcastPlacedItemAdd(placed);
+                return placed ?? undefined;
               }}
               onUpdatePlacedItem={updatePlacedItem}
               removePlacedItem={handleRemovePlacedItem}
+              onItemSelected={setSelectedItemId}
+              externalSelectedItemId={selectedItemId}
               backgroundOffsetX={worldOffset.x}
               backgroundOffsetY={worldOffset.y}
               width={CANVAS_W}
               height={CANVAS_H}
+              drawingLayerIndex={drawingLayerIndex}
+              defaultLayerIndex={layerCount - 1}
+              maxLayerIndex={layerCount - 1}
             />
 
             <canvas
@@ -731,6 +742,45 @@ export default function Home() {
             })}
           </div>
         </div>
+
+        {/* Layers toggle button */}
+        <button
+          onClick={() => setShowLayerPanel((v) => !v)}
+          title={showLayerPanel ? "Hide layers" : "Show layers"}
+          className="btn-smooth absolute right-3 top-18 z-50 inline-flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-semibold"
+          style={{
+            background: showLayerPanel
+              ? "rgba(167,139,250,0.18)"
+              : "rgba(255,255,255,0.92)",
+            color: showLayerPanel ? "#6d28d9" : "#6b7280",
+            border: "1px solid rgba(167,139,250,0.25)",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.08)",
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          <FiLayers size={13} />
+          Layers
+        </button>
+
+        {/* Layer panel — floats above the scrollable canvas */}
+        {showLayerPanel && (
+          <LayerPanel
+            items={placedItems}
+            selectedItemId={selectedItemId}
+            onSelectItem={(id) => {
+              setSelectedItemId(id);
+              if (id) setBrushSettings((prev) => ({ ...prev, tool: "select" }));
+            }}
+            onUpdateItem={updatePlacedItem}
+            onDeleteItem={handleRemovePlacedItem}
+            onHide={() => setShowLayerPanel(false)}
+            align="right"
+            layerCount={layerCount}
+            onLayerCountChange={setLayerCount}
+            drawingLayerIndex={drawingLayerIndex}
+            onDrawingLayerChange={setDrawingLayerIndex}
+          />
+        )}
 
         <StudioToolbar
           brushSettings={brushSettings}
@@ -812,7 +862,7 @@ export default function Home() {
 
           <button
             onClick={() => setActiveTab("mail")}
-            className="btn-smooth relative flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
+            className="btn-smooth btn-ripple relative flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
             style={{ color: "var(--muted-strong)" }}
             aria-label="Mail"
           >
@@ -830,7 +880,7 @@ export default function Home() {
 
           <button
             onClick={() => setActiveTab("store")}
-            className="btn-smooth flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
+            className="btn-smooth btn-ripple flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
             style={{ color: "var(--muted-strong)" }}
             aria-label="Shop"
           >
@@ -840,7 +890,7 @@ export default function Home() {
 
           <button
             onClick={() => router.push("/rooms")}
-            className="btn-smooth flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
+            className="btn-smooth btn-ripple flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold"
             style={{ color: "var(--muted-strong)" }}
             aria-label="Rooms"
           >
@@ -861,15 +911,11 @@ export default function Home() {
             aria-label="Account"
             title={account.viewer.name}
           >
-            {account.viewer.avatarUrl ? (
-              <img src={account.viewer.avatarUrl} alt={account.viewer.name} className="h-full w-full object-cover" />
-            ) : account.hydrated ? (
-              <span className="text-xs font-bold" style={{ color: account.viewer.accentColor ?? "var(--pink)" }}>
-                {account.viewer.name.slice(0, 2).toUpperCase()}
-              </span>
-            ) : (
-              <FiUser size={15} style={{ color: "var(--muted)" }} />
-            )}
+            <img
+              src={account.viewer.avatarUrl || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(account.viewer.name || "mochimail")}`}
+              alt={account.viewer.name}
+              className="h-full w-full object-cover"
+            />
           </button>
         </nav>
       </div>
@@ -930,6 +976,7 @@ export default function Home() {
         <div className="mx-auto max-w-7xl p-3 sm:p-4">
           <StoreView
             storeItems={store.storeItems}
+            allStoreItems={store.allStoreItems}
             filterType={store.filterType}
             setFilterType={store.setFilterType}
             searchQuery={store.searchQuery}
@@ -945,6 +992,10 @@ export default function Home() {
             userEnvelopes={envelopes}
             userFonts={customFonts}
             onPublish={handleStorePublish}
+            currentUserId={account.viewer.accountId ?? account.viewer.id}
+            isGuest={!account.isAuthenticated}
+            onUpdateStoreItem={store.updateStoreItem}
+            onRemoveFromStore={store.removeFromStore}
           />
         </div>
       </div>

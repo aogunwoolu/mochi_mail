@@ -114,7 +114,9 @@ export default function WashiTapeCreator({ onSave }: WashiTapeCreatorProps) {
         <button onClick={() => setIsOpen(false)} className="btn-smooth rounded-lg px-2 py-0.5 text-xs" style={{ color: "var(--muted)", background: "var(--surface)" }}>✕</button>
       </div>
 
+      <label htmlFor="washi-tape-name" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Tape name</label>
       <input
+        id="washi-tape-name"
         type="text"
         value={tapeName}
         onChange={(e) => setTapeName(e.target.value)}

@@ -16,6 +16,11 @@ const CHAR_GROUPS = [
 const GW = 104;
 const GH = 128;
 
+const INK_COLORS = [
+  "#1e1b2e", "#ff6b9d", "#a78bfa", "#67d4f1", "#6ee7b7",
+  "#fbbf24", "#fb923c", "#f87171", "#2563eb", "#374151",
+];
+
 function drawGuide(ctx: CanvasRenderingContext2D, char: string) {
   ctx.clearRect(0, 0, GW, GH);
   ctx.fillStyle = "#fdfcff";
@@ -66,11 +71,14 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
   const [lineWidth, setLineWidth] = useState(4);
   const [previewText, setPreviewText] = useState("Hello!");
   const [activeGroup, setActiveGroup] = useState(0);
+  const [tool, setTool] = useState<"pen" | "eraser">("pen");
+  const [inkColor, setInkColor] = useState("#1e1b2e");
 
   const drawRef  = useRef<HTMLCanvasElement>(null);
   const guideRef = useRef<HTMLCanvasElement>(null);
   const drawing  = useRef(false);
   const last     = useRef<{ x: number; y: number } | null>(null);
+  const strokeHistory = useRef<ImageData[]>([]);
 
   const currentChar = CHARSET[charIndex] ?? "A";
   const totalChars  = CHARSET.length;
@@ -91,6 +99,7 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, GW, GH);
+    strokeHistory.current = [];
     const saved = glyphs[currentChar];
     if (saved) {
       const img = new Image();
@@ -98,6 +107,15 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
       img.src = saved;
     }
   // intentionally only on charIndex change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [charIndex]);
+
+  // Keep the active group tab in sync with the current character
+  useEffect(() => {
+    const char = CHARSET[charIndex];
+    if (!char) return;
+    const gIdx = CHAR_GROUPS.findIndex(g => g.chars.includes(char));
+    if (gIdx >= 0) setActiveGroup(gIdx);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [charIndex]);
 
@@ -119,6 +137,7 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, GW, GH);
+    strokeHistory.current = [];
     setGlyphs(prev => {
       const next = { ...prev };
       delete next[currentChar];
@@ -148,6 +167,15 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
     e.currentTarget.setPointerCapture(e.pointerId);
     drawing.current = true;
     last.current = point(e);
+    const canvas = drawRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        const snap = ctx.getImageData(0, 0, GW, GH);
+        strokeHistory.current.push(snap);
+        if (strokeHistory.current.length > 30) strokeHistory.current.shift();
+      }
+    }
   }, [point]);
 
   const onPointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -157,16 +185,24 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const p = point(e);
-    ctx.strokeStyle = "#1e1b2e";
-    ctx.lineWidth   = lineWidth;
-    ctx.lineCap     = "round";
-    ctx.lineJoin    = "round";
+    if (tool === "eraser") {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.strokeStyle = "rgba(0,0,0,1)";
+      ctx.lineWidth = lineWidth * 2.5;
+    } else {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = inkColor;
+      ctx.lineWidth = lineWidth;
+    }
+    ctx.lineCap  = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
     ctx.moveTo(last.current.x, last.current.y);
     ctx.lineTo(p.x, p.y);
     ctx.stroke();
+    ctx.globalCompositeOperation = "source-over";
     last.current = p;
-  }, [lineWidth, point]);
+  }, [lineWidth, inkColor, tool, point]);
 
   const onPointerUp = useCallback(() => {
     drawing.current = false;
@@ -175,14 +211,75 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === "ArrowRight" || e.key === "Enter") saveAndGo(charIndex + 1);
-      if (e.key === "ArrowLeft")  saveAndGo(charIndex - 1);
-      if (e.key === "Backspace")  { e.preventDefault(); clearGlyph(); }
+      if (e.key === "ArrowLeft") saveAndGo(charIndex - 1);
+      if (e.key === "Backspace") { e.preventDefault(); clearGlyph(); }
+      if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        const snap = strokeHistory.current.pop();
+        if (snap) drawRef.current?.getContext("2d")?.putImageData(snap, 0, 0);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [saveAndGo, charIndex, clearGlyph]);
+
+  const exportSpriteSheet = useCallback(() => {
+    const data = captureCurrentGlyph();
+    const allGlyphs = data ? { ...glyphs, [currentChar]: data } : { ...glyphs };
+    const chars = CHARSET.split("").filter(ch => allGlyphs[ch]);
+    if (!chars.length) return;
+    const COLS = 13;
+    const PAD = 5;
+    const LABEL_H = 16;
+    const cellW = GW + PAD * 2;
+    const cellH = GH + PAD * 2 + LABEL_H;
+    const rows = Math.ceil(chars.length / COLS);
+    const canvas = document.createElement("canvas");
+    canvas.width = cellW * Math.min(chars.length, COLS) + PAD;
+    canvas.height = cellH * rows + PAD;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#fdfcff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    Promise.all(chars.map((ch, i) => new Promise<void>(resolve => {
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const x = PAD + col * cellW;
+      const y = PAD + row * cellH;
+      ctx.fillStyle = "rgba(167,139,250,0.07)";
+      ctx.fillRect(x, y, GW + PAD * 2, GH + PAD * 2);
+      ctx.font = "9px monospace";
+      ctx.fillStyle = "#9a7fc8";
+      ctx.textAlign = "center";
+      ctx.fillText(ch === " " ? "SPC" : ch, x + cellW / 2, y + GH + PAD * 2 + LABEL_H - 3);
+      const url = allGlyphs[ch];
+      if (url) {
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, x + PAD, y + PAD, GW, GH); resolve(); };
+        img.onerror = () => resolve();
+        img.src = url;
+      } else resolve();
+    }))).then(() => {
+      const link = document.createElement("a");
+      link.download = `${fontName.trim() || "my-font"}-glyphs.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    });
+  }, [captureCurrentGlyph, glyphs, currentChar, fontName]);
+
+  const exportJSON = useCallback(() => {
+    const data = captureCurrentGlyph();
+    const finalGlyphs = data ? { ...glyphs, [currentChar]: data } : { ...glyphs };
+    const json = JSON.stringify({ name: fontName.trim() || "My Hand Font", glyphs: finalGlyphs, glyphWidth: GW, glyphHeight: GH });
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.download = `${fontName.trim() || "my-font"}.json`;
+    link.href = url;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }, [captureCurrentGlyph, glyphs, currentChar, fontName]);
 
   const groupCharIndex = CHAR_GROUPS[activeGroup]?.chars.split("").findIndex(c => c === currentChar);
 
@@ -191,7 +288,9 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
 
       {/* ── Header: name + progress ── */}
       <div className="flex items-center gap-3">
+        <label htmlFor="font-name" className="sr-only">Font name</label>
         <input
+          id="font-name"
           value={fontName}
           onChange={(e) => setFontName(e.target.value)}
           placeholder="Font name…"
@@ -295,7 +394,7 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
               ref={drawRef}
               width={GW}
               height={GH}
-              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", touchAction: "none", cursor: "crosshair" }}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", touchAction: "none", cursor: tool === "eraser" ? "cell" : "crosshair" }}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
@@ -316,21 +415,67 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
         {/* Controls column */}
         <div className="flex flex-1 flex-col gap-3 pt-8">
 
+          {/* Tool toggle + ink color */}
+          <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)", background: "white" }}>
+            <div className="mb-2 flex gap-1">
+              <button
+                onClick={() => setTool("pen")}
+                className="btn-smooth flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-all"
+                style={{
+                  background: tool === "pen" ? "var(--purple)" : "var(--surface-soft)",
+                  color: tool === "pen" ? "white" : "var(--muted-strong)",
+                }}
+              >
+                ✏ Pen
+              </button>
+              <button
+                onClick={() => setTool("eraser")}
+                className="btn-smooth flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-all"
+                style={{
+                  background: tool === "eraser" ? "#fb923c" : "var(--surface-soft)",
+                  color: tool === "eraser" ? "white" : "var(--muted-strong)",
+                }}
+              >
+                ◻ Eraser
+              </button>
+            </div>
+            {tool === "pen" && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {INK_COLORS.map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setInkColor(c)}
+                    className="rounded-full transition-transform hover:scale-110"
+                    style={{
+                      width: 18, height: 18,
+                      background: c,
+                      border: inkColor === c ? "2.5px solid var(--purple)" : "1.5px solid rgba(0,0,0,0.1)",
+                      boxShadow: inkColor === c ? "0 0 0 1.5px rgba(167,139,250,0.4)" : "none",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Stroke width */}
           <div className="rounded-xl border p-3" style={{ borderColor: "var(--border)", background: "white" }}>
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>Stroke width</p>
+              <label htmlFor="stroke-width" className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
+                {tool === "eraser" ? "Eraser size" : "Stroke width"}
+              </label>
               <div
                 className="rounded-full"
                 style={{
                   width: Math.max(4, lineWidth * 1.8),
                   height: Math.max(4, lineWidth * 1.8),
-                  background: "#1e1b2e",
+                  background: tool === "eraser" ? "#fb923c" : inkColor,
                   transition: "all 0.15s",
                 }}
               />
             </div>
             <input
+              id="stroke-width"
               type="range" min={1} max={14} value={lineWidth}
               onChange={(e) => setLineWidth(Number(e.target.value))}
               className="w-full"
@@ -369,7 +514,7 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
 
           {/* Keyboard hint */}
           <p className="text-[9px] leading-relaxed" style={{ color: "var(--muted)" }}>
-            ← → keys to navigate · Backspace to clear
+            ← → navigate · Backspace clear · Ctrl+Z undo
           </p>
 
           {/* Finish */}
@@ -384,17 +529,38 @@ export default function FontTracerCreator({ onSave }: Readonly<FontTracerCreator
             ✦ Save Font
           </button>
           {doneCount > 0 && (
-            <p className="text-center text-[9px]" style={{ color: "var(--muted)" }}>
-              {doneCount} character{doneCount !== 1 ? "s" : ""} ready
-            </p>
+            <>
+              <p className="text-center text-[9px]" style={{ color: "var(--muted)" }}>
+                {doneCount} character{doneCount !== 1 ? "s" : ""} ready
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  onClick={exportSpriteSheet}
+                  className="btn-smooth rounded-xl py-2 text-[11px] font-semibold"
+                  style={{ background: "rgba(103,212,241,0.15)", color: "#0369a1" }}
+                  title="Download all drawn glyphs as a PNG image sheet"
+                >
+                  ↓ Sprite sheet
+                </button>
+                <button
+                  onClick={exportJSON}
+                  className="btn-smooth rounded-xl py-2 text-[11px] font-semibold"
+                  style={{ background: "rgba(110,231,183,0.18)", color: "#065f46" }}
+                  title="Download font data as JSON (re-importable)"
+                >
+                  ↓ Save as JSON
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>
 
       {/* ── Live preview ── */}
       <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>Live Preview</p>
+        <label htmlFor="font-preview-text" className="mb-2 block text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>Live Preview</label>
         <input
+          id="font-preview-text"
           value={previewText}
           onChange={(e) => setPreviewText(e.target.value)}
           placeholder="Type to preview your font…"

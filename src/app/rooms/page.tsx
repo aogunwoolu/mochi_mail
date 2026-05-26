@@ -1,11 +1,12 @@
 
 "use client";
 
-import { useEffect, useRef, useState, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FiArrowLeft, FiCopy, FiCheck, FiExternalLink, FiLock, FiGlobe, FiPlus, FiRefreshCw } from "react-icons/fi";
 import { useAccount } from "@/hooks/useAccount";
 import { useRooms } from "@/hooks/useRooms";
+import { ROOM_TOKEN_KEY } from "@/hooks/useRoom";
 import { RoomSummary } from "@/types";
 
 function errMsg(err: unknown, fallback: string): string {
@@ -128,20 +129,14 @@ function RoomsPageInner() {
 
   const canUseRooms = account.hydrated && account.hasSession && account.currentAccount;
 
-  const autoCreatedRef = useRef(false);
-  useEffect(() => {
-    if (!canUseRooms || rooms.loading || autoCreatedRef.current) return;
-    if (rooms.myRooms.length === 0) {
-      autoCreatedRef.current = true;
-      rooms.createRoom({
-        title: `${account.currentAccount?.displayName ?? "My"}'s Room`,
-        description: "",
-        isPublic: false,
-      }).catch((err) => {
-        setError(errMsg(err, "Could not create your room automatically. Try creating one below."));
-      });
-    }
-  }, [canUseRooms, rooms.loading, rooms.myRooms.length, rooms, account.currentAccount?.displayName]);
+  // Build the canvas URL that preserves the last open room.
+  // Falls back to "/" if the user hasn't opened the canvas yet.
+  const canvasUrl = (): string => {
+    try {
+      const token = globalThis.localStorage?.getItem(ROOM_TOKEN_KEY) ?? "";
+      return token ? `/?room=${encodeURIComponent(token)}` : "/";
+    } catch { return "/"; }
+  };
 
   const flash = (msg: string, isError = false) => {
     if (isError) { setError(msg); setStatus(null); }
@@ -159,7 +154,7 @@ function RoomsPageInner() {
         <div className="panel max-w-sm rounded-3xl p-6 text-center">
           <p className="text-sm font-semibold">Sign in to use rooms</p>
           <p className="mt-1.5 text-xs" style={{ color: "var(--muted)" }}>Rooms are account-based. Sign in, then come back.</p>
-          <button onClick={() => router.push("/")} className="btn-smooth mt-4 rounded-xl px-4 py-2 text-xs font-semibold text-white" style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
+          <button onClick={() => router.push(canvasUrl())} className="btn-smooth mt-4 rounded-xl px-4 py-2 text-xs font-semibold text-white" style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
             Back to studio
           </button>
         </div>
@@ -219,7 +214,7 @@ function RoomsPageInner() {
     <div className="mx-auto flex min-h-svh w-full max-w-2xl flex-col gap-5 p-4 pb-10">
       {/* Header */}
       <header className="flex items-center justify-between">
-        <button onClick={() => router.push("/")} className="btn-smooth flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
+        <button onClick={() => router.push(canvasUrl())} className="btn-smooth flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
           <FiArrowLeft size={15} /> Back
         </button>
         <div className="text-right">
@@ -237,6 +232,7 @@ function RoomsPageInner() {
       ) : null}
 
       {/* Primary room hero */}
+      {/* Primary room — the user's own room. Created automatically when they first open the canvas. */}
       {primaryRoom ? (
         <section className="rounded-2xl border p-5 flex flex-col gap-4" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
           <div className="flex items-start justify-between gap-3">
@@ -333,9 +329,24 @@ function RoomsPageInner() {
         </section>
       ) : rooms.loading ? (
         <div className="rounded-2xl border p-5 text-center text-xs" style={{ borderColor: "var(--border)", background: "var(--surface)", color: "var(--muted)" }}>
-          Setting up your room…
+          Loading your rooms…
         </div>
-      ) : null}
+      ) : (
+        /* No room yet — the canvas creates one automatically on first visit. */
+        <section className="rounded-2xl border p-5 text-center flex flex-col items-center gap-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+          <p className="text-sm font-semibold">No room yet</p>
+          <p className="text-xs max-w-xs" style={{ color: "var(--muted)" }}>
+            Your room is created the first time you open the canvas. Head there to get started — it will appear here automatically.
+          </p>
+          <button
+            onClick={() => router.push("/")}
+            className="btn-smooth rounded-xl px-4 py-2 text-xs font-semibold text-white"
+            style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}
+          >
+            Open canvas
+          </button>
+        </section>
+      )}
 
       {/* Join a room */}
       <section className="rounded-2xl border p-4" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
@@ -461,7 +472,7 @@ function RoomsPageInner() {
             className="btn-smooth flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold"
             style={{ background: "var(--surface)", color: "var(--muted-strong)", border: "1px dashed var(--border)" }}
           >
-            <FiPlus size={13} /> Create another room
+            <FiPlus size={13} /> {rooms.myRooms.length > 0 ? "Create another room" : "Create a room"}
           </button>
         )}
       </section>

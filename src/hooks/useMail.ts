@@ -1,12 +1,10 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { generateId } from "@/lib/id";
 import { Letter, DELIVERY_SPEEDS, LetterSendPayload, ViewerIdentity } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { Json } from "@/types/database";
 
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
 
 function normalizeName(user: ViewerIdentity): string {
   return user.name?.trim() || user.username?.trim() || "Guest";

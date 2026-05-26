@@ -41,7 +41,7 @@ export default function RoomInvitePage() {
         setError(null);
 
         try {
-          const result = await rooms.getInvitePreview(token ?? "");
+          const result = await rooms.getInvitePreview(token ?? ""); // stable callback
           if (!cancelled) {
             if (result) {
               setPreview(result);
@@ -82,7 +82,9 @@ export default function RoomInvitePage() {
       router.push(`/rooms?invite=${encodeURIComponent(token ?? "")}`);
       return;
     }
-  }, [account.hydrated, account.hasSession, rooms, router, token]);
+  // rooms.getInvitePreview is a stable useCallback — safe to list here.
+  // Don't include the whole `rooms` object or the effect re-runs every render.
+  }, [account.hydrated, account.hasSession, rooms.getInvitePreview, router, token]);
 
   if (!account.hydrated || loading) {
     return <div className="flex h-svh items-center justify-center">Loading...</div>;
@@ -152,7 +154,7 @@ export default function RoomInvitePage() {
           </>
         ) : null}
 
-        {!preview && !error ? null : !preview ? (
+        {!preview && error ? (
           <div className="mt-4">
             <button
               onClick={() => router.push("/rooms")}

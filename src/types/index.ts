@@ -95,6 +95,8 @@ export interface PlacedSticker {
   textColor?: string;
   textSize?: number;
   textFont?: string;
+  /** Z-order layer bucket: 0 = back, 4 = front. Defaults to 2 (middle). */
+  layerIndex?: number;
 }
 
 export interface Letter {

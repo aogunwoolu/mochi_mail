@@ -32,7 +32,21 @@ interface KitCardProps {
 
 function KitCard({ kit, onAddElement, onAddKit, onRemove, actionLabel, onAction, downloads }: KitCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [addedAll, setAddedAll] = useState(false);
+  const [addedEl, setAddedEl] = useState<string | null>(null);
   const c = kit.accent || "#a78bfa";
+
+  function handleAddKit() {
+    onAddKit(kit);
+    setAddedAll(true);
+    setTimeout(() => setAddedAll(false), 1800);
+  }
+
+  function handleAddElement(el: ScrapbookKitElement) {
+    onAddElement(el);
+    setAddedEl(el.name);
+    setTimeout(() => setAddedEl(null), 1800);
+  }
 
   return (
     <div
@@ -54,12 +68,12 @@ function KitCard({ kit, onAddElement, onAddKit, onRemove, actionLabel, onAction,
           )}
         </div>
         <button
-          onClick={() => onAddKit(kit)}
-          className="btn-smooth shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-bold shadow-sm"
-          style={{ background: c, color: "#fff" }}
+          onClick={handleAddKit}
+          className="btn-smooth shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-bold shadow-sm transition-all"
+          style={{ background: addedAll ? "#22c55e" : c, color: "#fff" }}
           title={`Add all ${kit.elements.length} elements`}
         >
-          + All {kit.elements.length}
+          {addedAll ? "✓ Added!" : `+ All ${kit.elements.length}`}
         </button>
       </div>
 
@@ -68,17 +82,14 @@ function KitCard({ kit, onAddElement, onAddKit, onRemove, actionLabel, onAction,
         {kit.elements.slice(0, 4).map((el) => (
           <button
             key={el.name}
-            onClick={() => onAddElement(el)}
+            onClick={() => handleAddElement(el)}
             title={`Add "${el.name}"`}
-            className="btn-smooth rounded-lg overflow-hidden aspect-square flex items-center justify-center p-1 transition-transform hover:scale-110"
-            style={{ background: `${c}12`, border: `1px solid ${c}25` }}
+            className="btn-smooth rounded-lg overflow-hidden aspect-square flex items-center justify-center p-1 transition-all hover:scale-110 relative"
+            style={{ background: addedEl === el.name ? `${c}30` : `${c}12`, border: `1px solid ${addedEl === el.name ? c : `${c}25`}` }}
           >
-            <img
-              src={el.imageData}
-              alt={el.name}
-              className="max-w-full max-h-full object-contain"
-              style={{ imageRendering: "auto" }}
-            />
+            {addedEl === el.name
+              ? <span className="text-[11px] font-bold" style={{ color: c }}>✓</span>
+              : <img src={el.imageData} alt={el.name} className="max-w-full max-h-full object-contain" style={{ imageRendering: "auto" }} />}
           </button>
         ))}
       </div>
@@ -113,9 +124,9 @@ function KitCard({ kit, onAddElement, onAddKit, onRemove, actionLabel, onAction,
             {kit.elements.map((el) => (
               <button
                 key={el.name}
-                onClick={() => onAddElement(el)}
-                className="btn-smooth flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:scale-[1.01] transition-transform"
-                style={{ background: `${c}08`, border: `1px solid ${c}20` }}
+                onClick={() => handleAddElement(el)}
+                className="btn-smooth flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:scale-[1.01] transition-all"
+                style={{ background: addedEl === el.name ? `${c}18` : `${c}08`, border: `1px solid ${addedEl === el.name ? c : `${c}20`}` }}
               >
                 <div
                   className="h-9 w-9 flex-shrink-0 rounded overflow-hidden flex items-center justify-center p-0.5"
@@ -127,7 +138,9 @@ function KitCard({ kit, onAddElement, onAddKit, onRemove, actionLabel, onAction,
                   <p className="text-[11px] font-semibold truncate" style={{ color: c }}>{el.name}</p>
                   <p className="text-[9px]" style={{ color: c, opacity: 0.55 }}>{el.width}×{el.height}px</p>
                 </div>
-                <span className="text-[10px] shrink-0" style={{ color: c, opacity: 0.6 }}>+ Add</span>
+                <span className="text-[10px] shrink-0 font-semibold" style={{ color: c, opacity: addedEl === el.name ? 1 : 0.6 }}>
+                  {addedEl === el.name ? "✓ Added" : "+ Add"}
+                </span>
               </button>
             ))}
           </div>

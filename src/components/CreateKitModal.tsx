@@ -212,7 +212,9 @@ export default function CreateKitModal({ userStickers, viewer, onClose, onSave }
               {/* Upload custom element */}
               <div className="rounded-2xl p-3 flex flex-col gap-2" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                 <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>Upload Image</p>
+                <label htmlFor="upload-element-name" className="sr-only">Element name</label>
                 <input
+                  id="upload-element-name"
                   value={uploadName}
                   onChange={(e) => setUploadName(e.target.value)}
                   placeholder="Element name (optional)"

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ViewerIdentity } from "@/types";
 import { getTrackingEnabled, setTrackingEnabled } from "@/lib/posthog";
+import { toast } from "@/lib/toast";
 
 const ACCENT_PRESETS = ["#ff6b9d", "#67d4f1", "#6ee7b7", "#a78bfa", "#fb923c", "#fbbf24"] as const;
 
@@ -165,20 +166,29 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
 
       <SectionCard title="Basics" note="The core things people notice first.">
         <div className="grid gap-2">
-          <input value={props.profileName} onChange={(e) => props.setProfileName(e.target.value)} placeholder="👤 Display name" className="input-soft w-full px-3 py-2 text-sm outline-none" />
-          <textarea value={props.bio} onChange={(e) => props.setBio(e.target.value)} placeholder="📝 Short bio" rows={3} className="input-soft w-full resize-none px-3 py-2 text-sm outline-none" />
-          <input value={props.homeTitle} onChange={(e) => props.setHomeTitle(e.target.value)} placeholder="🏠 Space title" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+          <div>
+            <label htmlFor="profile-name" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Display name</label>
+            <input id="profile-name" value={props.profileName} onChange={(e) => props.setProfileName(e.target.value)} placeholder="👤 Display name" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+          </div>
+          <div>
+            <label htmlFor="profile-bio" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Short bio</label>
+            <textarea id="profile-bio" value={props.bio} onChange={(e) => props.setBio(e.target.value)} placeholder="📝 Short bio" rows={3} className="input-soft w-full resize-none px-3 py-2 text-sm outline-none" />
+          </div>
+          <div>
+            <label htmlFor="home-title" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Space title</label>
+            <input id="home-title" value={props.homeTitle} onChange={(e) => props.setHomeTitle(e.target.value)} placeholder="🏠 Space title" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+          </div>
         </div>
       </SectionCard>
 
       <SectionCard title="Avatar" note="Pick a cute generated avatar, or paste your own image URL if you want something custom.">
         <div className="grid grid-cols-3 gap-2">
-          {props.avatarChoices.map((seed) => {
+          {props.avatarChoices.map((seed, i) => {
             const option = buildDicebearUrl(seed);
             const active = (props.avatarUrl.trim() || buildDicebearUrl(props.previewName)) === option;
             return (
               <button
-                key={seed}
+                key={`${seed}-${i}`}
                 onClick={() => props.setAvatarUrl(option)}
                 className="btn-smooth overflow-hidden rounded-2xl border p-1"
                 style={{ borderColor: active ? props.accent : "var(--border)", background: "rgba(255,255,255,0.88)" }}
@@ -204,7 +214,8 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
             }}
           />
         </label>
-        <input value={props.avatarUrl} onChange={(e) => props.setAvatarUrl(e.target.value)} placeholder="🔗 Or paste a custom avatar URL" className="input-soft mt-2 w-full px-3 py-2 text-sm outline-none" />
+        <label htmlFor="avatar-url" className="sr-only">Custom avatar URL</label>
+        <input id="avatar-url" value={props.avatarUrl} onChange={(e) => props.setAvatarUrl(e.target.value)} placeholder="🔗 Or paste a custom avatar URL" className="input-soft mt-2 w-full px-3 py-2 text-sm outline-none" />
       </SectionCard>
 
       <SectionCard title="Style" note="Choose a vibe instead of typing CSS.">
@@ -239,7 +250,10 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
 
       <SectionCard title="Extras" note="Nice-to-have profile details.">
         <div className="grid gap-2">
-          <input value={props.youtubeUrl} onChange={(e) => props.setYoutubeUrl(e.target.value)} placeholder="🎵 YouTube link for your space soundtrack" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+          <div>
+            <label htmlFor="youtube-url" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Space soundtrack</label>
+            <input id="youtube-url" value={props.youtubeUrl} onChange={(e) => props.setYoutubeUrl(e.target.value)} placeholder="🎵 YouTube link for your space soundtrack" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+          </div>
           <div className="rounded-2xl px-3 py-2 text-xs" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
             Username is fixed as @{props.currentAccount.username}
           </div>
@@ -301,12 +315,14 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
 
       <SectionCard title="Guest Name" note="Set how you appear while browsing before you sign up.">
         <div className="flex gap-2">
+          <label htmlFor="guest-name" className="sr-only">Your artist name</label>
           <input
+            id="guest-name"
             value={props.guestName}
             onChange={(e) => props.setGuestName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && props.handleGuestSave()}
             className="input-soft min-w-0 flex-1 px-3 py-2 text-sm outline-none"
-              placeholder="✨ Your artist name"
+            placeholder="✨ Your artist name"
           />
           <button
             onClick={props.handleGuestSave}
@@ -339,18 +355,18 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
         <div className="space-y-2 rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.7)" }}>
           {props.mode === "signup" ? (
             <div>
-              <p className="mb-1 px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Display name</p>
-              <input value={props.displayName} onChange={(e) => props.setDisplayName(e.target.value)} placeholder="👤 e.g. Mochi Fox" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+              <label htmlFor="signup-display-name" className="mb-1 block px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Display name</label>
+              <input id="signup-display-name" value={props.displayName} onChange={(e) => props.setDisplayName(e.target.value)} placeholder="👤 e.g. Mochi Fox" className="input-soft w-full px-3 py-2 text-sm outline-none" />
             </div>
           ) : null}
           <div>
-            <p className="mb-1 px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Username</p>
-            <input value={props.username} onChange={(e) => props.setUsername(e.target.value)} placeholder="@ e.g. mochifox" className="input-soft w-full px-3 py-2 text-sm outline-none" autoComplete="username" />
+            <label htmlFor="auth-username" className="mb-1 block px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Username</label>
+            <input id="auth-username" value={props.username} onChange={(e) => props.setUsername(e.target.value)} placeholder="@ e.g. mochifox" className="input-soft w-full px-3 py-2 text-sm outline-none" autoComplete="username" />
             <p className="mt-1 px-0.5 text-[10px]" style={{ color: "var(--muted)" }}>Lowercase letters, numbers, and underscores only.</p>
           </div>
           <div>
-            <p className="mb-1 px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Password</p>
-            <input value={props.password} onChange={(e) => props.setPassword(e.target.value)} type="password" placeholder="🔒 ••••••••" className="input-soft w-full px-3 py-2 text-sm outline-none" autoComplete={props.mode === "signup" ? "new-password" : "current-password"} onKeyDown={(e) => e.key === "Enter" && props.handleAuth()} />
+            <label htmlFor="auth-password" className="mb-1 block px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Password</label>
+            <input id="auth-password" value={props.password} onChange={(e) => props.setPassword(e.target.value)} type="password" placeholder="🔒 ••••••••" className="input-soft w-full px-3 py-2 text-sm outline-none" autoComplete={props.mode === "signup" ? "new-password" : "current-password"} onKeyDown={(e) => e.key === "Enter" && props.handleAuth()} />
           </div>
         </div>
 
@@ -361,9 +377,18 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
         <button
           onClick={props.handleAuth}
           disabled={props.authBusy}
-          className="btn-smooth mt-3 w-full rounded-xl px-3 py-2.5 text-sm font-semibold text-white"
-          style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))", opacity: props.authBusy ? 0.75 : 1 }}
+          className="btn-smooth btn-ripple mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-white"
+          style={{
+            background: "linear-gradient(135deg, var(--pink), var(--lavender))",
+            boxShadow: props.authBusy ? "none" : "0 6px 20px rgba(255,107,157,0.38)",
+            opacity: props.authBusy ? 0.8 : 1,
+          }}
         >
+          {props.authBusy && (
+            <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="white" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
+            </svg>
+          )}
           {authActionLabel}
         </button>
 
@@ -450,6 +475,7 @@ export default function AccountPanel({
         wallpaper: f.wallpaper.trim(),
       });
       setSaveStatus("saved");
+      toast("Profile saved!", { icon: "save" });
       savedTimerRef.current = setTimeout(() => setSaveStatus("idle"), 2500);
     }, 900);
     return () => {
@@ -458,7 +484,11 @@ export default function AccountPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileName, avatarUrl, bio, homeTitle, youtubeUrl, accentColor, wallpaper]);
 
-  const handleGuestSave = () => { onRenameGuest(guestName); setError(""); };
+  const handleGuestSave = () => {
+    onRenameGuest(guestName);
+    setError("");
+    toast(`Name set to ${guestName}!`, { icon: "sparkle" });
+  };
 
   const handleAvatarUpload = async (file: File | null) => {
     if (!file) return;
@@ -472,8 +502,21 @@ export default function AccountPanel({
       ? await onSignUp(username, password, displayName)
       : await onLogIn(username, password);
     setAuthBusy(false);
-    if (!result.ok) { setError(result.error ?? "Unable to continue."); return; }
-    setError(""); setUsername(""); setPassword(""); setDisplayName("");
+    if (!result.ok) {
+      const msg = result.error ?? "Unable to continue.";
+      setError(msg);
+      toast(msg, { variant: "error", icon: "warning" });
+      return;
+    }
+    setError("");
+    setUsername("");
+    setPassword("");
+    setDisplayName("");
+    if (mode === "signup") {
+      toast(`Welcome, ${displayName || username}!`, { icon: "star" });
+    } else {
+      toast(`Welcome back, ${username}!`, { icon: "sparkle" });
+    }
   };
 
   const handleProfileSave = () => {
@@ -532,7 +575,7 @@ export default function AccountPanel({
       setYoutubeUrl={setYoutubeUrl}
       saveStatus={saveStatus}
       onOpenSpaces={onOpenSpaces}
-      onLogOut={onLogOut}
+      onLogOut={() => { toast("See you soon!", { icon: "wave" }); onLogOut(); }}
       onUploadAvatar={(file) => { void handleAvatarUpload(file); }}
     />
   ) : (
@@ -572,15 +615,15 @@ export default function AccountPanel({
         {isAuthenticated && currentAccount ? (
           <div className="flex flex-1 items-center gap-3">
             <div
-              className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-2 text-lg font-bold text-white"
-              style={{ borderColor: accent, background: avatarUrl ? "transparent" : accent }}
+              className="flex h-14 w-14 shrink-0 overflow-hidden rounded-2xl border-2"
+              style={{ borderColor: accent }}
             >
-              {avatarUrl ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={avatarUrl} alt={profileName} className="h-full w-full object-cover" />
-              ) : (
-                (profileName || currentAccount.displayName).slice(0, 2).toUpperCase()
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={avatarUrl || buildDicebearUrl(profileName || currentAccount.displayName)}
+                alt={profileName || currentAccount.displayName}
+                className="h-full w-full object-cover"
+              />
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-bold">{profileName || currentAccount.displayName}</p>
