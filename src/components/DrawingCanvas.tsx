@@ -236,20 +236,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     
     // Sync remote strokes from collaboration
     useEffect(() => {
-      console.log("[DrawingCanvas] remoteStrokes effect triggered:", { count: remoteStrokes?.length ?? 0, existing: remoteStrokesRef.current.length });
       if (remoteStrokes && remoteStrokes.length > 0) {
-        console.log("[DrawingCanvas] Adding remote strokes to ref:", remoteStrokes.map(s => ({ id: s.id, pts: s.pts.length })));
         remoteStrokesRef.current = [...remoteStrokesRef.current, ...remoteStrokes];
-        console.log("[DrawingCanvas] Bumping version, total remote strokes:", remoteStrokesRef.current.length);
         setRemoteStrokesVersion(v => v + 1);
       }
     }, [remoteStrokes]);
     
     // Sync DB strokes - these are the initial load from the database
     useEffect(() => {
-      console.log("[DrawingCanvas] dbStrokes effect triggered:", { count: dbStrokes?.length ?? 0 });
       if (dbStrokes && dbStrokes.length > 0) {
-        console.log("[DrawingCanvas] DB strokes loaded:", dbStrokes.length);
         setRemoteStrokesVersion(v => v + 1);
       }
     }, [dbStrokes]);
@@ -440,7 +435,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       
       // Include remote strokes in layer grouping
       const remoteStrokesByLayer: Record<number, SyncStroke[]> = {};
-      console.log("[renderLiveCanvas] Processing remote strokes:", remoteStrokesRef.current.length);
       for (const stroke of remoteStrokesRef.current) {
         const layerIdx = 0; // Remote strokes default to layer 0 for now
         if (!remoteStrokesByLayer[layerIdx]) {
@@ -451,7 +445,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       
       // Include DB strokes in layer grouping
       const dbStrokesByLayer: Record<number, SyncStroke[]> = {};
-      console.log("[renderLiveCanvas] Processing DB strokes:", dbStrokes?.length ?? 0);
       for (const stroke of (dbStrokes ?? [])) {
         const layerIdx = 0; // DB strokes default to layer 0 for now
         if (!dbStrokesByLayer[layerIdx]) {
@@ -459,8 +452,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         }
         dbStrokesByLayer[layerIdx].push(stroke);
       }
-      console.log("[renderLiveCanvas] Grouped remote strokes by layer:", Object.keys(remoteStrokesByLayer).map(k => ({ layer: k, count: remoteStrokesByLayer[Number(k)].length })));
-      
       // Render layers in order (0 = back, max = front)
       const maxLayer = Math.max(
         ...Object.keys(strokesByLayer).map(Number),
@@ -469,12 +460,9 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         ...Object.keys(dbStrokesByLayer).map(Number),
         maxLayerIndex
       );
-      console.log("[renderLiveCanvas] maxLayer:", maxLayer, "localStrokes:", localStrokesRef.current.length, "remoteStrokes:", remoteStrokesRef.current.length);
-      
       for (let layerIdx = 0; layerIdx <= maxLayer; layerIdx++) {
         // Draw local strokes for this layer
         const layerStrokes = strokesByLayer[layerIdx] ?? [];
-        console.log("[renderLiveCanvas] Layer", layerIdx, "local strokes:", layerStrokes.length);
         for (const stroke of layerStrokes) {
           const isEraser = stroke.tool === "eraser";
           const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
@@ -492,12 +480,9 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         
         // Draw remote strokes for this layer
         const layerRemoteStrokes = remoteStrokesByLayer[layerIdx] ?? [];
-        console.log("[renderLiveCanvas] Layer", layerIdx, "remote strokes:", layerRemoteStrokes.length);
         for (const stroke of layerRemoteStrokes) {
-          console.log("[renderLiveCanvas] Drawing remote stroke:", stroke.id, "pts:", stroke.pts.length, "color:", stroke.color);
           const isEraser = stroke.tool === "eraser";
           const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
-          console.log("[renderLiveCanvas] Generated outline with", outline.length, "points");
           if (!outline.length) continue;
           ctx.save();
           if (isEraser) {
@@ -508,14 +493,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           }
           ctx.fill(strokeToPath2D(outline));
           ctx.restore();
-          console.log("[renderLiveCanvas] Drew remote stroke successfully");
         }
         
         // Draw DB strokes for this layer (initial load from database)
         const layerDbStrokes = dbStrokesByLayer[layerIdx] ?? [];
-        console.log("[renderLiveCanvas] Layer", layerIdx, "DB strokes:", layerDbStrokes.length);
         for (const stroke of layerDbStrokes) {
-          console.log("[renderLiveCanvas] Drawing DB stroke:", stroke.id, "pts:", stroke.pts.length);
           const isEraser = stroke.tool === "eraser";
           const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
           if (!outline.length) continue;
@@ -1014,7 +996,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           const deltaPts = allStrokePointsRef.current.slice(lastBroadcastIndexRef.current);
           lastBroadcastIndexRef.current = allStrokePointsRef.current.length;
           if (deltaPts.length > 0) {
-            console.log("[DrawingCanvas] Broadcasting stroke update:", { strokeId: currentStrokeIdRef.current, pts: deltaPts.length, tool, activePointerId: activePointerIdRef.current });
             onStrokeUpdate?.(
               currentStrokeIdRef.current,
               deltaPts,
@@ -1069,7 +1050,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
           // Send any remaining unbroadcast points with isLast = true
           const remainingDelta = allPts.slice(lastBroadcastIndexRef.current);
-          console.log("[DrawingCanvas] Stroke complete, sending final update:", { strokeId, remainingPts: remainingDelta.length, totalPts: allPts.length });
           onStrokeUpdate?.(strokeId, remainingDelta, color, size, tool, true);
 
           // Commit pen stroke from active canvas to drawing canvas

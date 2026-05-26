@@ -114,7 +114,6 @@ function commitAccToCanvas(
   acc: LiveAccumulated,
   strokeId: string,
 ) {
-  console.log("[commitAccToCanvas] Committing stroke to main canvas", { strokeId, pts: acc.allPts.length, tool: acc.tool });
   const dc = canvasRef.current?.getCanvas();
   if (!dc) {
     console.warn("[commitAccToCanvas] No canvas available from canvasRef!");
@@ -126,7 +125,6 @@ function commitAccToCanvas(
     return;
   }
   renderSyncStroke(ctx, { id: strokeId, tool: acc.tool, color: acc.color, size: acc.size, pts: acc.allPts });
-  console.log("[commitAccToCanvas] Stroke committed successfully");
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -191,7 +189,6 @@ export function useStrokeSync({
   // ── Remote stroke rendering ─────────────────────────────────────────────────
 
   const renderRemoteStrokes = useCallback(() => {
-    console.log("[renderRemoteStrokes] Rendering", { activeStrokes: remoteActiveStrokesRef.current.size });
     const canvas = remoteStrokeCanvasRef.current;
     if (!canvas) {
       console.warn("[renderRemoteStrokes] No remote stroke canvas available!");
@@ -204,7 +201,6 @@ export function useStrokeSync({
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const stroke of remoteActiveStrokesRef.current.values()) {
-      console.log("[renderRemoteStrokes] Rendering stroke", { strokeId: stroke.strokeId, pts: stroke.allPts.length, tool: stroke.tool });
       renderSyncStroke(ctx, {
         id: stroke.strokeId,
         tool: stroke.tool,
@@ -300,24 +296,20 @@ export function useStrokeSync({
       // Live stroke points while another user is drawing
       .on("broadcast", { event: "stroke" }, ({ payload }) => {
         const data = payload as LiveStrokePayload;
-        console.log("[useStrokeSync] Received stroke broadcast:", { artistId: data?.artistId, strokeId: data?.strokeId, pts: data?.pts?.length, isLast: data?.isLast, selfId: selfIdRef.current, willProcess: data?.artistId && data.artistId !== selfIdRef.current });
         if (!data?.artistId) {
           console.warn("[useStrokeSync] Received stroke with no artistId, ignoring");
           return;
         }
         if (data.artistId === selfIdRef.current) {
-          console.log("[useStrokeSync] Ignoring self-broadcast");
           return;
         }
 
         if (data.isLast) {
-          console.log("[useStrokeSync] Processing final stroke segment", { artistId: data.artistId, strokeId: data.strokeId, hasAccumulator: !!remoteActiveStrokesRef.current.get(data.artistId) });
           const acc = remoteActiveStrokesRef.current.get(data.artistId);
           if (acc) appendDeltaPts(acc, data.pts);
           remoteActiveStrokesRef.current.delete(data.artistId);
           renderedStrokeIdsRef.current.add(data.strokeId);
           if (acc) {
-            console.log("[useStrokeSync] Committing final stroke to canvas", { strokeId: data.strokeId, totalPts: acc.allPts.length });
             // Store the completed stroke so DrawingCanvas can render it
             setRemoteCompletedStrokes(prev => [...prev, {
               id: data.strokeId,
@@ -333,10 +325,8 @@ export function useStrokeSync({
         } else {
           const existing = remoteActiveStrokesRef.current.get(data.artistId);
           if (existing?.strokeId === data.strokeId) {
-            console.log("[useStrokeSync] Adding to existing stroke", { artistId: data.artistId, strokeId: data.strokeId, newPts: data.pts?.length, totalPts: existing.allPts.length + (data.pts?.length ?? 0) });
             appendDeltaPts(existing, data.pts);
           } else {
-            console.log("[useStrokeSync] Starting new stroke", { artistId: data.artistId, strokeId: data.strokeId, pts: data.pts?.length, color: data.color, size: data.size, tool: data.tool });
             remoteActiveStrokesRef.current.set(data.artistId, {
               strokeId: data.strokeId,
               allPts: data.pts ? [...data.pts] : [],
@@ -346,7 +336,6 @@ export function useStrokeSync({
             });
           }
           if (!strokeRafRef.current) {
-            console.log("[useStrokeSync] Starting render loop");
             strokeRafRef.current = requestAnimationFrame(renderRemoteStrokes);
           }
         }
@@ -388,11 +377,8 @@ export function useStrokeSync({
         persistDirtyRef.current = true;
       });
 
-    ch.subscribe((status) => {
-      console.log("[useStrokeSync] Channel subscription status:", status, "collabScope:", collabScope);
-    });
+    ch.subscribe();
     channelRef.current = ch;
-    console.log("[useStrokeSync] Channel created and subscribing, collabScope:", collabScope);
 
     return () => {
       if (strokeRafRef.current) {
@@ -475,7 +461,6 @@ export function useStrokeSync({
         console.warn("[broadcastStroke] No channel available - stroke not broadcast", { hasSession, collabScope, strokeId, pts: pts.length });
         return;
       }
-      console.log("[broadcastStroke] Broadcasting stroke", { strokeId, pts: pts.length, tool, isLast, collabScope });
       void ch.send({
         type: "broadcast",
         event: "stroke",
