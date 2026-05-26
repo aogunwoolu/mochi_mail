@@ -7,14 +7,12 @@ import SpaceStudio from "@/components/SpaceStudio";
 import { useState, useEffect, Suspense } from "react";
 import { parseSpaceConfig, bgToCss } from "@/lib/spaceConfig";
 
-function SpacePageInner() {
+export function SpaceView({ requestedUser }: { requestedUser: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const account = useAccount();
-  const spaces = useSpaces(account.accounts, account.currentAccount);
+  const spaces = useSpaces(account.accounts, account.currentAccount, requestedUser || undefined);
   const [selectedSpaceId, setSelectedSpaceId] = useState("");
   const isPreparingSpace = account.hydrated && account.isAuthenticated && !account.currentAccount;
-  const requestedUser = searchParams?.get("u")?.trim().toLowerCase() ?? "";
 
   const selectedSpace = spaces.spaces.find((s) => s.id === selectedSpaceId)
     ?? spaces.ownSpace
@@ -33,10 +31,10 @@ function SpacePageInner() {
   }, [requestedUser, spaces.spaces, selectedSpaceId]);
 
   useEffect(() => {
-    if (account.hydrated && !account.hasSession) {
+    if (!requestedUser && account.hydrated && !account.hasSession) {
       router.push("/");
     }
-  }, [account.hydrated, account.hasSession, router]);
+  }, [requestedUser, account.hydrated, account.hasSession, router]);
 
   if (!account.hydrated || isPreparingSpace) {
     return (
@@ -53,7 +51,7 @@ function SpacePageInner() {
     );
   }
 
-  if (!account.hasSession) return null;
+  if (!requestedUser && !account.hasSession) return null;
 
   const cfg = parseSpaceConfig(selectedSpace?.wallpaper ?? account.viewer.wallpaper);
   const pageBg = bgToCss(cfg.bg);
@@ -68,6 +66,7 @@ function SpacePageInner() {
         <SpaceStudio
           viewer={account.viewer}
           isAuthenticated={account.isAuthenticated}
+          requestedUsername={requestedUser || undefined}
           spaces={spaces.spaces}
           ownSpace={spaces.ownSpace}
           selectedSpaceId={selectedSpaceId}
@@ -83,6 +82,12 @@ function SpacePageInner() {
       </div>
     </div>
   );
+}
+
+function SpacePageInner() {
+  const searchParams = useSearchParams();
+  const requestedUser = searchParams?.get("u")?.trim().toLowerCase() ?? "";
+  return <SpaceView requestedUser={requestedUser} />;
 }
 
 export default function SpacePage() {

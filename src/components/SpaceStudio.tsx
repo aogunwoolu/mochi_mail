@@ -27,6 +27,7 @@ const SpaceBoard = dynamic(() => import("./SpaceBoard"), { ssr: false });
 interface SpaceStudioProps {
   viewer: ViewerIdentity;
   isAuthenticated: boolean;
+  requestedUsername?: string;
   spaces: UserSpace[];
   ownSpace: UserSpace | null;
   selectedSpaceId: string;
@@ -511,6 +512,7 @@ function VisitorNoteModal({
 export default function SpaceStudio({
   viewer,
   isAuthenticated,
+  requestedUsername,
   spaces,
   ownSpace,
   selectedSpaceId,
@@ -604,6 +606,22 @@ export default function SpaceStudio({
   }, [onUpdateSpaceItem, selectedSpace]);
 
   if (!selectedSpace) {
+    if (requestedUsername) {
+      return (
+        <div className="flex h-full items-center justify-center p-6 text-center">
+          <div className="rounded-3xl border p-8 shadow-sm" style={{ background: "rgba(255,255,255,0.88)", borderColor: "var(--border)" }}>
+            <p className="mb-3 text-3xl">🌸</p>
+            <p className="text-base font-semibold">Space not found</p>
+            <p className="mt-2 text-sm" style={{ color: "var(--muted)" }}>We couldn&apos;t find a space for <strong>{requestedUsername}</strong>.</p>
+            <button onClick={onNavigateBack}
+              className="btn-smooth mt-4 rounded-xl px-4 py-2 text-sm font-semibold text-white"
+              style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
+              Go back
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex h-full items-center justify-center p-6 text-center">
         <div className="rounded-3xl border p-8 shadow-sm" style={{ background: "rgba(255,255,255,0.88)", borderColor: "var(--border)" }}>

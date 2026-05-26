@@ -96,6 +96,7 @@ export interface Database {
           is_public: boolean;
           invite_token: string;
           password_hash: string | null;
+          room_code?: string;
           created_at: string;
           updated_at: string;
         };
@@ -107,6 +108,7 @@ export interface Database {
           is_public?: boolean;
           invite_token?: string;
           password_hash?: string | null;
+          room_code?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -167,6 +169,50 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["store_states"]["Insert"]>;
+        Relationships: [];
+      };
+      studio_boards: {
+        Row: {
+          created_by: string;
+          room_id: string;
+          drawing_data: string | null;
+          placed_items: Json;
+          selected_paper: Json;
+          updated_at: string;
+        };
+        Insert: {
+          created_by: string;
+          room_id: string;
+          drawing_data?: string | null;
+          placed_items?: Json;
+          selected_paper?: Json;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["studio_boards"]["Insert"]>;
+        Relationships: [];
+      };
+      board_strokes: {
+        Row: {
+          id: string;
+          room_id: string;
+          artist_id: string;
+          tool: "pen" | "eraser";
+          color: string;
+          size: number;
+          points: Json;
+          seq: number;
+        };
+        Insert: {
+          id: string;
+          room_id: string;
+          artist_id: string;
+          tool: "pen" | "eraser";
+          color: string;
+          size: number;
+          points: Json;
+          seq: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["board_strokes"]["Insert"]>;
         Relationships: [];
       };
     };

@@ -24,14 +24,15 @@ function loadLetters(storageKey: string): Letter[] {
   try {
     const raw = localStorage.getItem(storageKey);
     return raw ? (JSON.parse(raw) as Letter[]) : [];
-  } catch {
+  } catch (err) {
+    console.error("[useMail] Failed to load letters from localStorage:", err);
     return [];
   }
 }
 
 function saveLetters(storageKey: string, letters: Letter[]) {
   if (!globalThis.window) return;
-  try { localStorage.setItem(storageKey, JSON.stringify(letters)); } catch { /* quota exceeded */ }
+  try { localStorage.setItem(storageKey, JSON.stringify(letters)); } catch (err) { console.warn("[useMail] localStorage quota exceeded:", err); }
 }
 
 export function useMail(user: ViewerIdentity) {

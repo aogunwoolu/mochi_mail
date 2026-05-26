@@ -38,12 +38,12 @@ const AUTH_EMAIL_DOMAIN = "mochimail.app";
 
 function saveAnonTokens(session: { access_token: string; refresh_token: string }) {
   if (typeof window === "undefined") return;
-  try { localStorage.setItem(ANON_TOKENS_KEY, JSON.stringify(session)); } catch { /* quota */ }
+  try { localStorage.setItem(ANON_TOKENS_KEY, JSON.stringify(session)); } catch (err) { console.warn("[useAccount] Failed to save anon tokens to localStorage:", err); }
 }
 
 function clearAnonTokens() {
   if (typeof window === "undefined") return;
-  try { localStorage.removeItem(ANON_TOKENS_KEY); } catch { /* ignore */ }
+  try { localStorage.removeItem(ANON_TOKENS_KEY); } catch (err) { console.warn("[useAccount] Failed to remove anon tokens from localStorage:", err); }
 }
 
 async function tryRestoreAnonSession(
@@ -61,7 +61,8 @@ async function tryRestoreAnonSession(
     }
     if (data.session) saveAnonTokens(data.session);
     return data.user;
-  } catch {
+  } catch (err) {
+    console.error("[useAccount] Failed to restore anonymous session:", err);
     clearAnonTokens();
     return null;
   }
@@ -70,7 +71,7 @@ async function tryRestoreAnonSession(
 function isAnonymousUser(user: User | null): boolean {
   if (!user) return false;
   // Supabase v2 exposes is_anonymous directly; fall back to checking identities
-  if ((user as unknown as { is_anonymous?: boolean }).is_anonymous === true) return true;
+  if ("is_anonymous" in user && (user as { is_anonymous?: boolean }).is_anonymous === true) return true;
   // No linked identities = not a converted full account
   if (!user.identities || user.identities.length === 0) return true;
   return user.identities.every((identity) => identity.provider === "anonymous");
@@ -124,6 +125,7 @@ export function useAccount() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [guestId, setGuestId] = useState("");
   const [guestName, setGuestName] = useState("");
+  const [anonymousAvatarUrl, setAnonymousAvatarUrl] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [anonymousAuthWarning, setAnonymousAuthWarning] = useState<string | null>(null);
 
@@ -137,6 +139,10 @@ export function useAccount() {
       const existingUser = data.session?.user ?? null;
       if (existingUser) {
         if (isAnonymousUser(existingUser) && data.session) saveAnonTokens(data.session);
+        // Load avatar URL from metadata for anonymous users
+        const metadata = existingUser.user_metadata as Record<string, unknown> | undefined;
+        const avatarFromMeta = metadata?.avatar_url;
+        if (typeof avatarFromMeta === "string") setAnonymousAvatarUrl(avatarFromMeta);
         setAuthUser(existingUser);
         setHydrated(true);
         return;
@@ -251,8 +257,13 @@ export function useAccount() {
     }
     // Anonymous Supabase user: use their stable ID so mail/assets are consistent,
     // but treat them as a guest (no space, no public profile).
-    return { id: authUser?.id ?? guestId, name: guestName, isGuest: true };
-  }, [authUser, profile, guestId, guestName]);
+    return {
+      id: authUser?.id ?? guestId,
+      name: guestName,
+      avatarUrl: anonymousAvatarUrl ?? undefined,
+      isGuest: true,
+    };
+  }, [authUser, profile, guestId, guestName, anonymousAvatarUrl]);
 
   const currentAccount = useMemo(
     () =>
@@ -326,6 +337,38 @@ export function useAccount() {
     if (globalThis.window !== undefined) localStorage.setItem(GUEST_NAME_KEY, next);
   }, []);
 
+  const uploadAvatar = useCallback(async (file: File): Promise<string | null> => {
+    if (!authUser) return null;
+    const supabase = createSupabaseBrowserClient();
+
+    // Upload to avatars bucket with user ID as folder
+    const fileExt = file.name.split(".").pop() ?? "png";
+    const filePath = `${authUser.id}/avatar.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
+      console.error("[useAccount] Avatar upload failed:", uploadError);
+      return null;
+    }
+
+    // Get public URL
+    const { data: publicUrlData } = supabase.storage.from("avatars").getPublicUrl(filePath);
+    const publicUrl = publicUrlData.publicUrl;
+
+    // For anonymous users, save to user metadata so it persists
+    if (isAnonymousUser(authUser)) {
+      const { error: metaError } = await supabase.auth.updateUser({
+        data: { avatar_url: publicUrl },
+      });
+      if (!metaError) setAnonymousAvatarUrl(publicUrl);
+    }
+
+    return publicUrl;
+  }, [authUser]);
+
   const updateAccount = useCallback(async (patch: {
     displayName?: string;
     avatarUrl?: string;
@@ -377,5 +420,6 @@ export function useAccount() {
     logOut,
     renameGuest,
     updateAccount,
+    uploadAvatar,
   };
 }

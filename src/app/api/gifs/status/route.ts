@@ -5,11 +5,11 @@ export async function GET() {
 
   if (provider === "gifapi") {
     if (!process.env.GIFAPI_KEY) {
-      return NextResponse.json({ ready: false, error: "missing_gifapi_key" });
+      return NextResponse.json({ ready: false, error: "GifAPI key not configured in environment variables" });
     }
   } else {
     if (!process.env.GIPHY_API_KEY) {
-      return NextResponse.json({ ready: false, error: "missing_giphy_key" });
+      return NextResponse.json({ ready: false, error: "Giphy API key not configured in environment variables" });
     }
   }
 

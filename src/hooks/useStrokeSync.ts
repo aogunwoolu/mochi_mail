@@ -1,10 +1,11 @@
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getStroke } from "perfect-freehand";
 import { strokeToPath2D } from "@/lib/canvas/strokeUtils";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { DrawingCanvasHandle } from "@/components/DrawingCanvas";
 import type { PaperBackground, PlacedSticker } from "@/types";
+import type { Database, Json } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,10 +46,10 @@ export type UseStrokeSyncOptions = {
   canvasRef: React.RefObject<DrawingCanvasHandle | null>;
   remoteStrokeCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   placedItems: PlacedSticker[];
-  selectedPaper: PaperBackground | undefined;
+  selectedPaper: PaperBackground | null | undefined;
   applySharedCanvasState: (state: {
     placedItems?: PlacedSticker[];
-    selectedPaper?: PaperBackground | null;
+    selectedPaper?: PaperBackground | null | undefined;
   }) => void;
   onRemotePlacedItemAdd: (item: PlacedSticker) => void;
   onRemotePlacedItemRemove: (itemId: string) => void;
@@ -113,11 +114,19 @@ function commitAccToCanvas(
   acc: LiveAccumulated,
   strokeId: string,
 ) {
+  console.log("[commitAccToCanvas] Committing stroke to main canvas", { strokeId, pts: acc.allPts.length, tool: acc.tool });
   const dc = canvasRef.current?.getCanvas();
-  const ctx = dc?.getContext("2d");
-  if (ctx) {
-    renderSyncStroke(ctx, { id: strokeId, tool: acc.tool, color: acc.color, size: acc.size, pts: acc.allPts });
+  if (!dc) {
+    console.warn("[commitAccToCanvas] No canvas available from canvasRef!");
+    return;
   }
+  const ctx = dc.getContext("2d");
+  if (!ctx) {
+    console.warn("[commitAccToCanvas] Could not get 2d context!");
+    return;
+  }
+  renderSyncStroke(ctx, { id: strokeId, tool: acc.tool, color: acc.color, size: acc.size, pts: acc.allPts });
+  console.log("[commitAccToCanvas] Stroke committed successfully");
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -149,6 +158,14 @@ export function useStrokeSync({
   const remoteActiveStrokesRef = useRef<Map<string, LiveAccumulated>>(new Map());
   const renderedStrokeIdsRef = useRef<Set<string>>(new Set());
   const strokeRafRef = useRef<number | null>(null);
+  
+  // Completed remote strokes that need to be rendered in the main canvas
+  // (separate from local strokes so they don't get cleared on undo)
+  // Using state so changes trigger re-renders in DrawingCanvas
+  const [remoteCompletedStrokes, setRemoteCompletedStrokes] = useState<SyncStroke[]>([]);
+  
+  // Strokes loaded from database on initial load
+  const [dbStrokes, setDbStrokes] = useState<SyncStroke[]>([]);
 
   // Board metadata (items / paper) sync guards
   const hasReceivedRemoteBoardRef = useRef(false);
@@ -174,12 +191,20 @@ export function useStrokeSync({
   // ── Remote stroke rendering ─────────────────────────────────────────────────
 
   const renderRemoteStrokes = useCallback(() => {
+    console.log("[renderRemoteStrokes] Rendering", { activeStrokes: remoteActiveStrokesRef.current.size });
     const canvas = remoteStrokeCanvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      console.warn("[renderRemoteStrokes] No remote stroke canvas available!");
+      return;
+    }
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      console.warn("[renderRemoteStrokes] Could not get canvas context!");
+      return;
+    }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const stroke of remoteActiveStrokesRef.current.values()) {
+      console.log("[renderRemoteStrokes] Rendering stroke", { strokeId: stroke.strokeId, pts: stroke.allPts.length, tool: stroke.tool });
       renderSyncStroke(ctx, {
         id: stroke.strokeId,
         tool: stroke.tool,
@@ -223,7 +248,7 @@ export function useStrokeSync({
 
       // 2. Load and replay all strokes from board_strokes
       const supabase = createSupabaseBrowserClient();
-      const { data: rows, error } = await (supabase as any)
+      const { data: rows, error } = await supabase
         .from("board_strokes")
         .select("id, tool, color, size, points")
         .eq("room_id", collabScope)
@@ -240,20 +265,17 @@ export function useStrokeSync({
           console.warn("[useStrokeSync] stroke load error:", error.message);
         }
       } else if (rows?.length) {
-        const canvas = canvasRef.current?.getCanvas();
-        const ctx = canvas?.getContext("2d");
-        if (canvas && ctx) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          for (const row of rows) {
-            renderSyncStroke(ctx, {
-              id: row.id,
-              tool: row.tool === "eraser" ? "eraser" : "pen",
-              color: row.color ?? "#000000",
-              size: row.size ?? 4,
-              pts: (row.points ?? []) as [number, number, number][],
-            });
-            renderedStrokeIdsRef.current.add(row.id);
-          }
+        // Store DB strokes in state so DrawingCanvas can render them properly
+        const loadedStrokes: SyncStroke[] = rows.map(row => ({
+          id: row.id,
+          tool: row.tool === "eraser" ? "eraser" : "pen",
+          color: row.color ?? "#000000",
+          size: row.size ?? 4,
+          pts: ((row.points as unknown) ?? []) as [number, number, number][],
+        }));
+        setDbStrokes(loadedStrokes);
+        for (const stroke of loadedStrokes) {
+          renderedStrokeIdsRef.current.add(stroke.id);
         }
       }
 
@@ -278,21 +300,43 @@ export function useStrokeSync({
       // Live stroke points while another user is drawing
       .on("broadcast", { event: "stroke" }, ({ payload }) => {
         const data = payload as LiveStrokePayload;
-        if (!data?.artistId || data.artistId === selfIdRef.current) return;
+        console.log("[useStrokeSync] Received stroke broadcast:", { artistId: data?.artistId, strokeId: data?.strokeId, pts: data?.pts?.length, isLast: data?.isLast, selfId: selfIdRef.current, willProcess: data?.artistId && data.artistId !== selfIdRef.current });
+        if (!data?.artistId) {
+          console.warn("[useStrokeSync] Received stroke with no artistId, ignoring");
+          return;
+        }
+        if (data.artistId === selfIdRef.current) {
+          console.log("[useStrokeSync] Ignoring self-broadcast");
+          return;
+        }
 
         if (data.isLast) {
+          console.log("[useStrokeSync] Processing final stroke segment", { artistId: data.artistId, strokeId: data.strokeId, hasAccumulator: !!remoteActiveStrokesRef.current.get(data.artistId) });
           const acc = remoteActiveStrokesRef.current.get(data.artistId);
           if (acc) appendDeltaPts(acc, data.pts);
           remoteActiveStrokesRef.current.delete(data.artistId);
           renderedStrokeIdsRef.current.add(data.strokeId);
-          if (acc) commitAccToCanvas(canvasRef, acc, data.strokeId);
+          if (acc) {
+            console.log("[useStrokeSync] Committing final stroke to canvas", { strokeId: data.strokeId, totalPts: acc.allPts.length });
+            // Store the completed stroke so DrawingCanvas can render it
+            setRemoteCompletedStrokes(prev => [...prev, {
+              id: data.strokeId,
+              tool: acc.tool,
+              color: acc.color,
+              size: acc.size,
+              pts: acc.allPts,
+            }]);
+            commitAccToCanvas(canvasRef, acc, data.strokeId);
+          }
           // One extra render to wipe the completed stroke off the live overlay
           requestAnimationFrame(renderRemoteStrokes);
         } else {
           const existing = remoteActiveStrokesRef.current.get(data.artistId);
           if (existing?.strokeId === data.strokeId) {
+            console.log("[useStrokeSync] Adding to existing stroke", { artistId: data.artistId, strokeId: data.strokeId, newPts: data.pts?.length, totalPts: existing.allPts.length + (data.pts?.length ?? 0) });
             appendDeltaPts(existing, data.pts);
           } else {
+            console.log("[useStrokeSync] Starting new stroke", { artistId: data.artistId, strokeId: data.strokeId, pts: data.pts?.length, color: data.color, size: data.size, tool: data.tool });
             remoteActiveStrokesRef.current.set(data.artistId, {
               strokeId: data.strokeId,
               allPts: data.pts ? [...data.pts] : [],
@@ -302,6 +346,7 @@ export function useStrokeSync({
             });
           }
           if (!strokeRafRef.current) {
+            console.log("[useStrokeSync] Starting render loop");
             strokeRafRef.current = requestAnimationFrame(renderRemoteStrokes);
           }
         }
@@ -343,8 +388,11 @@ export function useStrokeSync({
         persistDirtyRef.current = true;
       });
 
-    ch.subscribe();
+    ch.subscribe((status) => {
+      console.log("[useStrokeSync] Channel subscription status:", status, "collabScope:", collabScope);
+    });
     channelRef.current = ch;
+    console.log("[useStrokeSync] Channel created and subscribing, collabScope:", collabScope);
 
     return () => {
       if (strokeRafRef.current) {
@@ -423,14 +471,18 @@ export function useStrokeSync({
       isLast: boolean,
     ) => {
       const ch = channelRef.current;
-      if (!ch) return;
+      if (!ch) {
+        console.warn("[broadcastStroke] No channel available - stroke not broadcast", { hasSession, collabScope, strokeId, pts: pts.length });
+        return;
+      }
+      console.log("[broadcastStroke] Broadcasting stroke", { strokeId, pts: pts.length, tool, isLast, collabScope });
       void ch.send({
         type: "broadcast",
         event: "stroke",
         payload: { artistId: selfIdRef.current, strokeId, pts, color, size, tool, isLast },
       });
     },
-    [],
+    [hasSession, collabScope],
   );
 
   // Persist a completed stroke to the DB immediately (called on pointer-up)
@@ -445,16 +497,16 @@ export function useStrokeSync({
       if (!hasSession || !collabScope || !isSessionReadyRef.current) return;
       renderedStrokeIdsRef.current.add(strokeId);
       const supabase = createSupabaseBrowserClient();
-      const { error } = await (supabase as any).from("board_strokes").insert({
+      const { error } = await supabase.from("board_strokes").insert({
         id: strokeId,
         room_id: collabScope,
         artist_id: selfIdRef.current ?? "unknown",
         tool,
         color,
         size,
-        points: pts,
+        points: pts as unknown as Json,
         seq: Date.now(),
-      });
+      } as Database["public"]["Tables"]["board_strokes"]["Insert"]);
       if (error) {
         const msg = String(error.message ?? "").toLowerCase();
         if (
@@ -475,7 +527,7 @@ export function useStrokeSync({
       if (!hasSession || !collabScope) return;
       renderedStrokeIdsRef.current.delete(strokeId);
       const supabase = createSupabaseBrowserClient();
-      await (supabase as any)
+      await supabase
         .from("board_strokes")
         .delete()
         .eq("id", strokeId)
@@ -512,6 +564,11 @@ export function useStrokeSync({
     });
   }, []);
 
+  const clearDbStrokes = useCallback(() => {
+    setDbStrokes([]);
+    setRemoteCompletedStrokes([]);
+  }, []);
+
   return {
     broadcastStroke,
     saveStroke,
@@ -519,5 +576,8 @@ export function useStrokeSync({
     restoreStroke,
     broadcastPlacedItemAdd,
     broadcastPlacedItemRemove,
+    remoteCompletedStrokes,
+    dbStrokes,
+    clearDbStrokes,
   };
 }

@@ -11,7 +11,9 @@ import MailComposePanel from "@/components/MailComposePanel";
 import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
 import RoomControl from "@/components/RoomControl";
+import { AppHeader } from "@/components/AppHeader";
 import { FiEdit3, FiLayers, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
+import { Pencil, Eraser, MousePointer, Type, Scissors, Image, Sparkles } from "lucide-react";
 import { exportCanvas } from "@/components/ExportUtil";
 import { toast } from "@/lib/toast";
 import { useRoom } from "@/hooks/useRoom";
@@ -122,6 +124,7 @@ export default function Home() {
 
   const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
   const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
+  const [canvasZoom, setCanvasZoom] = useState(1);
 
   const {
     phase: roomPhase,
@@ -157,7 +160,6 @@ export default function Home() {
       applySharedCanvasState({ placedItems: placedItems.filter((p) => p.id !== itemId) }),
     [applySharedCanvasState, placedItems],
   );
-
   const {
     broadcastStroke,
     saveStroke,
@@ -165,6 +167,9 @@ export default function Home() {
     restoreStroke,
     broadcastPlacedItemAdd,
     broadcastPlacedItemRemove,
+    remoteCompletedStrokes,
+    dbStrokes,
+    clearDbStrokes,
   } = useStrokeSync({
     hasSession: account.hasSession,
     collabScope,
@@ -271,7 +276,50 @@ export default function Home() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
   const [layerCount, setLayerCount] = useState(1);
-  const [drawingLayerIndex, setDrawingLayerIndex] = useState(0);
+  const [activeLayer, setActiveLayer] = useState(0);
+
+
+  const handleMoveLayerUp = useCallback((layerIdx: number) => {
+    if (layerIdx >= layerCount - 1) return;
+    // Swap items between layerIdx and layerIdx + 1
+    const itemsAbove = placedItems.filter((i) => (i.layerIndex ?? 0) === layerIdx + 1);
+    const itemsBelow = placedItems.filter((i) => (i.layerIndex ?? 0) === layerIdx);
+    
+    itemsAbove.forEach((item) => {
+      updatePlacedItem(item.id, { layerIndex: layerIdx });
+    });
+    itemsBelow.forEach((item) => {
+      updatePlacedItem(item.id, { layerIndex: layerIdx + 1 });
+    });
+    
+    // Update active layer if it was the one being moved
+    if (activeLayer === layerIdx) {
+      setActiveLayer(layerIdx + 1);
+    } else if (activeLayer === layerIdx + 1) {
+      setActiveLayer(layerIdx);
+    }
+  }, [layerCount, placedItems, updatePlacedItem, activeLayer]);
+
+  const handleMoveLayerDown = useCallback((layerIdx: number) => {
+    if (layerIdx <= 0) return;
+    // Swap items between layerIdx and layerIdx - 1
+    const itemsAbove = placedItems.filter((i) => (i.layerIndex ?? 0) === layerIdx);
+    const itemsBelow = placedItems.filter((i) => (i.layerIndex ?? 0) === layerIdx - 1);
+    
+    itemsAbove.forEach((item) => {
+      updatePlacedItem(item.id, { layerIndex: layerIdx - 1 });
+    });
+    itemsBelow.forEach((item) => {
+      updatePlacedItem(item.id, { layerIndex: layerIdx });
+    });
+    
+    // Update active layer if it was the one being moved
+    if (activeLayer === layerIdx) {
+      setActiveLayer(layerIdx - 1);
+    } else if (activeLayer === layerIdx - 1) {
+      setActiveLayer(layerIdx);
+    }
+  }, [placedItems, updatePlacedItem, activeLayer]);
 
 
   const handleExport = useCallback(() => {
@@ -332,6 +380,184 @@ export default function Home() {
     },
     [account.viewer, store, trackItemPublished],
   );
+
+  // ── Canvas zoom (Ctrl+wheel / pinch) — anchors to focal point ─────────────
+  const pinchStateRef = useRef<{
+    startDist: number;
+    startZoom: number;
+    centerX: number;
+    centerY: number;
+    initialScrollLeft: number;
+    initialScrollTop: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== "studio") return;
+    const el = studioScrollRef.current;
+    if (!el) return;
+
+    // Calculate focal point in world coordinates before zoom
+    const getFocalWorldPoint = (clientX: number, clientY: number) => {
+      const rect = el.getBoundingClientRect();
+      const localX = clientX - rect.left + el.scrollLeft;
+      const localY = clientY - rect.top + el.scrollTop;
+      return {
+        x: localX / canvasZoom,
+        y: localY / canvasZoom,
+      };
+    };
+
+    // Adjust scroll to keep focal point stable after zoom change
+    const adjustScrollForZoom = (
+      newZoom: number,
+      focalWorldX: number,
+      focalWorldY: number,
+      viewportX: number,
+      viewportY: number,
+    ) => {
+      const newLocalX = focalWorldX * newZoom;
+      const newLocalY = focalWorldY * newZoom;
+      el.scrollLeft = newLocalX - viewportX;
+      el.scrollTop = newLocalY - viewportY;
+    };
+
+    // Wheel zoom with Ctrl/Meta - anchors to cursor position
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+
+      const rect = el.getBoundingClientRect();
+      const viewportX = e.clientX - rect.left;
+      const viewportY = e.clientY - rect.top;
+      const focalWorld = getFocalWorldPoint(e.clientX, e.clientY);
+
+      setCanvasZoom((prev) => {
+        const delta = -e.deltaY * 0.002;
+        const next = Math.min(3, Math.max(0.25, prev + delta));
+        // Use setTimeout to access the new zoom value after state update
+        setTimeout(() => {
+          adjustScrollForZoom(next, focalWorld.x, focalWorld.y, viewportX, viewportY);
+        }, 0);
+        return next;
+      });
+    };
+
+    // Touch pinch zoom - tracks center of pinch
+    const getTouchDistance = (t1: Touch, t2: Touch) => {
+      const dx = t2.clientX - t1.clientX;
+      const dy = t2.clientY - t1.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const getTouchCenter = (t1: Touch, t2: Touch) => ({
+      x: (t1.clientX + t2.clientX) / 2,
+      y: (t1.clientY + t2.clientY) / 2,
+    });
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const center = getTouchCenter(t1, t2);
+        pinchStateRef.current = {
+          startDist: getTouchDistance(t1, t2),
+          startZoom: canvasZoom,
+          centerX: center.x,
+          centerY: center.y,
+          initialScrollLeft: el.scrollLeft,
+          initialScrollTop: el.scrollTop,
+        };
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchStateRef.current) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const state = pinchStateRef.current;
+
+        const newDist = getTouchDistance(t1, t2);
+        const scale = newDist / state.startDist;
+        const nextZoom = Math.min(3, Math.max(0.25, state.startZoom * scale));
+
+        // Calculate focal point in world coordinates at start
+        const rect = el.getBoundingClientRect();
+        const startLocalX = state.centerX - rect.left + state.initialScrollLeft;
+        const startLocalY = state.centerY - rect.top + state.initialScrollTop;
+        const focalWorldX = startLocalX / state.startZoom;
+        const focalWorldY = startLocalY / state.startZoom;
+
+        // Track current center (pinch may have moved)
+        const currentCenter = getTouchCenter(t1, t2);
+        const viewportX = currentCenter.x - rect.left;
+        const viewportY = currentCenter.y - rect.top;
+
+        setCanvasZoom(nextZoom);
+        adjustScrollForZoom(nextZoom, focalWorldX, focalWorldY, viewportX, viewportY);
+      }
+    };
+
+    const onTouchEnd = () => {
+      pinchStateRef.current = null;
+    };
+
+    // Legacy Safari gesture events (backup for older iOS)
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      // Safari doesn't give us center, approximate with viewport center
+      pinchStateRef.current = {
+        startDist: 1,
+        startZoom: canvasZoom,
+        centerX: rect.left + rect.width / 2,
+        centerY: rect.top + rect.height / 2,
+        initialScrollLeft: el.scrollLeft,
+        initialScrollTop: el.scrollTop,
+      };
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const ge = e as unknown as { scale: number };
+      if (typeof ge.scale === "number" && pinchStateRef.current) {
+        const state = pinchStateRef.current;
+        // Safari scale is cumulative from gesture start, not delta
+        const nextZoom = Math.min(3, Math.max(0.25, state.startZoom * ge.scale));
+        const rect = el.getBoundingClientRect();
+        const startLocalX = state.centerX - rect.left + state.initialScrollLeft;
+        const startLocalY = state.centerY - rect.top + state.initialScrollTop;
+        const focalWorldX = startLocalX / state.startZoom;
+        const focalWorldY = startLocalY / state.startZoom;
+        const viewportX = state.centerX - rect.left;
+        const viewportY = state.centerY - rect.top;
+        setCanvasZoom(nextZoom);
+        adjustScrollForZoom(nextZoom, focalWorldX, focalWorldY, viewportX, viewportY);
+      }
+    };
+    const onGestureEnd = () => {
+      pinchStateRef.current = null;
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchEnd);
+    el.addEventListener("gesturestart", onGestureStart, { passive: false } as EventListenerOptions);
+    el.addEventListener("gesturechange", onGestureChange, { passive: false } as EventListenerOptions);
+    el.addEventListener("gestureend", onGestureEnd);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+      el.removeEventListener("gesturestart", onGestureStart);
+      el.removeEventListener("gesturechange", onGestureChange);
+      el.removeEventListener("gestureend", onGestureEnd);
+    };
+  }, [activeTab, canvasZoom]);
 
   // ── Infinite canvas scroll ────────────────────────────────────────────────
 
@@ -405,7 +631,7 @@ export default function Home() {
       }
 
       setScrollPos({ left: el.scrollLeft, top: el.scrollTop });
-      trackCursor(lastMouseWorldRef.current ?? getViewportCenterWorld());
+      trackCursor(lastMouseWorldRef.current ?? getViewportCenterWorld(), activeLayer, brushSettings.tool);
     };
 
     const onMouseMove = (e: MouseEvent) => {
@@ -414,7 +640,7 @@ export default function Home() {
         x: el.scrollLeft + e.clientX - rect.left + worldOffsetRef.current.x,
         y: el.scrollTop + e.clientY - rect.top + worldOffsetRef.current.y,
       };
-      trackCursor(lastMouseWorldRef.current);
+      trackCursor(lastMouseWorldRef.current, activeLayer, brushSettings.tool);
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -425,7 +651,7 @@ export default function Home() {
         x: el.scrollLeft + touch.clientX - rect.left + worldOffsetRef.current.x,
         y: el.scrollTop + touch.clientY - rect.top + worldOffsetRef.current.y,
       };
-      trackCursor(lastMouseWorldRef.current);
+      trackCursor(lastMouseWorldRef.current, activeLayer, brushSettings.tool);
     };
 
     const updateViewSize = () =>
@@ -449,6 +675,13 @@ export default function Home() {
       el.removeEventListener("touchmove", onTouchMove);
     };
   }, [activeTab, trackCursor, shiftPlacedItems, getViewportCenterWorld]);
+
+  // Broadcast tool/layer changes immediately (not just on cursor move)
+  useEffect(() => {
+    if (lastMouseWorldRef.current) {
+      trackCursor(lastMouseWorldRef.current, activeLayer, brushSettings.tool);
+    }
+  }, [brushSettings.tool, activeLayer, trackCursor]);
 
   const remoteArtists = roomMembers.filter((m) => m.presenceKey !== selfArtistId);
   const artistList = mounted
@@ -484,87 +717,16 @@ export default function Home() {
     <div className="relative z-10 flex h-svh flex-col overflow-hidden">
       {/* Header — hidden on studio (full-screen canvas) */}
       {!isStudio && (
-        <header className="glass-strong shrink-0 px-4 py-3">
-          <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
-            {/* Logo */}
-            <div className="flex items-center gap-2.5">
-              <div
-                className="h-9 w-9 rounded-xl bg-cover bg-center bg-no-repeat"
-                style={{ backgroundImage: "url('/brand-mark.svg')" }}
-              />
-              <div>
-                <h1 className="text-base font-bold leading-tight tracking-tight">MochiMail</h1>
-                <p className="hidden text-[10px] tracking-widest sm:block" style={{ color: "var(--muted)" }}>
-                  DIGITAL STATIONERY
-                </p>
-              </div>
-            </div>
-
-            {/* Nav */}
-            <nav
-              className="flex rounded-2xl p-1"
-              style={{ background: "var(--surface)" }}
-              aria-label="Main navigation"
-            >
-              {(
-                [
-                  { id: "studio" as AppTab, label: "Canvas", icon: <FiEdit3 /> },
-                  { id: "mail" as AppTab, label: "Mail", icon: <FiMail /> },
-                  { id: "store" as AppTab, label: "Shop", icon: <FiShoppingBag /> },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => { setActiveTab(tab.id); trackTabChange(tab.id); }}
-                  className="btn-smooth relative flex min-h-10 items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold"
-                  style={{
-                    background: activeTab === tab.id ? "var(--surface-hover)" : "transparent",
-                    color: activeTab === tab.id ? "var(--foreground)" : "var(--muted)",
-                  }}
-                  aria-current={activeTab === tab.id ? "page" : undefined}
-                >
-                  {tab.icon}
-                  <span className="hidden sm:inline">{tab.label}</span>
-                  {tab.id === "mail" && unreadCount > 0 && (
-                    <span
-                      className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
-                      style={{ background: "var(--pink)" }}
-                    >
-                      {unreadCount}
-                    </span>
-                  )}
-                </button>
-              ))}
-              <button
-                onClick={() => router.push("/rooms")}
-                className="btn-smooth relative flex min-h-10 items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold"
-                style={{ color: "var(--muted)" }}
-                aria-label="Rooms"
-              >
-                <FiUsers />
-                <span className="hidden sm:inline">Rooms</span>
-              </button>
-            </nav>
-
-            {/* Account */}
-            <button
-              onClick={() => setAccountOpen((p) => !p)}
-              className="btn-smooth flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl border-2"
-              style={{
-                borderColor: account.viewer.accentColor ?? "var(--border)",
-                background: account.viewer.accentColor ? `${account.viewer.accentColor}22` : "var(--surface)",
-              }}
-              title={account.hydrated ? account.viewer.name : "Account"}
-              aria-label="Account"
-            >
-              <img
-                src={account.viewer.avatarUrl || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(account.viewer.name || "mochimail")}`}
-                alt={account.viewer.name}
-                className="h-full w-full object-cover"
-              />
-            </button>
-          </div>
-        </header>
+        <AppHeader
+          activeTab={activeTab}
+          onTabChange={(tab) => { setActiveTab(tab); trackTabChange(tab); }}
+          unreadCount={unreadCount}
+          onAccountClick={() => setAccountOpen((p) => !p)}
+          accountName={account.viewer.name}
+          accountAvatarUrl={account.viewer.avatarUrl || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(account.viewer.name || "mochimail")}`}
+          accountAccentColor={account.viewer.accentColor ?? null}
+          accountHydrated={account.hydrated}
+        />
       )}
 
       {accountOpen ? (
@@ -578,6 +740,7 @@ export default function Home() {
           onLogIn={account.logIn}
           onLogOut={account.logOut}
           onUpdateAccount={account.updateAccount}
+          onUploadAvatar={account.uploadAvatar}
           onOpenSpaces={() => {
             setAccountOpen(false);
             router.push("/space");
@@ -629,12 +792,29 @@ export default function Home() {
             const t = Math.min(tx, ty);
             const px = cx + dx * t;
             const py = cy + dy * t;
+            const layerLabel = member.activeLayer !== undefined ? `L${member.activeLayer + 1}` : "";
             const initials = member.name.slice(0, 2).toUpperCase();
+            
+            // Tool icon component
+            const ToolIcon = () => {
+              const iconProps = { size: 12, strokeWidth: 2, className: "opacity-90" };
+              switch (member.tool) {
+                case "pen": return <Pencil {...iconProps} />;
+                case "eraser": return <Eraser {...iconProps} />;
+                case "select": return <MousePointer {...iconProps} />;
+                case "text": return <Type {...iconProps} />;
+                case "washi": return <Scissors {...iconProps} />;
+                case "asset": return <Image {...iconProps} />;
+                case "animated": return <Sparkles {...iconProps} />;
+                default: return <Pencil {...iconProps} />;
+              }
+            };
+            
             return (
               <button
                 key={member.presenceKey}
                 onClick={() => jumpToMember(member)}
-                className="btn-smooth absolute z-50 flex items-center gap-1.5 rounded-full py-1 pl-1 pr-2.5 text-[11px] font-semibold text-white"
+                className="btn-smooth absolute z-40 flex items-center gap-1 rounded-full py-1 pl-1 pr-2 text-[11px] font-semibold text-white"
                 style={{
                   left: px,
                   top: py,
@@ -642,15 +822,26 @@ export default function Home() {
                   background: member.color,
                   boxShadow: "0 2px 10px rgba(0,0,0,0.22)",
                 }}
-                title={`Jump to ${member.name}`}
+                title={`${member.name} • ${member.tool || "pen"} ${layerLabel}`}
               >
-                <span
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
-                  style={{ background: "rgba(255,255,255,0.25)" }}
-                >
-                  {initials}
-                </span>
-                <span className="max-w-20 truncate">{member.name}</span>
+                {/* Avatar or initials */}
+                {member.avatarUrl ? (
+                  <img src={member.avatarUrl} alt="" className="h-5 w-5 rounded-full" />
+                ) : (
+                  <span
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+                    style={{ background: "rgba(255,255,255,0.25)" }}
+                  >
+                    {initials}
+                  </span>
+                )}
+                
+                {/* Name */}
+                <span className="max-w-[50px] truncate">{member.name}</span>
+                
+                {/* Tool & Layer */}
+                <ToolIcon />
+                {layerLabel && <span className="rounded bg-white/20 px-1 text-[9px]">{layerLabel}</span>}
                 <svg
                   width="8" height="8" viewBox="0 0 8 8" fill="none"
                   style={{ marginLeft: 2, transform: `rotate(${angleDeg}deg)`, flexShrink: 0 }}
@@ -662,8 +853,23 @@ export default function Home() {
           })}
 
         {/* Scrollable infinite canvas */}
-        <div ref={studioScrollRef} className="h-full w-full overflow-auto">
-          <div className="relative" style={{ width: CANVAS_W, height: CANVAS_H }}>
+        <div ref={studioScrollRef} className="h-full w-full overflow-auto" style={{ touchAction: "pan-x pan-y pinch-zoom" }}>
+          <div
+            className="relative"
+            style={{
+              width: CANVAS_W * canvasZoom,
+              height: CANVAS_H * canvasZoom,
+            }}
+          >
+            <div
+              className="absolute left-0 top-0"
+              style={{
+                width: CANVAS_W,
+                height: CANVAS_H,
+                transform: `scale(${canvasZoom})`,
+                transformOrigin: "top left",
+              }}
+            >
             <DrawingCanvas
               ref={canvasRef}
               brushSettings={brushSettings}
@@ -697,9 +903,11 @@ export default function Home() {
               backgroundOffsetY={worldOffset.y}
               width={CANVAS_W}
               height={CANVAS_H}
-              drawingLayerIndex={drawingLayerIndex}
-              defaultLayerIndex={layerCount - 1}
+              currentDrawingLayer={activeLayer}
+              defaultLayerIndex={activeLayer}
               maxLayerIndex={layerCount - 1}
+              remoteStrokes={remoteCompletedStrokes}
+              dbStrokes={dbStrokes}
             />
 
             <canvas
@@ -707,7 +915,7 @@ export default function Home() {
               width={CANVAS_W}
               height={CANVAS_H}
               className="pointer-events-none absolute inset-0"
-              style={{ width: "100%", height: "100%" }}
+              style={{ width: "100%", height: "100%", zIndex: 5 }}
             />
 
             {remoteArtists.map((member) => {
@@ -715,12 +923,31 @@ export default function Home() {
               const y = member.y - worldOffset.y;
               if (x < -80 || y < -80 || x > CANVAS_W + 80 || y > CANVAS_H + 80)
                 return null;
+              
+              const layerLabel = member.activeLayer !== undefined ? `L${member.activeLayer + 1}` : "";
+              
+              // Tool icon component
+              const ToolIcon = () => {
+                const iconProps = { size: 12, strokeWidth: 2, className: "opacity-80" };
+                switch (member.tool) {
+                  case "pen": return <Pencil {...iconProps} />;
+                  case "eraser": return <Eraser {...iconProps} />;
+                  case "select": return <MousePointer {...iconProps} />;
+                  case "text": return <Type {...iconProps} />;
+                  case "washi": return <Scissors {...iconProps} />;
+                  case "asset": return <Image {...iconProps} />;
+                  case "animated": return <Sparkles {...iconProps} />;
+                  default: return <Pencil {...iconProps} />;
+                }
+              };
+              
               return (
                 <div
                   key={member.presenceKey}
-                  className="pointer-events-none absolute"
+                  className="pointer-events-none absolute z-40 flex items-center gap-1"
                   style={{ left: x, top: y }}
                 >
+                  {/* Cursor arrow */}
                   <svg width="14" height="18" viewBox="0 0 14 18" fill="none" style={{ display: "block" }}>
                     <path
                       d="M1 1L1 14.5L4.2 10.8L6.6 17L8.8 16.1L6.3 9.8L11.2 9.8Z"
@@ -731,17 +958,62 @@ export default function Home() {
                       strokeLinecap="round"
                     />
                   </svg>
-                  <span
-                    className="absolute left-4 top-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
-                    style={{ background: member.color, boxShadow: "0 2px 8px rgba(0,0,0,0.18)" }}
+                  
+                  {/* Compact info badge */}
+                  <div
+                    className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium text-white shadow-md"
+                    style={{ background: member.color }}
                   >
-                    {member.name}
-                  </span>
+                    {/* Avatar or initials */}
+                    {member.avatarUrl ? (
+                      <img src={member.avatarUrl} alt="" className="h-4 w-4 rounded-full" />
+                    ) : (
+                      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/20 text-[8px]">
+                        {member.name.slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                    
+                    {/* Name */}
+                    <span className="max-w-[60px] truncate">{member.name}</span>
+                    
+                    {/* Tool */}
+                    <ToolIcon />
+                    
+                    {/* Layer */}
+                    {layerLabel && (
+                      <span className="rounded bg-white/20 px-1 text-[9px]">{layerLabel}</span>
+                    )}
+                  </div>
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
+
+        {/* Zoom indicator */}
+        {canvasZoom !== 1 && (
+          <div
+            className="pointer-events-auto absolute bottom-20 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-full px-3 py-1.5"
+            style={{
+              background: "rgba(255,255,255,0.95)",
+              border: "1px solid rgba(186,156,214,0.3)",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.1)",
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <span className="text-xs font-semibold" style={{ color: "var(--muted-strong)" }}>
+              {Math.round(canvasZoom * 100)}%
+            </span>
+            <button
+              onClick={() => setCanvasZoom(1)}
+              className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-bold"
+              style={{ background: "rgba(167,139,250,0.15)", color: "#6d28d9" }}
+            >
+              Reset
+            </button>
+          </div>
+        )}
 
         {/* Layers toggle button */}
         <button
@@ -777,8 +1049,10 @@ export default function Home() {
             align="right"
             layerCount={layerCount}
             onLayerCountChange={setLayerCount}
-            drawingLayerIndex={drawingLayerIndex}
-            onDrawingLayerChange={setDrawingLayerIndex}
+            activeLayer={activeLayer}
+            onActiveLayerChange={setActiveLayer}
+            onMoveLayerUp={handleMoveLayerUp}
+            onMoveLayerDown={handleMoveLayerDown}
           />
         )}
 
@@ -787,7 +1061,7 @@ export default function Home() {
           onBrushChange={handleBrushChange}
           onUndo={() => canvasRef.current?.undo()}
           onRedo={() => canvasRef.current?.redo()}
-          onClear={() => canvasRef.current?.clearCanvas()}
+          onClear={() => { canvasRef.current?.clearCanvas(); clearDbStrokes(); }}
           onExport={handleExport}
           isExporting={isExporting}
           triggerOpenAssets={triggerOpenAssets}

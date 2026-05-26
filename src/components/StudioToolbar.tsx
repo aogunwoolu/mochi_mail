@@ -578,7 +578,7 @@ export default function StudioToolbar({
         style={{ top: "1rem", bottom: "5.5rem" }}
       >
         <div
-          className="animate-toolbar-in pointer-events-auto flex flex-col items-center gap-0.5 px-2 py-3"
+          className="animate-toolbar-in pointer-events-auto my-auto flex flex-col items-center gap-0.5 px-2 py-3"
           style={{
             maxHeight: "100%",
             overflowY: "auto",
@@ -741,9 +741,10 @@ export default function StudioToolbar({
       {/* ── Brush size — floats to the right of the toolbar, same vertical center ── */}
       {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
         <div
-          className="pointer-events-none absolute left-[4.5rem] z-20 flex items-center"
+          className="pointer-events-none absolute left-[4.5rem] z-20 flex items-center gap-2"
           style={{ top: "1rem", bottom: "5.5rem" }}
         >
+          {/* Brush size */}
           <div
             className="animate-panel-in pointer-events-auto flex flex-col items-center gap-1 px-1.5 py-2"
             style={{

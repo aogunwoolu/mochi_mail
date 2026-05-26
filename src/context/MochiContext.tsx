@@ -28,11 +28,11 @@ interface MochiAssets {
   stamps: MailStamp[];
   envelopes: EnvelopeStyle[];
   customFonts: CustomFont[];
-  selectedPaper: PaperBackground | undefined;
+  selectedPaper: PaperBackground | null;
   placedItems: PlacedSticker[];
   selectedAsset: Sticker | WashiTape | null;
-  setSelectedPaper: (p: PaperBackground | null | undefined) => void;
-  setSelectedAsset: (a: Sticker | WashiTape | null) => void;
+  setSelectedPaper: React.Dispatch<React.SetStateAction<PaperBackground | null>>;
+  setSelectedAsset: React.Dispatch<React.SetStateAction<Sticker | WashiTape | null>>;
   addSticker: (name: string, imageData: string, width: number, height: number) => Sticker;
   addWashiTape: (name: string, imageData: string, opacity: number, width: number, height: number) => WashiTape;
   addPaper: (name: string, imageData: string, width: number, height: number) => PaperBackground;
@@ -56,7 +56,7 @@ interface MochiAssets {
   addKitToLibrary: (kit: ScrapbookKit) => ScrapbookKit;
   removeKit: (id: string) => void;
   saveBoardState: (drawingData: string | null, items: PlacedSticker[], paper: PaperBackground | null, roomId?: string | null) => Promise<void>;
-  loadBoardState: (roomId?: string | null) => Promise<{ drawingData: string; placedItems: PlacedSticker[]; selectedPaper: PaperBackground | null } | null>;
+  loadBoardState: (roomId?: string | null) => Promise<{ drawingData: string | null; placedItems: PlacedSticker[]; selectedPaper: PaperBackground | null } | null | undefined>;
   /** Add a store item directly into the asset library. */
   equipFromStore: (item: StoreItem) => void;
 }
@@ -126,6 +126,7 @@ interface MochiAccountMethods {
     youtubeUrl?: string;
     homeTitle?: string;
   }) => Promise<void>;
+  uploadAvatar: (file: File) => Promise<string | null>;
 }
 
 interface MochiContextValue {
@@ -190,11 +191,12 @@ export function MochiProvider({ children }: { children: ReactNode }) {
       logOut: account.logOut,
       renameGuest: account.renameGuest,
       updateAccount: account.updateAccount,
+      uploadAvatar: account.uploadAvatar,
     },
     assets: {
       ...assets,
       equipFromStore,
-    } as unknown as MochiAssets,
+    },
     mail,
     store: {
       ...store,

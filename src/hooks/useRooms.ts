@@ -31,8 +31,7 @@ function mapRoom(
     description: room.description,
     visibility: room.is_public ? "public" : "private",
     inviteToken: room.invite_token,
-    // room_code added in migration 0007 — safe cast until DB types are regenerated
-    roomCode: (room as Record<string, unknown>).room_code as string ?? "",
+    roomCode: room.room_code ?? "",
     hasPassword: Boolean(room.password_hash),
     isMember: memberRoomIds.has(room.id) || isOwner,
     isOwner,

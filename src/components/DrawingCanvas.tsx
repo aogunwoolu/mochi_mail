@@ -18,6 +18,7 @@ import {
   Sticker,
   WashiTape,
 } from "@/types";
+import type { SyncStroke } from "@/hooks/useStrokeSync";
 
 // ─── Public handle (exposed via ref) ─────────────────────────────────────────
 
@@ -56,6 +57,7 @@ type LocalStrokeEntry = {
   color: string;
   size: number;
   tool: "pen" | "eraser";
+  layerIndex: number;
 };
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -109,12 +111,18 @@ interface DrawingCanvasProps {
   onItemSelected?: (id: string | null) => void;
   /** Externally-controlled selected item id. Synced into internal state. */
   externalSelectedItemId?: string | null;
-  /** Where the pen-drawing layer sits relative to sticker layers. 0 = below all, layerCount = above all. */
+  /** @deprecated Drawing layer isolation removed - drawings now use the same layer system as items */
   drawingLayerIndex?: number;
   /** layerIndex assigned to newly placed stickers/text. */
   defaultLayerIndex?: number;
   /** Max layer index the UI should allow (layerCount - 1). */
   maxLayerIndex?: number;
+  /** Current layer index for drawing strokes. If not provided, uses defaultLayerIndex. */
+  currentDrawingLayer?: number;
+  /** Remote strokes that should be rendered (live collaboration) */
+  remoteStrokes?: SyncStroke[];
+  /** Strokes loaded from database on initial load */
+  dbStrokes?: SyncStroke[];
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -127,6 +135,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       selectedAsset,
       selectedPaper,
       customFonts = [],
+      remoteStrokes,
+      dbStrokes,
       onPlaceAsset,
       onAddTextItem,
       onUpdatePlacedItem,
@@ -147,6 +157,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       drawingLayerIndex = 0,
       defaultLayerIndex = 0,
       maxLayerIndex = 4,
+      currentDrawingLayer,
     },
     ref,
   ) => {
@@ -159,6 +170,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     // ── Drawing state ────────────────────────────────────────────────────────
     const isDrawing = useRef(false);
+    const activePointerIdRef = useRef<number | null>(null);
     const activeStrokePointsRef = useRef<[number, number, number][]>([]);
     const preStrokeSnapshotRef = useRef<ImageData | null>(null);
     const lastStrokeBroadcastAtRef = useRef(0);
@@ -172,6 +184,11 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const sessionBaseRef = useRef<ImageBitmap | null>(null);
     const localStrokesRef = useRef<LocalStrokeEntry[]>([]);
     const undoneStrokesRef = useRef<LocalStrokeEntry[]>([]);
+    
+    // ── Remote strokes from collaborators ────────────────────────────────────
+    // These persist across render cycles so they're not cleared by renderLiveCanvas
+    const remoteStrokesRef = useRef<SyncStroke[]>([]);
+    const [remoteStrokesVersion, setRemoteStrokesVersion] = useState(0);
 
     // ── Washi / select drag refs ─────────────────────────────────────────────
     const washiStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -216,6 +233,26 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         setSelectedItemId(externalSelectedItemId ?? null);
       }
     }, [externalSelectedItemId]);
+    
+    // Sync remote strokes from collaboration
+    useEffect(() => {
+      console.log("[DrawingCanvas] remoteStrokes effect triggered:", { count: remoteStrokes?.length ?? 0, existing: remoteStrokesRef.current.length });
+      if (remoteStrokes && remoteStrokes.length > 0) {
+        console.log("[DrawingCanvas] Adding remote strokes to ref:", remoteStrokes.map(s => ({ id: s.id, pts: s.pts.length })));
+        remoteStrokesRef.current = [...remoteStrokesRef.current, ...remoteStrokes];
+        console.log("[DrawingCanvas] Bumping version, total remote strokes:", remoteStrokesRef.current.length);
+        setRemoteStrokesVersion(v => v + 1);
+      }
+    }, [remoteStrokes]);
+    
+    // Sync DB strokes - these are the initial load from the database
+    useEffect(() => {
+      console.log("[DrawingCanvas] dbStrokes effect triggered:", { count: dbStrokes?.length ?? 0 });
+      if (dbStrokes && dbStrokes.length > 0) {
+        console.log("[DrawingCanvas] DB strokes loaded:", dbStrokes.length);
+        setRemoteStrokesVersion(v => v + 1);
+      }
+    }, [dbStrokes]);
     const containerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const [displayScale, setDisplayScale] = useState(1);
@@ -244,6 +281,72 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const allStrokePointsRef = useRef<[number, number, number][]>([]);
     const lastBroadcastIndexRef = useRef(0);
 
+    // ── Overlay rendering (stickers / text) ──────────────────────────────────
+    const renderItemsToCtx = useCallback((ctx: CanvasRenderingContext2D, items: PlacedSticker[]) => {
+      const wrapLines = (text: string, maxWidth: number, font: string): string[] => {
+        ctx.font = font;
+        const lines: string[] = [];
+        for (const hardLine of text.split("\n")) {
+          const words = hardLine.split(" ");
+          if (!words.length) { lines.push(""); continue; }
+          let current = words[0] ?? "";
+          for (let i = 1; i < words.length; i++) {
+            const next = `${current} ${words[i]}`;
+            if (ctx.measureText(next).width <= maxWidth) {
+              current = next;
+            } else {
+              lines.push(current);
+              current = words[i] ?? "";
+            }
+          }
+          lines.push(current);
+        }
+        return lines;
+      };
+
+      items.forEach((item) => {
+        if (item.type === "text") {
+          const fontSize = Math.max(10, item.textSize ?? 28);
+          const fontFamily = item.textFont?.startsWith("custom:")
+            ? '"Space Mono", monospace'
+            : (item.textFont ?? '"Space Mono", monospace');
+          const lines = wrapLines(
+            item.text ?? "",
+            Math.max(40, item.width - 10),
+            `${fontSize}px ${fontFamily}`,
+          );
+          ctx.save();
+          ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
+          ctx.rotate((item.rotation * Math.PI) / 180);
+          ctx.translate(-item.width / 2, -item.height / 2);
+          ctx.globalAlpha = item.opacity;
+          ctx.font = `${fontSize}px ${fontFamily}`;
+          ctx.fillStyle = item.textColor ?? "#1e1e2e";
+          ctx.textBaseline = "top";
+          let y = 4;
+          const lineHeight = fontSize * 1.35;
+          lines.forEach((line) => {
+            ctx.fillText(line, 4, y, Math.max(20, item.width - 8));
+            y += lineHeight;
+          });
+          ctx.restore();
+          ctx.globalAlpha = 1;
+          return;
+        }
+        if (item.isAnimated) return;
+        const img = assetImagesRef.current.get(item.id);
+        if (img?.complete) {
+          ctx.globalAlpha = item.opacity;
+          ctx.save();
+          ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
+          ctx.rotate((item.rotation * Math.PI) / 180);
+          ctx.drawImage(img, -item.width / 2, -item.height / 2, item.width, item.height);
+          ctx.restore();
+          ctx.globalAlpha = 1;
+        }
+      });
+    }, []);
+
     // ── Restore session base + replay local strokes (for undo/redo) ──────────
     const restoreAndReplay = useCallback(() => {
       const canvas = canvasRef.current;
@@ -254,21 +357,186 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       if (sessionBaseRef.current) {
         ctx.drawImage(sessionBaseRef.current, 0, 0);
       }
+      
+      // Group strokes by layer
+      const strokesByLayer: Record<number, LocalStrokeEntry[]> = {};
       for (const stroke of localStrokesRef.current) {
-        const isEraser = stroke.tool === "eraser";
-        const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
-        if (!outline.length) continue;
-        ctx.save();
-        if (isEraser) {
-          ctx.globalCompositeOperation = "destination-out";
-          ctx.fillStyle = "rgba(0,0,0,1)";
-        } else {
-          ctx.fillStyle = stroke.color;
+        if (!strokesByLayer[stroke.layerIndex]) {
+          strokesByLayer[stroke.layerIndex] = [];
         }
-        ctx.fill(strokeToPath2D(outline));
-        ctx.restore();
+        strokesByLayer[stroke.layerIndex].push(stroke);
       }
-    }, []);
+      
+      // Group items by layer (excluding animated items)
+      const itemsByLayer: Record<number, PlacedSticker[]> = {};
+      for (const item of placedItemsRef.current) {
+        if (item.isAnimated) continue;
+        const layerIdx = item.layerIndex ?? 0;
+        if (!itemsByLayer[layerIdx]) {
+          itemsByLayer[layerIdx] = [];
+        }
+        itemsByLayer[layerIdx].push(item);
+      }
+      
+      // Render layers in order
+      const maxLayer = Math.max(
+        ...Object.keys(strokesByLayer).map(Number),
+        ...Object.keys(itemsByLayer).map(Number),
+        maxLayerIndex
+      );
+      
+      for (let layerIdx = 0; layerIdx <= maxLayer; layerIdx++) {
+        // Draw strokes for this layer
+        const layerStrokes = strokesByLayer[layerIdx] ?? [];
+        for (const stroke of layerStrokes) {
+          const isEraser = stroke.tool === "eraser";
+          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
+          if (!outline.length) continue;
+          ctx.save();
+          if (isEraser) {
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.fillStyle = "rgba(0,0,0,1)";
+          } else {
+            ctx.fillStyle = stroke.color;
+          }
+          ctx.fill(strokeToPath2D(outline));
+          ctx.restore();
+        }
+        
+        // Draw items for this layer
+        const layerItems = itemsByLayer[layerIdx] ?? [];
+        renderItemsToCtx(ctx, layerItems);
+      }
+    }, [maxLayerIndex, renderItemsToCtx]);
+
+    // ── Live rendering of strokes + items (layer-aware) ─────────────────────────
+    const renderLiveCanvas = useCallback(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Group strokes by layer
+      const strokesByLayer: Record<number, LocalStrokeEntry[]> = {};
+      for (const stroke of localStrokesRef.current) {
+        if (!strokesByLayer[stroke.layerIndex]) {
+          strokesByLayer[stroke.layerIndex] = [];
+        }
+        strokesByLayer[stroke.layerIndex].push(stroke);
+      }
+      
+      // Group items by layer (excluding animated items which are rendered separately)
+      const itemsByLayer: Record<number, PlacedSticker[]> = {};
+      for (const item of placedItemsRef.current) {
+        if (item.isAnimated) continue;
+        const layerIdx = item.layerIndex ?? 0;
+        if (!itemsByLayer[layerIdx]) {
+          itemsByLayer[layerIdx] = [];
+        }
+        itemsByLayer[layerIdx].push(item);
+      }
+      
+      // Include remote strokes in layer grouping
+      const remoteStrokesByLayer: Record<number, SyncStroke[]> = {};
+      console.log("[renderLiveCanvas] Processing remote strokes:", remoteStrokesRef.current.length);
+      for (const stroke of remoteStrokesRef.current) {
+        const layerIdx = 0; // Remote strokes default to layer 0 for now
+        if (!remoteStrokesByLayer[layerIdx]) {
+          remoteStrokesByLayer[layerIdx] = [];
+        }
+        remoteStrokesByLayer[layerIdx].push(stroke);
+      }
+      
+      // Include DB strokes in layer grouping
+      const dbStrokesByLayer: Record<number, SyncStroke[]> = {};
+      console.log("[renderLiveCanvas] Processing DB strokes:", dbStrokes?.length ?? 0);
+      for (const stroke of (dbStrokes ?? [])) {
+        const layerIdx = 0; // DB strokes default to layer 0 for now
+        if (!dbStrokesByLayer[layerIdx]) {
+          dbStrokesByLayer[layerIdx] = [];
+        }
+        dbStrokesByLayer[layerIdx].push(stroke);
+      }
+      console.log("[renderLiveCanvas] Grouped remote strokes by layer:", Object.keys(remoteStrokesByLayer).map(k => ({ layer: k, count: remoteStrokesByLayer[Number(k)].length })));
+      
+      // Render layers in order (0 = back, max = front)
+      const maxLayer = Math.max(
+        ...Object.keys(strokesByLayer).map(Number),
+        ...Object.keys(itemsByLayer).map(Number),
+        ...Object.keys(remoteStrokesByLayer).map(Number),
+        ...Object.keys(dbStrokesByLayer).map(Number),
+        maxLayerIndex
+      );
+      console.log("[renderLiveCanvas] maxLayer:", maxLayer, "localStrokes:", localStrokesRef.current.length, "remoteStrokes:", remoteStrokesRef.current.length);
+      
+      for (let layerIdx = 0; layerIdx <= maxLayer; layerIdx++) {
+        // Draw local strokes for this layer
+        const layerStrokes = strokesByLayer[layerIdx] ?? [];
+        console.log("[renderLiveCanvas] Layer", layerIdx, "local strokes:", layerStrokes.length);
+        for (const stroke of layerStrokes) {
+          const isEraser = stroke.tool === "eraser";
+          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
+          if (!outline.length) continue;
+          ctx.save();
+          if (isEraser) {
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.fillStyle = "rgba(0,0,0,1)";
+          } else {
+            ctx.fillStyle = stroke.color;
+          }
+          ctx.fill(strokeToPath2D(outline));
+          ctx.restore();
+        }
+        
+        // Draw remote strokes for this layer
+        const layerRemoteStrokes = remoteStrokesByLayer[layerIdx] ?? [];
+        console.log("[renderLiveCanvas] Layer", layerIdx, "remote strokes:", layerRemoteStrokes.length);
+        for (const stroke of layerRemoteStrokes) {
+          console.log("[renderLiveCanvas] Drawing remote stroke:", stroke.id, "pts:", stroke.pts.length, "color:", stroke.color);
+          const isEraser = stroke.tool === "eraser";
+          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
+          console.log("[renderLiveCanvas] Generated outline with", outline.length, "points");
+          if (!outline.length) continue;
+          ctx.save();
+          if (isEraser) {
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.fillStyle = "rgba(0,0,0,1)";
+          } else {
+            ctx.fillStyle = stroke.color;
+          }
+          ctx.fill(strokeToPath2D(outline));
+          ctx.restore();
+          console.log("[renderLiveCanvas] Drew remote stroke successfully");
+        }
+        
+        // Draw DB strokes for this layer (initial load from database)
+        const layerDbStrokes = dbStrokesByLayer[layerIdx] ?? [];
+        console.log("[renderLiveCanvas] Layer", layerIdx, "DB strokes:", layerDbStrokes.length);
+        for (const stroke of layerDbStrokes) {
+          console.log("[renderLiveCanvas] Drawing DB stroke:", stroke.id, "pts:", stroke.pts.length);
+          const isEraser = stroke.tool === "eraser";
+          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
+          if (!outline.length) continue;
+          ctx.save();
+          if (isEraser) {
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.fillStyle = "rgba(0,0,0,1)";
+          } else {
+            ctx.fillStyle = stroke.color;
+          }
+          ctx.fill(strokeToPath2D(outline));
+          ctx.restore();
+        }
+        
+        // Draw items for this layer
+        const layerItems = itemsByLayer[layerIdx] ?? [];
+        renderItemsToCtx(ctx, layerItems);
+      }
+    }, [maxLayerIndex, renderItemsToCtx, remoteStrokesVersion, dbStrokes]);
+
+    useEffect(() => { renderLiveCanvas(); }, [renderLiveCanvas, placedItems, remoteStrokesVersion, dbStrokes]);
 
     // ── Active stroke rendering (RAF loop) ───────────────────────────────────
     const renderActiveStroke = useCallback(() => {
@@ -368,88 +636,21 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       }
     }, [selectedAsset]);
 
-    // ── Overlay rendering (stickers / text) ──────────────────────────────────
-    const renderItemsToCtx = useCallback((ctx: CanvasRenderingContext2D, items: PlacedSticker[]) => {
-      const wrapLines = (text: string, maxWidth: number, font: string): string[] => {
-        ctx.font = font;
-        const lines: string[] = [];
-        for (const hardLine of text.split("\n")) {
-          const words = hardLine.split(" ");
-          if (!words.length) { lines.push(""); continue; }
-          let current = words[0] ?? "";
-          for (let i = 1; i < words.length; i++) {
-            const next = `${current} ${words[i]}`;
-            if (ctx.measureText(next).width <= maxWidth) {
-              current = next;
-            } else {
-              lines.push(current);
-              current = words[i] ?? "";
-            }
-          }
-          lines.push(current);
-        }
-        return lines;
-      };
-
-      items.forEach((item) => {
-        if (item.type === "text") {
-          const fontSize = Math.max(10, item.textSize ?? 28);
-          const fontFamily = item.textFont?.startsWith("custom:")
-            ? '"Space Mono", monospace'
-            : (item.textFont ?? '"Space Mono", monospace');
-          const lines = wrapLines(
-            item.text ?? "",
-            Math.max(40, item.width - 10),
-            `${fontSize}px ${fontFamily}`,
-          );
-          ctx.save();
-          ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
-          ctx.rotate((item.rotation * Math.PI) / 180);
-          ctx.translate(-item.width / 2, -item.height / 2);
-          ctx.globalAlpha = item.opacity;
-          ctx.font = `${fontSize}px ${fontFamily}`;
-          ctx.fillStyle = item.textColor ?? "#1e1e2e";
-          ctx.textBaseline = "top";
-          let y = 4;
-          const lineHeight = fontSize * 1.35;
-          lines.forEach((line) => {
-            ctx.fillText(line, 4, y, Math.max(20, item.width - 8));
-            y += lineHeight;
-          });
-          ctx.restore();
-          ctx.globalAlpha = 1;
-          return;
-        }
-        if (item.isAnimated) return;
-        const img = assetImagesRef.current.get(item.id);
-        if (img?.complete) {
-          ctx.globalAlpha = item.opacity;
-          ctx.save();
-          ctx.translate(item.x + item.width / 2, item.y + item.height / 2);
-          ctx.rotate((item.rotation * Math.PI) / 180);
-          ctx.drawImage(img, -item.width / 2, -item.height / 2, item.width, item.height);
-          ctx.restore();
-          ctx.globalAlpha = 1;
-        }
-      });
-    }, []);
-
     const renderOverlay = useCallback(() => {
-      const aboveItems = sortedByLayer.filter((i) => (i.layerIndex ?? 0) >= drawingLayerIndex);
-      const belowItems = sortedByLayer.filter((i) => (i.layerIndex ?? 0) < drawingLayerIndex);
-
+      // Render items to overlay canvas, separated by layer
       const above = overlayCanvasRef.current;
       if (above) {
         const ctx = above.getContext("2d");
-        if (ctx) { ctx.clearRect(0, 0, above.width, above.height); renderItemsToCtx(ctx, aboveItems); }
+        if (ctx) ctx.clearRect(0, 0, above.width, above.height);
       }
 
+      // Clear below overlay as it's no longer used
       const below = belowOverlayCanvasRef.current;
       if (below) {
         const ctx = below.getContext("2d");
-        if (ctx) { ctx.clearRect(0, 0, below.width, below.height); renderItemsToCtx(ctx, belowItems); }
+        if (ctx) ctx.clearRect(0, 0, below.width, below.height);
       }
-    }, [sortedByLayer, drawingLayerIndex, renderItemsToCtx]);
+    }, []);
 
     useEffect(() => { renderOverlay(); }, [renderOverlay]);
 
@@ -601,11 +802,16 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         e.preventDefault();
+        // Only allow primary pointer or if no pointer is active (prevents multi-touch drawing)
+        if (!e.isPrimary && activePointerIdRef.current !== null) {
+          return;
+        }
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
         } catch {
           // ignore on unsupported browsers
         }
+        activePointerIdRef.current = e.pointerId;
         const point = getCanvasPoint(e);
 
         if (brushSettings.tool === "text") {
@@ -657,6 +863,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           if (!target) {
             selectItem(null);
             selectionDragRef.current = null;
+            activePointerIdRef.current = null;
             return;
           }
           selectItem(target.id);
@@ -676,6 +883,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             point.y - selectedAsset.height / 2,
             defaultLayerIndex,
           );
+          activePointerIdRef.current = null;
           return;
         }
 
@@ -735,6 +943,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const handlePointerMove = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
         if (!isDrawing.current) return;
+        // Only process events from the active pointer (prevents multi-touch issues)
+        if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) {
+          return;
+        }
         // Apple Pencil hover detection — end stroke to prevent ghost lines
         if (e.pointerType === "pen" && e.buttons === 0) {
           handlePointerUpRef.current?.(e);
@@ -802,6 +1014,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           const deltaPts = allStrokePointsRef.current.slice(lastBroadcastIndexRef.current);
           lastBroadcastIndexRef.current = allStrokePointsRef.current.length;
           if (deltaPts.length > 0) {
+            console.log("[DrawingCanvas] Broadcasting stroke update:", { strokeId: currentStrokeIdRef.current, pts: deltaPts.length, tool, activePointerId: activePointerIdRef.current });
             onStrokeUpdate?.(
               currentStrokeIdRef.current,
               deltaPts,
@@ -834,6 +1047,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             // ignore
           }
         }
+        // Only process pointer up for the active pointer
+        if (e && activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) {
+          return;
+        }
         if (rafIdRef.current !== null) {
           cancelAnimationFrame(rafIdRef.current);
           rafIdRef.current = null;
@@ -852,6 +1069,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
           // Send any remaining unbroadcast points with isLast = true
           const remainingDelta = allPts.slice(lastBroadcastIndexRef.current);
+          console.log("[DrawingCanvas] Stroke complete, sending final update:", { strokeId, remainingPts: remainingDelta.length, totalPts: allPts.length });
           onStrokeUpdate?.(strokeId, remainingDelta, color, size, tool, true);
 
           // Commit pen stroke from active canvas to drawing canvas
@@ -863,7 +1081,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           }
 
           // Track this stroke locally for undo (full points)
-          localStrokesRef.current.push({ id: strokeId, pts: allPts, color, size, tool });
+          localStrokesRef.current.push({ id: strokeId, pts: allPts, color, size, tool, layerIndex: currentDrawingLayer ?? defaultLayerIndex });
           undoneStrokesRef.current = []; // clear redo stack on new stroke
 
           // Persist immediately with full accumulated points
@@ -886,6 +1104,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         lastBroadcastIndexRef.current = 0;
         preStrokeSnapshotRef.current = null;
         isDrawing.current = false;
+        activePointerIdRef.current = null;
         washiStartRef.current = null;
         selectionDragRef.current = null;
         changedDuringPointerRef.current = false;
@@ -950,18 +1169,70 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       base.height = h;
       const ctx = base.getContext("2d");
       if (!ctx) return base;
+      
+      // Draw background
       if (backgroundCanvasRef.current) {
         ctx.drawImage(backgroundCanvasRef.current, 0, 0);
       } else {
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, w, h);
       }
-      if (belowOverlayCanvasRef.current) ctx.drawImage(belowOverlayCanvasRef.current, 0, 0);
-      if (canvasRef.current) ctx.drawImage(canvasRef.current, 0, 0);
+      
+      // Group strokes by layer
+      const strokesByLayer: Record<number, LocalStrokeEntry[]> = {};
+      for (const stroke of localStrokesRef.current) {
+        if (!strokesByLayer[stroke.layerIndex]) {
+          strokesByLayer[stroke.layerIndex] = [];
+        }
+        strokesByLayer[stroke.layerIndex].push(stroke);
+      }
+      
+      // Group items by layer
+      const itemsByLayer: Record<number, PlacedSticker[]> = {};
+      for (const item of placedItemsRef.current) {
+        if (item.isAnimated) continue; // Animated items handled separately
+        const layerIdx = item.layerIndex ?? 0;
+        if (!itemsByLayer[layerIdx]) {
+          itemsByLayer[layerIdx] = [];
+        }
+        itemsByLayer[layerIdx].push(item);
+      }
+      
+      // Render layers in order (0 = back, max = front)
+      const maxLayer = Math.max(
+        ...Object.keys(strokesByLayer).map(Number),
+        ...Object.keys(itemsByLayer).map(Number),
+        maxLayerIndex
+      );
+      
+      for (let layerIdx = 0; layerIdx <= maxLayer; layerIdx++) {
+        // Draw strokes for this layer
+        const layerStrokes = strokesByLayer[layerIdx] ?? [];
+        for (const stroke of layerStrokes) {
+          const isEraser = stroke.tool === "eraser";
+          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
+          if (!outline.length) continue;
+          ctx.save();
+          if (isEraser) {
+            ctx.globalCompositeOperation = "destination-out";
+            ctx.fillStyle = "rgba(0,0,0,1)";
+          } else {
+            ctx.fillStyle = stroke.color;
+          }
+          ctx.fill(strokeToPath2D(outline));
+          ctx.restore();
+        }
+        
+        // Draw items for this layer
+        const layerItems = itemsByLayer[layerIdx] ?? [];
+        renderItemsToCtx(ctx, layerItems);
+      }
+      
+      // Draw active stroke if any
       if (activeStrokeCanvasRef.current) ctx.drawImage(activeStrokeCanvasRef.current, 0, 0);
-      if (overlayCanvasRef.current) ctx.drawImage(overlayCanvasRef.current, 0, 0);
+      
       return base;
-    }, [width, height]);
+    }, [width, height, maxLayerIndex, renderItemsToCtx]);
 
     // Stamps current animated-GIF frames onto an external context. Call each rAF tick.
     // Uses animatedImgRefsRef (live DOM elements) so the browser's GIF frame
@@ -1281,7 +1552,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           width={width}
           height={height}
           className="absolute inset-0"
-          style={{ touchAction: "none", cursor, width: "100%", height: "100%" }}
+          style={{ touchAction: "none", cursor, width: "100%", height: "100%", zIndex: 1 }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}

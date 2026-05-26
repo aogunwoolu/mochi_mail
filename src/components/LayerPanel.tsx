@@ -21,10 +21,18 @@ interface LayerPanelProps {
   layerCount?: number;
   /** Called when user adds a new layer. */
   onLayerCountChange?: (n: number) => void;
-  /** Where pen-drawing sits (0 = below layer 0, layerCount = above all). */
+  /** @deprecated Drawing layer isolation removed - drawings now use the same layer system as items */
   drawingLayerIndex?: number;
-  /** Called when user moves the drawing row. */
+  /** @deprecated Drawing layer isolation removed - drawings now use the same layer system as items */
   onDrawingLayerChange?: (n: number) => void;
+  /** Currently active layer for drawing and item placement */
+  activeLayer?: number;
+  /** Called when user clicks to activate a layer */
+  onActiveLayerChange?: (n: number) => void;
+  /** Called when user moves a layer up (increases index) */
+  onMoveLayerUp?: (layerIdx: number) => void;
+  /** Called when user moves a layer down (decreases index) */
+  onMoveLayerDown?: (layerIdx: number) => void;
 }
 
 const MAX_LAYERS = 5;
@@ -113,11 +121,15 @@ export default function LayerPanel({
   onLayerCountChange,
   drawingLayerIndex = 0,
   onDrawingLayerChange,
+  activeLayer = 0,
+  onActiveLayerChange,
+  onMoveLayerUp,
+  onMoveLayerDown,
 }: LayerPanelProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [dragOverLayer, setDragOverLayer] = useState<number | "drawing" | null>(null);
+  const [dragOverLayer, setDragOverLayer] = useState<number | null>(null);
   const dragItemIdRef = useRef<string | null>(null);
-  const draggingDrawingRef = useRef(false);
+  const touchDragItemRef = useRef<{ itemId: string; startX: number; startY: number } | null>(null);
 
   const selectedItem = selectedItemId ? items.find((i) => i.id === selectedItemId) ?? null : null;
   const selectedLayerIndex = selectedItem?.layerIndex ?? 0;
@@ -132,29 +144,15 @@ export default function LayerPanel({
       : { position: "absolute", bottom: 12, left: 12, zIndex: 30 };
 
   // Build the ordered list of rows (top = front).
-  // Layers are rendered high-to-low; Drawing row slots in at drawingLayerIndex.
-  type Row = { kind: "layer"; idx: number } | { kind: "drawing" };
+  // Layers are rendered high-to-low.
+  type Row = { kind: "layer"; idx: number };
   const rows: Row[] = [];
   for (let visual = layerCount - 1; visual >= 0; visual--) {
-    // Insert drawing row ABOVE layers that are below drawingLayerIndex
-    if (visual === drawingLayerIndex - 1 || (drawingLayerIndex === layerCount && visual === layerCount - 1 && rows.findIndex(r => r.kind === "drawing") === -1)) {
-      // handled below
-    }
     rows.push({ kind: "layer", idx: visual });
   }
-  // Insert drawing row at the correct visual position
-  const drawingInsertPos = layerCount - drawingLayerIndex; // 0 = top, layerCount = bottom
-  rows.splice(drawingInsertPos, 0, { kind: "drawing" });
 
   const handleItemDragStart = (e: React.DragEvent, itemId: string) => {
     dragItemIdRef.current = itemId;
-    draggingDrawingRef.current = false;
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleDrawingDragStart = (e: React.DragEvent) => {
-    draggingDrawingRef.current = true;
-    dragItemIdRef.current = null;
     e.dataTransfer.effectAllowed = "move";
   };
 
@@ -164,19 +162,10 @@ export default function LayerPanel({
     setDragOverLayer(targetLayerIdx);
   };
 
-  const handleDrawingDragOver = (e: React.DragEvent) => {
-    if (!draggingDrawingRef.current) return; // only drawing row can drop on itself (no-op)
-    e.preventDefault();
-    setDragOverLayer("drawing");
-  };
-
   const handleLayerDrop = (e: React.DragEvent, targetLayerIdx: number) => {
     e.preventDefault();
     setDragOverLayer(null);
-    if (draggingDrawingRef.current && onDrawingLayerChange) {
-      onDrawingLayerChange(targetLayerIdx);
-      draggingDrawingRef.current = false;
-    } else if (dragItemIdRef.current) {
+    if (dragItemIdRef.current) {
       onUpdateItem(dragItemIdRef.current, { layerIndex: targetLayerIdx });
       dragItemIdRef.current = null;
     }
@@ -185,7 +174,33 @@ export default function LayerPanel({
   const handleDragEnd = () => {
     setDragOverLayer(null);
     dragItemIdRef.current = null;
-    draggingDrawingRef.current = false;
+  };
+
+  // Touch handlers for iPad layer drag
+  const handleTouchStart = (e: React.TouchEvent, itemId: string) => {
+    const touch = e.touches[0];
+    touchDragItemRef.current = { itemId, startX: touch.clientX, startY: touch.clientY };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent, targetLayerIdx: number) => {
+    if (!touchDragItemRef.current) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchDragItemRef.current.startX;
+    const dy = touch.clientY - touchDragItemRef.current.startY;
+    
+    // Only trigger drag if moved significantly (to distinguish from tap)
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+      setDragOverLayer(targetLayerIdx);
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent, targetLayerIdx: number) => {
+    if (touchDragItemRef.current) {
+      onUpdateItem(touchDragItemRef.current.itemId, { layerIndex: targetLayerIdx });
+    }
+    setDragOverLayer(null);
+    touchDragItemRef.current = null;
   };
 
   return (
@@ -256,44 +271,12 @@ export default function LayerPanel({
         <>
           <div style={{ padding: "4px 0 2px" }}>
             {rows.map((row, rowIdx) => {
-              if (row.kind === "drawing") {
-                const isDropTarget = dragOverLayer === "drawing";
-                return (
-                  <div
-                    key="drawing"
-                    draggable
-                    onDragStart={handleDrawingDragStart}
-                    onDragOver={handleDrawingDragOver}
-                    onDrop={(e) => { e.preventDefault(); setDragOverLayer(null); }}
-                    onDragEnd={handleDragEnd}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 7,
-                      padding: "5px 10px 5px 12px",
-                      borderTop: rowIdx > 0 ? "1px solid rgba(0,0,0,0.04)" : undefined,
-                      borderBottom: rowIdx < rows.length - 1 ? "1px solid rgba(0,0,0,0.04)" : undefined,
-                      background: isDropTarget ? "rgba(167,139,250,0.08)" : "rgba(109,40,217,0.03)",
-                      cursor: "grab",
-                      transition: "background 0.1s",
-                    }}
-                  >
-                    <span style={{ fontSize: 9, color: "#c4b5fd", marginRight: 1, lineHeight: 1 }}>⠿</span>
-                    <div style={{
-                      width: 9, height: 9, borderRadius: "50%",
-                      background: "rgba(109,40,217,0.25)", flexShrink: 0,
-                    }} />
-                    <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: '"Space Mono", monospace', flex: 1 }}>
-                      Drawing
-                    </span>
-                    <span style={{ fontSize: 8, color: "#c4b5fd", fontFamily: "monospace" }}>drag</span>
-                  </div>
-                );
-              }
-
               const layerIdx = row.idx;
               const layerItems = byLayer[layerIdx] ?? [];
               const color = LAYER_COLORS[layerIdx]!;
               const name = LAYER_NAMES[layerIdx]!;
-              const isActiveLayer = selectedItem !== null && selectedLayerIndex === layerIdx;
+              const hasSelectedItem = selectedItem !== null && selectedLayerIndex === layerIdx;
+              const isCurrentlyActive = activeLayer === layerIdx;
               const users = layerUsers[layerIdx] ?? [];
               const isDropTarget = dragOverLayer === layerIdx;
 
@@ -303,22 +286,29 @@ export default function LayerPanel({
                   onDragOver={(e) => handleLayerDragOver(e, layerIdx)}
                   onDrop={(e) => handleLayerDrop(e, layerIdx)}
                   onDragLeave={() => setDragOverLayer(null)}
+                  onTouchMove={(e) => handleTouchMove(e, layerIdx)}
+                  onTouchEnd={(e) => handleTouchEnd(e, layerIdx)}
+                  onClick={() => onActiveLayerChange?.(layerIdx)}
                   style={{
-                    borderLeft: isActiveLayer ? `3px solid ${color}` : isDropTarget ? `3px solid ${color}88` : "3px solid transparent",
-                    background: isDropTarget ? `${color}18` : isActiveLayer ? `${color}12` : "transparent",
+                    borderLeft: isCurrentlyActive ? `3px solid ${color}` : hasSelectedItem ? `2px solid ${color}88` : isDropTarget ? `3px solid ${color}88` : "3px solid transparent",
+                    background: isDropTarget ? `${color}18` : isCurrentlyActive ? `${color}15` : hasSelectedItem ? `${color}08` : "transparent",
                     transition: "background 0.1s",
                     outline: isDropTarget ? `1px dashed ${color}66` : "none",
                     outlineOffset: -1,
+                    cursor: "pointer",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", padding: "5px 10px 5px 9px", gap: 7 }}>
                     <div style={{ width: 9, height: 9, borderRadius: "50%", background: color, flexShrink: 0 }} />
                     <span style={{
-                      fontSize: 10, fontWeight: isActiveLayer ? 700 : 500,
-                      color: isActiveLayer ? "#374151" : "#6b7280",
+                      fontSize: 10, fontWeight: isCurrentlyActive ? 700 : hasSelectedItem ? 600 : 500,
+                      color: isCurrentlyActive ? "#374151" : hasSelectedItem ? "#4b5563" : "#6b7280",
                       fontFamily: '"Space Mono", monospace', flex: 1, minWidth: 0,
                     }}>
                       {name}
+                      {isCurrentlyActive && (
+                        <span style={{ fontSize: 7, color: color, marginLeft: 3, fontWeight: 700 }}>●</span>
+                      )}
                       {layerIdx === layerCount - 1 && (
                         <span style={{ fontSize: 8, color: "#a78bfa", marginLeft: 4, fontWeight: 400 }}>top</span>
                       )}
@@ -336,6 +326,57 @@ export default function LayerPanel({
                       </span>
                     )}
                     <UserDots users={users} />
+                    {/* Layer move controls */}
+                    <div style={{ display: "flex", gap: 2, marginLeft: 4 }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMoveLayerUp?.(layerIdx);
+                        }}
+                        disabled={layerIdx >= layerCount - 1}
+                        style={{
+                          width: 18,
+                          height: 18,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: layerIdx >= layerCount - 1 ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.08)",
+                          border: "none",
+                          borderRadius: 4,
+                          cursor: layerIdx >= layerCount - 1 ? "not-allowed" : "pointer",
+                          opacity: layerIdx >= layerCount - 1 ? 0.3 : 1,
+                          fontSize: 10,
+                          color: "#6b7280",
+                        }}
+                        title="Move layer up"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onMoveLayerDown?.(layerIdx);
+                        }}
+                        disabled={layerIdx <= 0}
+                        style={{
+                          width: 18,
+                          height: 18,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: layerIdx <= 0 ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.08)",
+                          border: "none",
+                          borderRadius: 4,
+                          cursor: layerIdx <= 0 ? "not-allowed" : "pointer",
+                          opacity: layerIdx <= 0 ? 0.3 : 1,
+                          fontSize: 10,
+                          color: "#6b7280",
+                        }}
+                        title="Move layer down"
+                      >
+                        ↓
+                      </button>
+                    </div>
                   </div>
 
                   {layerItems.length > 0 && (
@@ -351,6 +392,7 @@ export default function LayerPanel({
                             draggable
                             onDragStart={(e) => handleItemDragStart(e, item.id)}
                             onDragEnd={handleDragEnd}
+                            onTouchStart={(e) => handleTouchStart(e, item.id)}
                             onClick={() => onSelectItem(isSelected ? null : item.id)}
                             title={`${item.type === "text" ? (item.text ?? "Text") : item.type} — drag to move layer`}
                             style={{

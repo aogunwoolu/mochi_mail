@@ -20,11 +20,18 @@ export default function RoomInvitePage() {
   const params = useParams<{ inviteToken: string }>();
   const token = params?.inviteToken;
   const account = useAccount();
-  const rooms = useRooms(account.currentAccount ? {
+  // Use currentAccount for full users, fall back to viewer identity for anonymous users
+  const roomIdentity = account.currentAccount ? {
     id: account.currentAccount.id,
     displayName: account.currentAccount.displayName,
     username: account.currentAccount.username,
+  } : (account.hasSession && account.viewer.id ? {
+    id: account.viewer.id,
+    displayName: account.viewer.name,
+    username: account.viewer.username || "",
   } : null);
+
+  const rooms = useRooms(roomIdentity);
 
   const [preview, setPreview] = useState<RoomInvitePreview | null>(null);
   const [password, setPassword] = useState("");

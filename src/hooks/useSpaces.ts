@@ -109,7 +109,8 @@ function toSpaceItemUpdate(patch: Partial<SpaceItem>): SpaceItemUpdate {
 
 export function useSpaces(
   _accounts: never[],
-  currentAccount: { id: string; displayName: string; username: string; bio: string; avatarUrl: string; youtubeUrl: string; accentColor: string; wallpaper: string; homeTitle: string } | null
+  currentAccount: { id: string; displayName: string; username: string; bio: string; avatarUrl: string; youtubeUrl: string; accentColor: string; wallpaper: string; homeTitle: string } | null,
+  requestedUsername?: string
 ) {
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
 
@@ -177,10 +178,35 @@ export function useSpaces(
     async function load() {
       await ensureOwnSpace();
 
-      const { data: spaceRows } = await supabase
-        .from("spaces")
-        .select("*")
-        .order("updated_at", { ascending: false });
+      let spaceRows: SpaceRow[] | null = null;
+
+      if (!currentAccount && requestedUsername) {
+        const { data: targetProfile } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("username", requestedUsername)
+          .maybeSingle();
+
+        if (!targetProfile) {
+          if (!cancelled) setSpaces([]);
+          return;
+        }
+
+        const { data: rows } = await supabase
+          .from("spaces")
+          .select("*")
+          .eq("owner_id", targetProfile.id)
+          .limit(1);
+
+        spaceRows = rows;
+      } else {
+        const { data: rows } = await supabase
+          .from("spaces")
+          .select("*")
+          .order("updated_at", { ascending: false });
+
+        spaceRows = rows;
+      }
 
       if (!spaceRows || spaceRows.length === 0) {
         if (!cancelled) setSpaces([]);
@@ -221,7 +247,7 @@ export function useSpaces(
     return () => {
       cancelled = true;
     };
-  }, [currentAccount?.id, currentAccount?.displayName, currentAccount?.username, currentAccount?.bio, currentAccount?.avatarUrl, currentAccount?.youtubeUrl, currentAccount?.accentColor, currentAccount?.wallpaper, currentAccount?.homeTitle]);
+  }, [currentAccount?.id, currentAccount?.displayName, currentAccount?.username, currentAccount?.bio, currentAccount?.avatarUrl, currentAccount?.youtubeUrl, currentAccount?.accentColor, currentAccount?.wallpaper, currentAccount?.homeTitle, requestedUsername]);
 
   const ownSpace = useMemo(
     () => (currentAccount ? spaces.find((s) => s.ownerId === currentAccount.id) ?? null : null),

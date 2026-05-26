@@ -90,6 +90,7 @@ interface AccountPanelProps {
   onLogIn: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   onLogOut: () => void;
   onUpdateAccount: (patch: { displayName?: string; avatarUrl?: string; bio?: string; accentColor?: string; wallpaper?: string; youtubeUrl?: string; homeTitle?: string; }) => void;
+  onUploadAvatar?: (file: File) => Promise<string | null>;
   onOpenSpaces: () => void;
 }
 
@@ -183,6 +184,31 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
 
       <SectionCard title="Avatar" note="Pick a cute generated avatar, or paste your own image URL if you want something custom.">
         <div className="grid grid-cols-3 gap-2">
+          {/* Show uploaded/custom avatar as first option if it's not a generated one */}
+          {(() => {
+            const url = props.avatarUrl.trim();
+            if (url && !url.includes("dicebear")) {
+              console.log("[Avatar] Rendering custom avatar:", url);
+              return (
+                <button
+                  onClick={() => props.setAvatarUrl(url)}
+                  className="btn-smooth overflow-hidden rounded-2xl border p-1"
+                  style={{ borderColor: props.accent, background: "rgba(255,255,255,0.88)" }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src={url} 
+                    alt="Your avatar" 
+                    className="aspect-square w-full rounded-xl object-cover"
+                    onError={(e) => { 
+                      console.error("[Avatar] Failed to load:", url, "Error:", e);
+                    }}
+                  />
+                </button>
+              );
+            }
+            return null;
+          })()}
           {props.avatarChoices.map((seed, i) => {
             const option = buildDicebearUrl(seed);
             const active = (props.avatarUrl.trim() || buildDicebearUrl(props.previewName)) === option;
@@ -413,6 +439,7 @@ export default function AccountPanel({
   onLogIn,
   onLogOut,
   onUpdateAccount,
+  onUploadAvatar,
   onOpenSpaces,
 }: Readonly<AccountPanelProps>) {
   const [mode, setMode] = useState<"login" | "signup">("signup");
@@ -492,8 +519,22 @@ export default function AccountPanel({
 
   const handleAvatarUpload = async (file: File | null) => {
     if (!file) return;
-    const imageUrl = await readFileAsDataUrl(file);
-    if (imageUrl) setAvatarUrl(imageUrl);
+    // If upload function provided (authenticated), use it to get a public URL
+    if (onUploadAvatar) {
+      const publicUrl = await onUploadAvatar(file);
+      if (publicUrl) {
+        setAvatarUrl(publicUrl);
+        // Immediately save to profile so it broadcasts to other users
+        onUpdateAccount({ avatarUrl: publicUrl });
+        toast("Avatar uploaded!", { icon: "image" });
+      } else {
+        toast("Avatar upload failed - check Supabase Storage bucket", { variant: "error", icon: "warning" });
+      }
+    } else {
+      // Fallback to data URL for guests (won't be broadcast to others)
+      const imageUrl = await readFileAsDataUrl(file);
+      if (imageUrl) setAvatarUrl(imageUrl);
+    }
   };
 
   const handleAuth = async () => {

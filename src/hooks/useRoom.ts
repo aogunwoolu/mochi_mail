@@ -24,6 +24,10 @@ export interface RoomMember {
   x: number;
   /** World-space Y position (updated via cursor broadcast). */
   y: number;
+  /** Active layer the user is drawing on */
+  activeLayer?: number;
+  /** Current tool the user is using */
+  tool?: "pen" | "eraser" | "select" | "text" | "washi" | "asset" | "animated";
 }
 
 type PresencePayload = {
@@ -44,6 +48,8 @@ type CursorBroadcast = {
   color: string;
   avatarUrl?: string;
   username?: string;
+  activeLayer?: number;
+  tool?: "pen" | "eraser" | "select" | "text" | "washi" | "asset" | "animated";
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -138,7 +144,7 @@ export interface UseRoomReturn {
   members: RoomMember[];
   selfColor: string;
   error: string | null;
-  trackCursor: (pos: { x: number; y: number }) => void;
+  trackCursor: (pos: { x: number; y: number }, activeLayer?: number, tool?: string) => void;
   setRoomPublic: (pub: boolean) => Promise<void>;
 }
 
@@ -262,6 +268,7 @@ export function useRoom({
           p_token: token,
           p_password: null,
         });
+        console.log(`[useRoom:join_room_by_token] token=${token} err=${joinErr?.message ?? null} data=`, joinData);
 
         if (!joinErr && joinData?.[0]) {
           // Fetch full room details now that we have membership (RLS will allow it).
@@ -291,6 +298,7 @@ export function useRoom({
           .eq("invite_token", token)
           .maybeSingle();
 
+        console.log(`[useRoom:directRoom] result=`, directRoom);
         if (directRoom) {
           saveToken(directRoom.invite_token); // persist so navigating back to / reopens this room
           setActiveRoomId(directRoom.id);
@@ -302,6 +310,41 @@ export function useRoom({
           return;
         }
 
+        // ── Path 3: server API route (bypasses RLS for anonymous users) ────
+        // Called when both DB paths fail — typically because the Supabase RLS
+        // policy blocks anonymous JWTs from reading the rooms table directly.
+        // The API route uses the service-role key server-side.
+        try {
+          const apiRes = await fetch("/api/rooms/join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token }),
+          });
+          if (apiRes.ok) {
+            const { room: apiRoom } = (await apiRes.json()) as {
+              room: { id: string; title: string; invite_token: string; is_public: boolean; owner_id: string };
+            };
+            if (apiRoom) {
+              console.log(`[useRoom:apiPath] resolved room id=${apiRoom.id}`);
+              saveToken(apiRoom.invite_token);
+              if (globalThis.history) {
+                const url = new URL(globalThis.location.href);
+                url.searchParams.set("room", apiRoom.invite_token);
+                globalThis.history.replaceState(null, "", url.toString());
+              }
+              setActiveRoomId(apiRoom.id);
+              setActiveRoomTitle(apiRoom.title);
+              setActiveRoomToken(apiRoom.invite_token);
+              setIsPublic(apiRoom.is_public);
+              setIsOwner(Boolean(currentUser && apiRoom.owner_id === currentUser.id));
+              setPhase("drawing");
+              return;
+            }
+          }
+        } catch (apiErr) {
+          console.warn("[useRoom:apiPath] fetch failed:", apiErr);
+        }
+
         // ── All paths failed ────────────────────────────────────────────────
         // Token is genuinely invalid or expired (e.g. rotated by owner).
         // Clear the saved token so future visits don't keep retrying it.
@@ -311,6 +354,7 @@ export function useRoom({
           url.searchParams.delete("room");
           globalThis.history.replaceState(null, "", url.toString());
         }
+        console.warn(`[useRoom] All join paths failed for token=${token}`);
         setError("That invite link was invalid or expired — starting a fresh canvas.");
         setPhase("creating");
 
@@ -340,6 +384,8 @@ export function useRoom({
   useEffect(() => {
     if (!hasSession || !activeRoomId || phase !== "drawing") return;
 
+    console.log(`[useRoom] Opening presence channel — roomId=${activeRoomId} selfId=${selfIdRef.current} selfName=${selfNameRef.current}`);
+
     const supabase = createSupabaseBrowserClient();
     const ch = supabase
       .channel(`room-live:room:${activeRoomId}`, {
@@ -350,6 +396,7 @@ export function useRoom({
       })
       .on("presence", { event: "sync" }, () => {
         const state = ch.presenceState<PresencePayload>();
+        console.log(`[useRoom:sync] self=${selfIdRef.current} keys=`, Object.keys(state));
         const next: RoomMember[] = [];
         for (const [key, slots] of Object.entries(state)) {
           const p = slots[0];
@@ -367,37 +414,72 @@ export function useRoom({
         }
         setMembers(next);
       })
+      .on("presence", { event: "join" }, ({ key, newPresences }) => {
+        const p = (newPresences as unknown as PresencePayload[])[0];
+        console.log(`[useRoom:join] self=${selfIdRef.current} joined key=${key} name=${p?.name}`);
+        if (!p) return;
+        setMembers((prev) => {
+          if (prev.some((m) => m.presenceKey === key)) return prev;
+          return [
+            ...prev,
+            {
+              presenceKey: key,
+              userId: p.userId ?? key,
+              name: p.name ?? "Artist",
+              color: p.color ?? "#ff6b9d",
+              avatarUrl: p.avatarUrl,
+              username: p.username,
+              x: p.x ?? 0,
+              y: p.y ?? 0,
+            },
+          ];
+        });
+      })
+      .on("presence", { event: "leave" }, ({ key }) => {
+        console.log(`[useRoom:leave] self=${selfIdRef.current} left key=${key}`);
+        setMembers((prev) => prev.filter((m) => m.presenceKey !== key));
+      })
       .on("broadcast", { event: "cursor" }, ({ payload }) => {
         const data = payload as CursorBroadcast;
         if (!data?.id || data.id === selfIdRef.current) return;
         setMembers((prev) => {
           const idx = prev.findIndex((m) => m.presenceKey === data.id);
           if (idx === -1) return prev;
+          const existing = prev[idx];
           const updated = [...prev];
           updated[idx] = {
-            ...updated[idx],
+            ...existing,
             x: data.x,
             y: data.y,
-            name: data.name,
-            color: data.color,
-            avatarUrl: data.avatarUrl,
-            username: data.username,
+            // Only overwrite optional fields if broadcast includes them
+            ...(data.name && { name: data.name }),
+            ...(data.color && { color: data.color }),
+            ...(data.avatarUrl && { avatarUrl: data.avatarUrl }),
+            ...(data.username && { username: data.username }),
+            ...(data.activeLayer !== undefined && { activeLayer: data.activeLayer }),
+            ...(data.tool && { tool: data.tool }),
           };
           return updated;
         });
       });
 
     ch.subscribe(async (status) => {
+      console.log(`[useRoom:subscribe] self=${selfIdRef.current} status=${status}`);
       if (status !== "SUBSCRIBED") return;
-      await ch.track({
+      // Strip data: URLs from the avatar — they can be hundreds of KB (e.g. GIF stickers
+      // used as profile pictures) and will exceed Supabase Realtime's ~250 KB payload
+      // limit, causing track() to be silently dropped for all other users.
+      const safeAvatarUrl = selfAvatarRef.current?.startsWith("data:") ? undefined : selfAvatarRef.current;
+      const trackResult = await ch.track({
         userId: selfIdRef.current,
         name: selfNameRef.current,
         color: selfColorRef.current,
-        avatarUrl: selfAvatarRef.current,
+        avatarUrl: safeAvatarUrl,
         username: selfUsernameRef.current,
         x: 0,
         y: 0,
       } satisfies PresencePayload);
+      console.log(`[useRoom:track] self=${selfIdRef.current} trackResult=`, trackResult);
     });
 
     channelRef.current = ch;
@@ -409,8 +491,39 @@ export function useRoom({
     };
   }, [hasSession, activeRoomId, phase]);
 
+  // ── Re-track when avatar changes ───────────────────────────────────────────
+  useEffect(() => {
+    const ch = channelRef.current;
+    if (!ch) return;
+    const safeAvatarUrl = selfAvatarRef.current?.startsWith("data:") ? undefined : selfAvatarRef.current;
+    // Re-track presence with new avatar
+    void ch.track({
+      userId: selfIdRef.current,
+      name: selfNameRef.current,
+      color: selfColorRef.current,
+      avatarUrl: safeAvatarUrl,
+      username: selfUsernameRef.current,
+      x: 0,
+      y: 0,
+    } satisfies PresencePayload);
+    // Also broadcast via cursor channel for immediate update
+    void ch.send({
+      type: "broadcast",
+      event: "cursor",
+      payload: {
+        id: selfIdRef.current,
+        x: 0,
+        y: 0,
+        name: selfNameRef.current,
+        color: selfColorRef.current,
+        avatarUrl: safeAvatarUrl,
+        username: selfUsernameRef.current,
+      } satisfies CursorBroadcast,
+    });
+  }, [selfAvatarUrl]);
+
   // ── Cursor broadcast (16 ms throttle) ─────────────────────────────────────
-  const trackCursor = useCallback((pos: { x: number; y: number }) => {
+  const trackCursor = useCallback((pos: { x: number; y: number }, activeLayer?: number, tool?: string) => {
     const ch = channelRef.current;
     if (!ch) return;
     const now = performance.now();
@@ -425,8 +538,10 @@ export function useRoom({
         y: pos.y,
         name: selfNameRef.current,
         color: selfColorRef.current,
-        avatarUrl: selfAvatarRef.current,
+        avatarUrl: selfAvatarRef.current?.startsWith("data:") ? undefined : selfAvatarRef.current,
         username: selfUsernameRef.current,
+        activeLayer,
+        tool: tool as CursorBroadcast["tool"],
       } satisfies CursorBroadcast,
     });
   }, []);
@@ -436,7 +551,7 @@ export function useRoom({
     async (pub: boolean) => {
       if (!activeRoomId) return;
       const supabase = createSupabaseBrowserClient();
-      await (supabase.rpc as Function)("update_room_security", {
+      await supabase.rpc("update_room_security", {
         p_room_id: activeRoomId,
         p_is_public: pub,
       });

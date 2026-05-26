@@ -4,6 +4,7 @@ import { generateId } from "@/lib/id";
 import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity, ScrapbookKit } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { Json } from "@/types/database";
+import { createCanvas } from "@/lib/canvas/utils";
 
 type VisualAsset = Sticker | WashiTape | PaperBackground | MailStamp | EnvelopeStyle;
 
@@ -40,14 +41,15 @@ function loadStore(key: string): StoreItem[] {
     });
     localStorage.setItem(STORE_KEY, JSON.stringify(migrated));
     return migrated;
-  } catch {
+  } catch (err) {
+    console.error("[useStore] Failed to migrate store from localStorage:", err);
     return getDefaultStoreItems();
   }
 }
 
 function saveStoreByKey(key: string, items: StoreItem[]) {
   if (!globalThis.window) return;
-  try { localStorage.setItem(key, JSON.stringify(items)); } catch { /* quota exceeded */ }
+  try { localStorage.setItem(key, JSON.stringify(items)); } catch (err) { console.warn("[useStore] localStorage quota exceeded:", err); }
 }
 
 function loadCollection(key: string): string[] {
@@ -55,24 +57,15 @@ function loadCollection(key: string): string[] {
   try {
     const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
-  } catch {
+  } catch (err) {
+    console.error("[useStore] Failed to load collection from localStorage:", err);
     return [];
   }
 }
 
 function saveCollectionByKey(key: string, ids: string[]) {
   if (!globalThis.window) return;
-  try { localStorage.setItem(key, JSON.stringify(ids)); } catch { /* quota exceeded */ }
-}
-
-function createCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
-  if (!globalThis.document) return null;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  return { canvas, ctx };
+  try { localStorage.setItem(key, JSON.stringify(ids)); } catch (err) { console.warn("[useStore] localStorage quota exceeded:", err); }
 }
 
 // Generate a simple pixel art as default content

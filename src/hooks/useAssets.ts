@@ -3,18 +3,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { generateId } from "@/lib/id";
 import { Sticker, WashiTape, PlacedSticker, PaperBackground, CustomFont, MailStamp, EnvelopeStyle, ViewerIdentity, ScrapbookKit } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { Json } from "@/types/database";
-
-// Runs `draw` on a new canvas and returns a PNG data URL (or "" if canvas is unavailable).
-function renderToCanvas(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void): string {
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
-  draw(ctx);
-  return canvas.toDataURL("image/png");
-}
+import type { Json, Database } from "@/types/database";
+import { renderToCanvas } from "@/lib/canvas/utils";
 
 const PAPER_W = 1200;
 const PAPER_H = 800;
@@ -172,7 +162,8 @@ function loadAssetPayload(storageKey: string): AssetPayload | null {
   try {
     const raw = localStorage.getItem(storageKey);
     return raw ? (JSON.parse(raw) as AssetPayload) : null;
-  } catch {
+  } catch (err) {
+    console.error("[useAssets] Failed to load asset payload from localStorage:", err);
     return null;
   }
 }
@@ -181,8 +172,8 @@ function saveAssetPayload(storageKey: string, payload: AssetPayload) {
   if (!globalThis.window) return;
   try {
     localStorage.setItem(storageKey, JSON.stringify(payload));
-  } catch {
-    // Storage quota exceeded — skip local save silently
+  } catch (err) {
+    console.warn("[useAssets] localStorage quota exceeded, skipping local save:", err);
   }
 }
 
@@ -275,8 +266,8 @@ export function useAssets(user: ViewerIdentity) {
             selectedAssetId: selectedAssetValue?.id ?? null,
           });
         }
-      } catch {
-        // Keep local/default fallback.
+      } catch (err) {
+        console.warn("[useAssets] Failed to load remote assets, keeping local fallback:", err);
       } finally {
         if (!cancelled) setHydratedRemote(true);
       }
@@ -313,8 +304,8 @@ export function useAssets(user: ViewerIdentity) {
           await supabase
             .from("asset_states")
             .upsert({ owner_id: ownerId, payload: (payload as unknown as Json), updated_at: new Date().toISOString() }, { onConflict: "owner_id" });
-        } catch {
-          // Local payload already saved.
+        } catch (err) {
+          console.warn("[useAssets] Failed to sync assets to remote, local payload saved:", err);
         }
       })();
     }, 350);
@@ -510,18 +501,19 @@ export function useAssets(user: ViewerIdentity) {
   }, []);
 
   const saveBoardState = useCallback(async (drawingData: string | null, currentPlacedItems: PlacedSticker[], currentSelectedPaper: PaperBackground | null, roomId?: string | null) => {
-    if (!user?.id || user.isGuest || boardPersistenceDisabledRef.current) return;
+    const isSharedRoomWrite = !!roomId;
+    if (!user?.id || (user.isGuest && !isSharedRoomWrite) || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
-    const { error } = await (supabase
-      .from("studio_boards") as any)
+    const { error } = await supabase
+      .from("studio_boards")
       .upsert({
         created_by: user.id,
         room_id: roomId ?? "personal",
         drawing_data: drawingData,
-        placed_items: currentPlacedItems,
-        selected_paper: currentSelectedPaper,
+        placed_items: currentPlacedItems as unknown as Json,
+        selected_paper: currentSelectedPaper as unknown as Json,
         updated_at: new Date().toISOString(),
-      }, { onConflict: "created_by,room_id" });
+      } as Database["public"]["Tables"]["studio_boards"]["Insert"], { onConflict: "created_by,room_id" });
     if (error) {
       const message = String(error.message ?? "").toLowerCase();
       const code = String(error.code ?? "");
@@ -534,12 +526,14 @@ export function useAssets(user: ViewerIdentity) {
   }, [user?.id, user.isGuest]);
 
   const loadBoardState = useCallback(async (roomId?: string | null) => {
-    if (!user?.id || user.isGuest || boardPersistenceDisabledRef.current) return;
+    const isSharedRoomRead = !!roomId;
+    if (!user?.id || (user.isGuest && !isSharedRoomRead) || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
     // For shared rooms load the most recently updated board from any participant;
     // for personal boards restrict to the owner.
     const isSharedRoom = !!roomId;
-    const baseQuery = (supabase.from("studio_boards") as any)
+    const baseQuery = supabase
+      .from("studio_boards")
       .select("drawing_data, placed_items, selected_paper")
       .eq("room_id", roomId ?? "personal");
     const { data, error } = await (
@@ -561,9 +555,9 @@ export function useAssets(user: ViewerIdentity) {
 
     if (data) {
       return {
-        drawingData: (data as any).drawing_data as string | null,
-        placedItems: ((data as any).placed_items ?? []) as PlacedSticker[],
-        selectedPaper: ((data as any).selected_paper ?? null) as PaperBackground | null,
+        drawingData: data.drawing_data as string | null,
+        placedItems: ((data.placed_items as unknown) ?? []) as PlacedSticker[],
+        selectedPaper: ((data.selected_paper as unknown) ?? null) as PaperBackground | null,
       };
     }
     return null;

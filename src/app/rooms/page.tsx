@@ -111,11 +111,18 @@ function RoomsPageInner() {
   const searchParams = useSearchParams();
   const inviteFromUrl = searchParams?.get("invite")?.trim() ?? "";
   const account = useAccount();
-  const rooms = useRooms(account.currentAccount ? {
+  // Use currentAccount for full users, fall back to viewer identity for anonymous users
+  const roomIdentity = account.currentAccount ? {
     id: account.currentAccount.id,
     displayName: account.currentAccount.displayName,
     username: account.currentAccount.username,
+  } : (account.hasSession && account.viewer.id ? {
+    id: account.viewer.id,
+    displayName: account.viewer.name,
+    username: account.viewer.username || "",
   } : null);
+
+  const rooms = useRooms(roomIdentity);
 
   const [joinToken, setJoinToken] = useState(inviteFromUrl);
   const [joinPassword, setJoinPassword] = useState("");
@@ -127,7 +134,8 @@ function RoomsPageInner() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
-  const canUseRooms = account.hydrated && account.hasSession && account.currentAccount;
+  // Allow anonymous users with a session to use rooms
+  const canUseRooms = account.hydrated && account.hasSession && roomIdentity;
 
   // Build the canvas URL that preserves the last open room.
   // Falls back to "/" if the user hasn't opened the canvas yet.
@@ -152,8 +160,8 @@ function RoomsPageInner() {
     return (
       <div className="flex h-svh items-center justify-center p-4">
         <div className="panel max-w-sm rounded-3xl p-6 text-center">
-          <p className="text-sm font-semibold">Sign in to use rooms</p>
-          <p className="mt-1.5 text-xs" style={{ color: "var(--muted)" }}>Rooms are account-based. Sign in, then come back.</p>
+          <p className="text-sm font-semibold">Authentication required</p>
+          <p className="mt-1.5 text-xs" style={{ color: "var(--muted)" }}>Rooms require an active session. Please sign in or enable anonymous auth.</p>
           <button onClick={() => router.push(canvasUrl())} className="btn-smooth mt-4 rounded-xl px-4 py-2 text-xs font-semibold text-white" style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
             Back to studio
           </button>
