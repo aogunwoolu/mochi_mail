@@ -1,7 +1,7 @@
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { BrushSettings, CustomFont, PaperBackground, Sticker, WashiTape, ScrapbookKit, ScrapbookKitElement, StoreItem, ViewerIdentity } from "@/types";
-import FontTracerCreator from "./FontTracerCreator";
+import FontStudio from "./FontStudio";
 import StickerCreator from "./StickerCreator";
 import WashiTapeCreator from "./WashiTapeCreator";
 import ScrapbookView from "./ScrapbookView";
@@ -55,26 +55,42 @@ function GifSkeletons() {
 }
 
 function GifGrid({ results, onAdd }: { results: GifSearchResult[]; onAdd: (gif: GifSearchResult) => void }) {
+  const GRID_COLS = 5;
+  const GRID_ROWS = 2;
+  const COLUMN_GAP = 6;
+  const MAX_HEIGHT = 280;
+  
+  const chunkArray = (arr: GifSearchResult[], size: number) =>
+  Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+    arr.slice(i * size, i * size + size)
+  );
+
+  // compute columns: GRID_COLS columns (distribute evenly)
+  const perColumn = Math.ceil(results.length / GRID_COLS);
+  const columns = chunkArray(results, perColumn);
+  
   return (
-    <div className="overflow-y-auto" style={{ maxHeight: 280, columns: 2, columnGap: 6 }}>
-      {results.map((gif) => (
-        <div key={gif.id} className="mb-1.5" style={{ breakInside: "avoid" }}>
-          <button
-            onClick={() => onAdd(gif)}
-            className="group relative w-full overflow-hidden rounded-xl btn-smooth block"
-            style={{ background: "var(--border)" }}
-            title={gif.title}
-          >
-            <img
-              src={gif.previewUrl}
-              alt={gif.title}
-              className="block w-full h-auto"
-              loading="lazy"
-            />
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 rounded-xl" style={{ background: "rgba(167,139,250,0.5)" }}>
-              <span className="text-white text-2xl font-bold drop-shadow-md leading-none">+</span>
+    <div className="grid overflow-y-scroll" style={{ gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`, gap: COLUMN_GAP, maxHeight: MAX_HEIGHT }}>
+      {columns.map((col, colIndex) => (
+        <div key={colIndex} style={{ columns: 1 }}>
+          {col.map((gif) => (
+            <div key={gif.id} className="mb-1.5" style={{ breakInside: "avoid" }}>
+              <button
+                onClick={() => onAdd(gif)}
+                className="group relative w-full overflow-hidden rounded-xl btn-smooth block"
+                style={{ background: "var(--border)" }}
+                title={gif.title}
+              >
+                <img src={gif.previewUrl} alt={gif.title} className="block w-full h-auto" loading="lazy" />
+                <div
+                  className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 rounded-xl"
+                  style={{ background: "rgba(167,139,250,0.5)" }}
+                >
+                  <span className="text-white text-2xl font-bold drop-shadow-md leading-none">+</span>
+                </div>
+              </button>
             </div>
-          </button>
+          ))}
         </div>
       ))}
     </div>
@@ -161,6 +177,19 @@ export default function StudioAssetDrawer({
   const filteredWashi = useMemo(() => washiTapes.filter((w) => w.name.toLowerCase().includes(query)), [washiTapes, query]);
   const filteredPapers = useMemo(() => papers.filter((p) => p.name.toLowerCase().includes(query)), [papers, query]);
   const filteredFonts = useMemo(() => customFonts.filter((f) => f.name.toLowerCase().includes(query)), [customFonts, query]);
+
+  // Font editing state
+  const [editingFont, setEditingFont] = useState<CustomFont | null>(null);
+
+  // Handle font save (create new or update existing)
+  const handleFontSave = useCallback((name: string, glyphs: Record<string, string>, glyphWidth: number, glyphHeight: number) => {
+    if (editingFont) {
+      // Delete old font and create new one
+      onDeleteCustomFont(editingFont.id);
+    }
+    onSaveCustomFont(name, glyphs, glyphWidth, glyphHeight);
+    setEditingFont(null);
+  }, [editingFont, onDeleteCustomFont, onSaveCustomFont]);
 
   return (
     <div>
@@ -421,24 +450,64 @@ export default function StudioAssetDrawer({
         {/* ── Font Lab ── */}
         {activeSection === "fonts" && (
           <div className="panel-soft p-4">
-            <SectionTitle title="Font Lab" note="Trace your own handwriting and use it as a font." />
-            <FontTracerCreator onSave={onSaveCustomFont} />
-            {filteredFonts.length > 0
-              ? (
-                <div className="mt-4 space-y-2">
-                  {filteredFonts.map((font) => (
-                    <div key={font.id} className="group flex items-center justify-between gap-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-                      <button onClick={() => onBrushChange({ textFont: `custom:${font.id}`, tool: "text" })} className="btn-smooth flex-1 text-left" style={{ color: "var(--muted-strong)" }}>
-                        <div className="text-xs font-semibold">{font.name}</div>
-                        <div className="text-[10px]" style={{ color: "var(--muted)" }}>Use this traced font for text mode</div>
+            <SectionTitle title="Font Lab" note={editingFont ? `Editing "${editingFont.name}"` : "Trace your own handwriting and use it as a font."} />
+            {editingFont && (
+              <button
+                onClick={() => setEditingFont(null)}
+                className="mb-3 flex items-center gap-1 text-[11px] font-semibold"
+                style={{ color: "var(--muted-strong)" }}
+              >
+                ← Back to font list
+              </button>
+            )}
+            <FontStudio 
+              initialFont={editingFont}
+              onSave={handleFontSave} 
+              onCancel={() => setEditingFont(null)}
+            />
+            {!editingFont && filteredFonts.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <div className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>Your Fonts</div>
+                {filteredFonts.map((font) => (
+                  <div key={font.id} className="group flex items-center justify-between gap-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+                    <button onClick={() => onBrushChange({ textFont: `custom:${font.id}`, tool: "text" })} className="btn-smooth flex-1 text-left" style={{ color: "var(--muted-strong)" }}>
+                      <div className="text-xs font-semibold">{font.name}</div>
+                      <div className="text-[10px]" style={{ color: "var(--muted)" }}>{Object.keys(font.glyphs).length} glyphs • Click to use</div>
+                    </button>
+                    <div className="flex gap-1">
+                      <button 
+                        onClick={() => setEditingFont(font)} 
+                        className="btn-smooth rounded-lg px-2 py-1 text-[10px]" 
+                        style={{ background: "rgba(103,212,241,0.15)", color: "#0369a1" }}
+                        title="Edit font"
+                      >
+                        Edit
                       </button>
-                      <button onClick={() => exportFont(font, viewer.name)} className="btn-smooth rounded-lg px-2 py-1 text-[10px]" style={{ background: "rgba(167,139,250,0.15)", color: "var(--lavender)" }} title="Download font as JSON">↓ Export</button>
-                      <button onClick={() => onDeleteCustomFont(font.id)} className="btn-smooth rounded-lg px-2 py-1 text-[10px]" style={{ background: "rgba(251,146,60,0.15)", color: "var(--coral)" }}>Delete</button>
+                      <button 
+                        onClick={() => exportFont(font, viewer.name)} 
+                        className="btn-smooth rounded-lg px-2 py-1 text-[10px]" 
+                        style={{ background: "rgba(167,139,250,0.15)", color: "var(--lavender)" }} 
+                        title="Download font as JSON"
+                      >
+                        Export
+                      </button>
+                      <button 
+                        onClick={() => onDeleteCustomFont(font.id)} 
+                        className="btn-smooth rounded-lg px-2 py-1 text-[10px]" 
+                        style={{ background: "rgba(251,146,60,0.15)", color: "var(--coral)" }}
+                      >
+                        Delete
+                      </button>
                     </div>
-                  ))}
-                </div>
-              )
-              : <div className="mt-4 rounded-xl px-3 py-4 text-xs" style={{ background: "var(--surface)", color: "var(--muted)" }}>No fonts match your search.</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {!editingFont && filteredFonts.length === 0 && (
+              <div className="mt-4 rounded-xl px-3 py-4 text-xs" style={{ background: "var(--surface)", color: "var(--muted)" }}>
+                No fonts yet. Create your first font above!
+              </div>
+            )}
           </div>
         )}
       </div>

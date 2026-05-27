@@ -381,7 +381,7 @@ export default function Home() {
     [account.viewer, store, trackItemPublished],
   );
 
-  // ── Canvas zoom (Ctrl+wheel / pinch) — anchors to focal point ─────────────
+  // ── Canvas zoom (Ctrl+wheel / pinch) — optimized with RAF throttling ──────
   const pinchStateRef = useRef<{
     startDist: number;
     startZoom: number;
@@ -390,59 +390,151 @@ export default function Home() {
     initialScrollLeft: number;
     initialScrollTop: number;
   } | null>(null);
+  
+  // Use refs for smooth zoom animation without React re-renders
+  const zoomStateRef = useRef({ current: 1, target: 1, isAnimating: false });
+  const canvasWorldRef = useRef<HTMLDivElement>(null);
+  const zoomRafRef = useRef<number | null>(null);
+  const gestureStartDistRef = useRef(0);
+  const gestureStartZoomRef = useRef(1);
+  const gestureCenterRef = useRef({ x: 0, y: 0 });
+  const gestureScrollRef = useRef({ left: 0, top: 0 });
+
+  // Apply zoom using CSS transform for GPU acceleration (no React render)
+  const applyZoomTransform = useCallback((zoom: number, centerX?: number, centerY?: number) => {
+    const worldEl = canvasWorldRef.current;
+    const scrollEl = studioScrollRef.current;
+    if (!worldEl || !scrollEl) return;
+
+    // Use CSS transform for GPU-accelerated zooming
+    worldEl.style.transform = `scale(${zoom})`;
+    worldEl.style.transformOrigin = "top left";
+    
+    // Adjust container size to match zoom
+    const scaledW = CANVAS_W * zoom;
+    const scaledH = CANVAS_H * zoom;
+    worldEl.style.width = `${scaledW}px`;
+    worldEl.style.height = `${scaledH}px`;
+    
+    // Keep focal point stable if center coordinates provided
+    if (centerX !== undefined && centerY !== undefined) {
+      const rect = scrollEl.getBoundingClientRect();
+      const viewportX = centerX - rect.left;
+      const viewportY = centerY - rect.top;
+      const focalWorldX = (scrollEl.scrollLeft + viewportX) / zoomStateRef.current.current;
+      const focalWorldY = (scrollEl.scrollTop + viewportY) / zoomStateRef.current.current;
+      scrollEl.scrollLeft = focalWorldX * zoom - viewportX;
+      scrollEl.scrollTop = focalWorldY * zoom - viewportY;
+    }
+  }, []);
+
+  // Smooth zoom animation with RAF
+  const animateZoom = useCallback(() => {
+    const state = zoomStateRef.current;
+    if (!state.isAnimating) return;
+    
+    const diff = state.target - state.current;
+    if (Math.abs(diff) < 0.001) {
+      state.current = state.target;
+      state.isAnimating = false;
+      applyZoomTransform(state.current);
+      setCanvasZoom(state.current); // Sync to React state after animation
+      zoomRafRef.current = null;
+      return;
+    }
+    
+    // Smooth lerp for natural feel
+    state.current += diff * 0.15;
+    applyZoomTransform(state.current);
+    zoomRafRef.current = requestAnimationFrame(animateZoom);
+  }, [applyZoomTransform]);
+
+  // Programmatic zoom setter with smooth animation
+  const setZoomSmooth = useCallback((targetZoom: number, centerX?: number, centerY?: number) => {
+    const clamped = Math.min(3, Math.max(0.25, targetZoom));
+    zoomStateRef.current.target = clamped;
+    
+    if (!zoomStateRef.current.isAnimating) {
+      zoomStateRef.current.isAnimating = true;
+      zoomRafRef.current = requestAnimationFrame(animateZoom);
+    }
+    
+    // If center point provided, adjust scroll to keep it stable
+    if (centerX !== undefined && centerY !== undefined) {
+      const scrollEl = studioScrollRef.current;
+      if (scrollEl) {
+        const rect = scrollEl.getBoundingClientRect();
+        const viewportX = centerX - rect.left;
+        const viewportY = centerY - rect.top;
+        const focalWorldX = (scrollEl.scrollLeft + viewportX) / zoomStateRef.current.current;
+        const focalWorldY = (scrollEl.scrollTop + viewportY) / zoomStateRef.current.current;
+        // Defer scroll adjustment to after zoom animation
+        requestAnimationFrame(() => {
+          scrollEl.scrollLeft = focalWorldX * clamped - viewportX;
+          scrollEl.scrollTop = focalWorldY * clamped - viewportY;
+        });
+      }
+    }
+  }, [animateZoom]);
+
+  // Zoom in/out buttons
+  const zoomIn = useCallback(() => {
+    setZoomSmooth(zoomStateRef.current.target * 1.2);
+  }, [setZoomSmooth]);
+  
+  const zoomOut = useCallback(() => {
+    setZoomSmooth(zoomStateRef.current.target * 0.8);
+  }, [setZoomSmooth]);
+  
+  const zoomReset = useCallback(() => {
+    setZoomSmooth(1);
+  }, [setZoomSmooth]);
 
   useEffect(() => {
     if (activeTab !== "studio") return;
     const el = studioScrollRef.current;
     if (!el) return;
 
-    // Calculate focal point in world coordinates before zoom
-    const getFocalWorldPoint = (clientX: number, clientY: number) => {
-      const rect = el.getBoundingClientRect();
-      const localX = clientX - rect.left + el.scrollLeft;
-      const localY = clientY - rect.top + el.scrollTop;
-      return {
-        x: localX / canvasZoom,
-        y: localY / canvasZoom,
-      };
-    };
-
-    // Adjust scroll to keep focal point stable after zoom change
-    const adjustScrollForZoom = (
-      newZoom: number,
-      focalWorldX: number,
-      focalWorldY: number,
-      viewportX: number,
-      viewportY: number,
-    ) => {
-      const newLocalX = focalWorldX * newZoom;
-      const newLocalY = focalWorldY * newZoom;
-      el.scrollLeft = newLocalX - viewportX;
-      el.scrollTop = newLocalY - viewportY;
-    };
-
-    // Wheel zoom with Ctrl/Meta - anchors to cursor position
+    // Wheel zoom with Ctrl/Meta - throttled with RAF
+    let wheelTimeout: ReturnType<typeof setTimeout> | null = null;
+    let accumulatedDelta = 0;
+    
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) return;
+      // Normal scroll (no modifier) - let browser handle it natively
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+        return;
+      }
+      
       e.preventDefault();
-
-      const rect = el.getBoundingClientRect();
-      const viewportX = e.clientX - rect.left;
-      const viewportY = e.clientY - rect.top;
-      const focalWorld = getFocalWorldPoint(e.clientX, e.clientY);
-
-      setCanvasZoom((prev) => {
-        const delta = -e.deltaY * 0.002;
-        const next = Math.min(3, Math.max(0.25, prev + delta));
-        // Use setTimeout to access the new zoom value after state update
-        setTimeout(() => {
-          adjustScrollForZoom(next, focalWorld.x, focalWorld.y, viewportX, viewportY);
-        }, 0);
-        return next;
-      });
+      
+      // Accumulate delta for smooth zooming
+      accumulatedDelta += -e.deltaY * 0.002;
+      
+      if (wheelTimeout) {
+        clearTimeout(wheelTimeout);
+      } else {
+        // First wheel event - capture focal point
+        const rect = el.getBoundingClientRect();
+        gestureCenterRef.current = { x: e.clientX, y: e.clientY };
+        gestureScrollRef.current = { left: el.scrollLeft, top: el.scrollTop };
+      }
+      
+      wheelTimeout = setTimeout(() => {
+        const rect = el.getBoundingClientRect();
+        const viewportX = gestureCenterRef.current.x - rect.left;
+        const viewportY = gestureCenterRef.current.y - rect.top;
+        const focalWorldX = (gestureScrollRef.current.left + viewportX) / zoomStateRef.current.target;
+        const focalWorldY = (gestureScrollRef.current.top + viewportY) / zoomStateRef.current.target;
+        
+        const newZoom = Math.min(3, Math.max(0.25, zoomStateRef.current.target * (1 + accumulatedDelta)));
+        setZoomSmooth(newZoom, gestureCenterRef.current.x, gestureCenterRef.current.y);
+        
+        accumulatedDelta = 0;
+        wheelTimeout = null;
+      }, 16); // One frame delay for batching
     };
 
-    // Touch pinch zoom - tracks center of pinch
+    // Touch pinch zoom - optimized
     const getTouchDistance = (t1: Touch, t2: Touch) => {
       const dx = t2.clientX - t1.clientX;
       const dy = t2.clientY - t1.clientY;
@@ -460,9 +552,13 @@ export default function Home() {
         const t1 = e.touches[0];
         const t2 = e.touches[1];
         const center = getTouchCenter(t1, t2);
+        gestureStartDistRef.current = getTouchDistance(t1, t2);
+        gestureStartZoomRef.current = zoomStateRef.current.target;
+        gestureCenterRef.current = center;
+        gestureScrollRef.current = { left: el.scrollLeft, top: el.scrollTop };
         pinchStateRef.current = {
-          startDist: getTouchDistance(t1, t2),
-          startZoom: canvasZoom,
+          startDist: gestureStartDistRef.current,
+          startZoom: gestureStartZoomRef.current,
           centerX: center.x,
           centerY: center.y,
           initialScrollLeft: el.scrollLeft,
@@ -476,67 +572,46 @@ export default function Home() {
         e.preventDefault();
         const t1 = e.touches[0];
         const t2 = e.touches[1];
-        const state = pinchStateRef.current;
-
+        
         const newDist = getTouchDistance(t1, t2);
-        const scale = newDist / state.startDist;
-        const nextZoom = Math.min(3, Math.max(0.25, state.startZoom * scale));
-
-        // Calculate focal point in world coordinates at start
-        const rect = el.getBoundingClientRect();
-        const startLocalX = state.centerX - rect.left + state.initialScrollLeft;
-        const startLocalY = state.centerY - rect.top + state.initialScrollTop;
-        const focalWorldX = startLocalX / state.startZoom;
-        const focalWorldY = startLocalY / state.startZoom;
-
-        // Track current center (pinch may have moved)
+        const scale = newDist / pinchStateRef.current.startDist;
+        const nextZoom = Math.min(3, Math.max(0.25, pinchStateRef.current.startZoom * scale));
+        
         const currentCenter = getTouchCenter(t1, t2);
-        const viewportX = currentCenter.x - rect.left;
-        const viewportY = currentCenter.y - rect.top;
-
-        setCanvasZoom(nextZoom);
-        adjustScrollForZoom(nextZoom, focalWorldX, focalWorldY, viewportX, viewportY);
+        
+        // Apply zoom immediately for responsive pinch
+        zoomStateRef.current.target = nextZoom;
+        if (!zoomStateRef.current.isAnimating) {
+          zoomStateRef.current.current = nextZoom;
+          applyZoomTransform(nextZoom, currentCenter.x, currentCenter.y);
+        }
       }
     };
 
     const onTouchEnd = () => {
-      pinchStateRef.current = null;
+      if (pinchStateRef.current) {
+        // Sync final zoom to React state
+        setCanvasZoom(zoomStateRef.current.target);
+        pinchStateRef.current = null;
+      }
     };
 
     // Legacy Safari gesture events (backup for older iOS)
     const onGestureStart = (e: Event) => {
       e.preventDefault();
       const rect = el.getBoundingClientRect();
-      // Safari doesn't give us center, approximate with viewport center
-      pinchStateRef.current = {
-        startDist: 1,
-        startZoom: canvasZoom,
-        centerX: rect.left + rect.width / 2,
-        centerY: rect.top + rect.height / 2,
-        initialScrollLeft: el.scrollLeft,
-        initialScrollTop: el.scrollTop,
-      };
+      gestureStartZoomRef.current = zoomStateRef.current.target;
+      gestureCenterRef.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      gestureScrollRef.current = { left: el.scrollLeft, top: el.scrollTop };
     };
+    
     const onGestureChange = (e: Event) => {
       e.preventDefault();
       const ge = e as unknown as { scale: number };
-      if (typeof ge.scale === "number" && pinchStateRef.current) {
-        const state = pinchStateRef.current;
-        // Safari scale is cumulative from gesture start, not delta
-        const nextZoom = Math.min(3, Math.max(0.25, state.startZoom * ge.scale));
-        const rect = el.getBoundingClientRect();
-        const startLocalX = state.centerX - rect.left + state.initialScrollLeft;
-        const startLocalY = state.centerY - rect.top + state.initialScrollTop;
-        const focalWorldX = startLocalX / state.startZoom;
-        const focalWorldY = startLocalY / state.startZoom;
-        const viewportX = state.centerX - rect.left;
-        const viewportY = state.centerY - rect.top;
-        setCanvasZoom(nextZoom);
-        adjustScrollForZoom(nextZoom, focalWorldX, focalWorldY, viewportX, viewportY);
+      if (typeof ge.scale === "number") {
+        const nextZoom = Math.min(3, Math.max(0.25, gestureStartZoomRef.current * ge.scale));
+        setZoomSmooth(nextZoom, gestureCenterRef.current.x, gestureCenterRef.current.y);
       }
-    };
-    const onGestureEnd = () => {
-      pinchStateRef.current = null;
     };
 
     el.addEventListener("wheel", onWheel, { passive: false });
@@ -546,8 +621,11 @@ export default function Home() {
     el.addEventListener("touchcancel", onTouchEnd);
     el.addEventListener("gesturestart", onGestureStart, { passive: false } as EventListenerOptions);
     el.addEventListener("gesturechange", onGestureChange, { passive: false } as EventListenerOptions);
-    el.addEventListener("gestureend", onGestureEnd);
+    
     return () => {
+      if (zoomRafRef.current) {
+        cancelAnimationFrame(zoomRafRef.current);
+      }
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
@@ -555,9 +633,8 @@ export default function Home() {
       el.removeEventListener("touchcancel", onTouchEnd);
       el.removeEventListener("gesturestart", onGestureStart);
       el.removeEventListener("gesturechange", onGestureChange);
-      el.removeEventListener("gestureend", onGestureEnd);
     };
-  }, [activeTab, canvasZoom]);
+  }, [activeTab, applyZoomTransform, setZoomSmooth]);
 
   // ── Infinite canvas scroll ────────────────────────────────────────────────
 
@@ -682,6 +759,40 @@ export default function Home() {
       trackCursor(lastMouseWorldRef.current, activeLayer, brushSettings.tool);
     }
   }, [brushSettings.tool, activeLayer, trackCursor]);
+
+  // Keyboard shortcuts for zoom
+  useEffect(() => {
+    if (activeTab !== "studio") return;
+    
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Only handle if not typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case "=":
+          case "+":
+            e.preventDefault();
+            zoomIn();
+            break;
+          case "-":
+          case "_":
+            e.preventDefault();
+            zoomOut();
+            break;
+          case "0":
+            e.preventDefault();
+            zoomReset();
+            break;
+        }
+      }
+    };
+    
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeTab, zoomIn, zoomOut, zoomReset]);
 
   const remoteArtists = roomMembers.filter((m) => m.presenceKey !== selfArtistId);
   const artistList = mounted
@@ -857,16 +968,16 @@ export default function Home() {
           <div
             className="relative"
             style={{
-              width: CANVAS_W * canvasZoom,
-              height: CANVAS_H * canvasZoom,
+              width: CANVAS_W,
+              height: CANVAS_H,
             }}
           >
             <div
-              className="absolute left-0 top-0"
+              ref={canvasWorldRef}
+              className="absolute left-0 top-0 will-change-transform"
               style={{
                 width: CANVAS_W,
                 height: CANVAS_H,
-                transform: `scale(${canvasZoom})`,
                 transformOrigin: "top left",
               }}
             >
@@ -991,29 +1102,52 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Zoom indicator */}
-        {canvasZoom !== 1 && (
-          <div
-            className="pointer-events-auto absolute bottom-20 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-full px-3 py-1.5"
-            style={{
-              background: "rgba(255,255,255,0.95)",
-              border: "1px solid rgba(186,156,214,0.3)",
-              boxShadow: "0 2px 10px rgba(0,0,0,0.1)",
-              backdropFilter: "blur(8px)",
-            }}
+        {/* Zoom controls */}
+        <div
+          className="pointer-events-auto absolute bottom-20 right-4 z-50 flex flex-col items-center gap-1 rounded-2xl p-1.5"
+          style={{
+            background: "rgba(255,255,255,0.95)",
+            border: "1px solid rgba(186,156,214,0.3)",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.12)",
+            backdropFilter: "blur(10px)",
+          }}
+        >
+          <button
+            onClick={zoomIn}
+            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold transition-all hover:scale-105"
+            style={{ color: "var(--muted-strong)" }}
+            title="Zoom in (+)"
           >
-            <span className="text-xs font-semibold" style={{ color: "var(--muted-strong)" }}>
+            +
+          </button>
+          
+          <div className="flex h-8 items-center justify-center">
+            <span className="text-[11px] font-semibold tabular-nums" style={{ color: "var(--muted-strong)" }}>
               {Math.round(canvasZoom * 100)}%
             </span>
-            <button
-              onClick={() => setCanvasZoom(1)}
-              className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-bold"
-              style={{ background: "rgba(167,139,250,0.15)", color: "#6d28d9" }}
-            >
-              Reset
-            </button>
           </div>
-        )}
+          
+          <button
+            onClick={zoomOut}
+            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold transition-all hover:scale-105"
+            style={{ color: "var(--muted-strong)" }}
+            title="Zoom out (-)"
+          >
+            −
+          </button>
+          
+          <div className="my-0.5 h-px w-5 bg-[rgba(186,156,214,0.3)]" />
+          
+          <button
+            onClick={zoomReset}
+            className="btn-smooth flex h-7 w-8 items-center justify-center rounded-lg text-[10px] font-bold"
+            style={{ background: canvasZoom !== 1 ? "rgba(167,139,250,0.15)" : "transparent", color: "#6d28d9" }}
+            title="Reset zoom (100%)"
+            disabled={canvasZoom === 1}
+          >
+            ⌂
+          </button>
+        </div>
 
         {/* Layers toggle button */}
         <button

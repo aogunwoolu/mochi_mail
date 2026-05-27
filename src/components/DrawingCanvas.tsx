@@ -1385,85 +1385,71 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (!selectedItem || !onUpdatePlacedItem) return;
         e.stopPropagation();
         e.preventDefault();
+        try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch {}
+
         const canvasEl = canvasRef.current;
         if (!canvasEl) return;
         const rect = canvasEl.getBoundingClientRect();
         const scaleX = canvasEl.width / rect.width;
         const scaleY = canvasEl.height / rect.height;
         const startItem = { ...selectedItem };
+        const startMouseX = (e.clientX - rect.left) * scaleX;
+        const startMouseY = (e.clientY - rect.top) * scaleY;
 
-        handleDragRef.current = {
-          type,
-          corner,
-          startMouseX: (e.clientX - rect.left) * scaleX,
-          startMouseY: (e.clientY - rect.top) * scaleY,
-          startItem,
-          canvasRect: rect,
-          scaleX,
-          scaleY,
+        handleDragRef.current = { type, corner, startMouseX, startMouseY, startItem, canvasRect: rect, scaleX, scaleY };
+
+        let rafId: number | null = null;
+        let pending: Partial<PlacedSticker> | null = null;
+
+        const flush = () => {
+          if (pending) { onUpdatePlacedItem(startItem.id, pending); pending = null; }
+          rafId = null;
         };
 
         const onMove = (me: PointerEvent) => {
-          const drag = handleDragRef.current;
-          if (!drag) return;
-          const item = drag.startItem;
+          const item = startItem;
           const R = (item.rotation * Math.PI) / 180;
           const cosR = Math.cos(R);
           const sinR = Math.sin(R);
           const cx = item.x + item.width / 2;
           const cy = item.y + item.height / 2;
-          const mouseX = (me.clientX - drag.canvasRect.left) * drag.scaleX;
-          const mouseY = (me.clientY - drag.canvasRect.top) * drag.scaleY;
+          const mouseX = (me.clientX - rect.left) * scaleX;
+          const mouseY = (me.clientY - rect.top) * scaleY;
 
-          if (drag.type === "rotate") {
-            const startAngle = Math.atan2(drag.startMouseY - cy, drag.startMouseX - cx);
+          if (type === "rotate") {
+            const startAngle = Math.atan2(startMouseY - cy, startMouseX - cx);
             const currentAngle = Math.atan2(mouseY - cy, mouseX - cx);
             const delta = (currentAngle - startAngle) * (180 / Math.PI);
-            onUpdatePlacedItem(item.id, {
-              rotation: ((item.rotation + delta) % 360 + 360) % 360,
-            });
-            return;
+            pending = { rotation: ((item.rotation + delta) % 360 + 360) % 360 };
+          } else {
+            const c = corner!;
+            const getCorner = (w: "nw" | "ne" | "sw" | "se") => {
+              const lx = w[1] === "e" ? item.width / 2 : -item.width / 2;
+              const ly = w[0] === "s" ? item.height / 2 : -item.height / 2;
+              return { x: cx + lx * cosR - ly * sinR, y: cy + lx * sinR + ly * cosR };
+            };
+            const opp: Record<string, "nw" | "ne" | "sw" | "se"> = { se: "nw", nw: "se", ne: "sw", sw: "ne" };
+            const anchor = getCorner(opp[c]);
+            const dx = mouseX - anchor.x;
+            const dy = mouseY - anchor.y;
+            const localDx = dx * cosR + dy * sinR;
+            const signX = c[1] === "e" ? 1 : -1;
+            const aspect = item.width / item.height;
+            const newW = Math.max(24, signX * localDx);
+            const newH = Math.max(24, newW / aspect);
+            const dlx = c[1] === "e" ? newW / 2 : -newW / 2;
+            const dly = c[0] === "s" ? newH / 2 : -newH / 2;
+            const newCX = anchor.x + dlx * cosR - dly * sinR;
+            const newCY = anchor.y + dlx * sinR + dly * cosR;
+            pending = { x: newCX - newW / 2, y: newCY - newH / 2, width: newW, height: newH };
           }
 
-          // Resize: compute anchor corner (opposite of dragged corner)
-          const c = drag.corner!;
-          const getCornerScreen = (which: "nw" | "ne" | "sw" | "se") => {
-            const lx = which[1] === "e" ? item.width / 2 : -item.width / 2;
-            const ly = which[0] === "s" ? item.height / 2 : -item.height / 2;
-            return { x: cx + lx * cosR - ly * sinR, y: cy + lx * sinR + ly * cosR };
-          };
-          const opposites: Record<string, "nw" | "ne" | "sw" | "se"> = {
-            se: "nw", nw: "se", ne: "sw", sw: "ne",
-          };
-          const anchor = getCornerScreen(opposites[c]);
-
-          // d = vector from anchor to mouse in canvas space
-          const dx = mouseX - anchor.x;
-          const dy = mouseY - anchor.y;
-          // Rotate to local space
-          const localDx = dx * cosR + dy * sinR;
-
-          // For SE/NE the dragged corner is to the right (+x); for NW/SW it's to the left (-x)
-          const signX = c[1] === "e" ? 1 : -1;
-          const aspect = item.width / item.height;
-          const newW = Math.max(24, signX * localDx);
-          const newH = Math.max(24, newW / aspect);
-
-          // new center = anchor + rot(R) * (dragged corner's local position from center)
-          const dragLocalX = c[1] === "e" ? newW / 2 : -newW / 2;
-          const dragLocalY = c[0] === "s" ? newH / 2 : -newH / 2;
-          const newCX = anchor.x + dragLocalX * cosR - dragLocalY * sinR;
-          const newCY = anchor.y + dragLocalX * sinR + dragLocalY * cosR;
-
-          onUpdatePlacedItem(item.id, {
-            x: newCX - newW / 2,
-            y: newCY - newH / 2,
-            width: newW,
-            height: newH,
-          });
+          if (rafId === null) rafId = requestAnimationFrame(flush);
         };
 
         const onUp = () => {
+          if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+          if (pending) { onUpdatePlacedItem(startItem.id, pending); pending = null; }
           handleDragRef.current = null;
           window.removeEventListener("pointermove", onMove);
           window.removeEventListener("pointerup", onUp);
@@ -1583,13 +1569,13 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 pointerEvents: "none",
               }}
             />
-            {/* Delete button — pointer-events-auto, always reachable */}
+            {/* Delete button — inside top-right, doesn't overlap corner handles */}
             <button
               onPointerDown={(e) => {
                 e.stopPropagation();
                 deleteItem(item.id);
               }}
-              className="absolute right-0 top-0 flex h-5 w-5 -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full text-[10px] font-bold text-white opacity-0 transition-opacity group-hover:opacity-100"
+              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white opacity-0 transition-opacity group-hover:opacity-100"
               style={{
                 background: "rgba(185,28,28,0.85)",
                 pointerEvents: "auto",
@@ -1616,6 +1602,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 transform: `translate(-50%, -50%) rotate(${selectedItem.rotation}deg)`,
                 transformOrigin: "center",
                 pointerEvents: "none",
+                zIndex: 10,
               }}
             >
               {/* Selection border */}
@@ -1628,12 +1615,12 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 }}
               />
 
-              {/* Rotation handle — above top-center */}
+              {/* Rotation handle — above top-center with larger hit area */}
               <div
                 style={{
                   position: "absolute",
                   left: "50%",
-                  top: -36,
+                  top: -40,
                   transform: "translateX(-50%)",
                   display: "flex",
                   flexDirection: "column",
@@ -1642,6 +1629,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                   cursor: "grab",
                   touchAction: "none",
                   userSelect: "none",
+                  padding: 8,
+                  margin: -8,
                 }}
                 onPointerDown={(e) => startHandleDrag(e, "rotate")}
               >
@@ -1654,38 +1643,94 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 />
                 <div
                   style={{
-                    width: 14,
-                    height: 14,
+                    width: 18,
+                    height: 18,
                     borderRadius: "50%",
                     background: "white",
-                    border: "2px solid rgba(109,40,217,0.75)",
-                    boxShadow: "0 1px 5px rgba(0,0,0,0.2)",
+                    border: "2.5px solid rgba(109,40,217,0.85)",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
                     marginTop: -1,
                   }}
                 />
               </div>
 
-              {/* Corner resize handles */}
+              {/* Invisible hit area for dragging the item - covers the selection box */}
+              <div
+                style={{
+                  position: "absolute",
+                  inset: -10,
+                  cursor: "move",
+                  pointerEvents: "auto",
+                  touchAction: "none",
+                }}
+                onPointerDown={(e) => {
+                  if (!selectedItem || !onUpdatePlacedItem) return;
+                  e.stopPropagation();
+                  e.preventDefault();
+                  const canvasEl = canvasRef.current;
+                  if (!canvasEl) return;
+                  const rect = canvasEl.getBoundingClientRect();
+                  const scaleX = canvasEl.width / rect.width;
+                  const scaleY = canvasEl.height / rect.height;
+                  const offsetX = (e.clientX - rect.left) * scaleX - selectedItem.x;
+                  const offsetY = (e.clientY - rect.top) * scaleY - selectedItem.y;
+                  const id = selectedItem.id;
+                  try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch {}
+                  let rafId: number | null = null;
+                  let pendingX = selectedItem.x;
+                  let pendingY = selectedItem.y;
+                  const flush = () => {
+                    onUpdatePlacedItem(id, { x: pendingX, y: pendingY });
+                    rafId = null;
+                  };
+                  const onMove = (me: PointerEvent) => {
+                    pendingX = (me.clientX - rect.left) * scaleX - offsetX;
+                    pendingY = (me.clientY - rect.top) * scaleY - offsetY;
+                    if (rafId === null) rafId = requestAnimationFrame(flush);
+                  };
+                  const onUp = () => {
+                    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+                    onUpdatePlacedItem(id, { x: pendingX, y: pendingY });
+                    window.removeEventListener("pointermove", onMove);
+                    window.removeEventListener("pointerup", onUp);
+                  };
+                  window.addEventListener("pointermove", onMove);
+                  window.addEventListener("pointerup", onUp);
+                }}
+              />
+
+              {/* Corner resize handles - larger with invisible hit area */}
               {(["nw", "ne", "sw", "se"] as const).map((corner) => (
                 <div
                   key={corner}
                   style={{
                     position: "absolute",
-                    width: 10,
-                    height: 10,
-                    background: "white",
-                    border: "2px solid rgba(109,40,217,0.75)",
-                    borderRadius: 2,
-                    boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                    width: 24,
+                    height: 24,
+                    display: "flex",
+                    alignItems: corner[0] === "n" ? "flex-start" : "flex-end",
+                    justifyContent: corner[1] === "w" ? "flex-start" : "flex-end",
                     cursor: `${corner}-resize`,
                     pointerEvents: "auto",
                     touchAction: "none",
                     userSelect: "none",
-                    ...(corner[0] === "n" ? { top: -5 } : { bottom: -5 }),
-                    ...(corner[1] === "w" ? { left: -5 } : { right: -5 }),
+                    ...(corner[0] === "n" ? { top: -8 } : { bottom: -8 }),
+                    ...(corner[1] === "w" ? { left: -8 } : { right: -8 }),
+                    padding: 6,
                   }}
                   onPointerDown={(e) => startHandleDrag(e, "resize", corner)}
-                />
+                >
+                  <div
+                    style={{
+                      width: 12,
+                      height: 12,
+                      background: "white",
+                      border: "2.5px solid rgba(109,40,217,0.85)",
+                      borderRadius: 3,
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+                    }}
+                  />
+                </div>
               ))}
             </div>
 
