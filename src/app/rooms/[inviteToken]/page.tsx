@@ -48,6 +48,21 @@ export default function RoomInvitePage() {
         setError(null);
 
         try {
+          const supabase = createSupabaseBrowserClient();
+
+          // If the user already has access (owner or existing member), RLS lets them
+          // read the room directly — skip the join UI and go straight to the canvas.
+          const { data: existingAccess } = await supabase
+            .from("rooms")
+            .select("id, invite_token")
+            .eq("invite_token", token ?? "")
+            .maybeSingle();
+
+          if (!cancelled && existingAccess) {
+            router.push(`/?room=${encodeURIComponent(existingAccess.invite_token ?? token ?? "")}`);
+            return;
+          }
+
           const result = await rooms.getInvitePreview(token ?? ""); // stable callback
           if (!cancelled) {
             if (result) {
@@ -58,7 +73,6 @@ export default function RoomInvitePage() {
           }
 
           // Fall back: treat as a room ID (stable share link)
-          const supabase = createSupabaseBrowserClient();
           const { data: roomData } = await supabase
             .from("rooms")
             .select("id,title")

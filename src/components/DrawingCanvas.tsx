@@ -47,6 +47,11 @@ export interface DrawingCanvasHandle {
   shiftContent: (dx: number, dy: number) => void;
   /** Called after the initial stroke replay so undo has a clean baseline. */
   setSessionBase?: () => void;
+  /**
+   * Swap the layerIndex of all in-session strokes between two layers.
+   * Call this when the user reorders layers so stroke z-order updates immediately.
+   */
+  swapStrokeLayers: (layerA: number, layerB: number) => void;
 }
 
 // ─── Local stroke entry (lightweight — no pixel data) ────────────────────────
@@ -91,6 +96,7 @@ interface DrawingCanvasProps {
     size: number,
     tool: "pen" | "eraser",
     isLast: boolean,
+    layerIndex: number,
   ) => void;
   /**
    * Fired once when a stroke is fully committed (pointer-up).
@@ -102,6 +108,7 @@ interface DrawingCanvasProps {
     color: string,
     size: number,
     tool: "pen" | "eraser",
+    layerIndex: number,
   ) => void;
   /** Fired when the user undoes — sync layer should delete the stroke from DB. */
   onUndoStroke?: (strokeId: string) => void;
@@ -123,6 +130,15 @@ interface DrawingCanvasProps {
   remoteStrokes?: SyncStroke[];
   /** Strokes loaded from database on initial load */
   dbStrokes?: SyncStroke[];
+  /**
+   * Fired every frame during a 2-finger gesture.
+   * prevCx/prevCy = centroid last frame, cx/cy = centroid this frame.
+   * scaleDelta = dist_this / dist_prev (1.0 = no zoom change).
+   * One call handles both pan and zoom — do NOT adjust scroll separately.
+   */
+  onPinchZoom?: (scaleDelta: number, prevCx: number, prevCy: number, cx: number, cy: number) => void;
+  /** Fired when the 2-finger gesture ends, with the final pan velocity (px/frame at 60fps). */
+  onPinchGestureEnd?: (velX: number, velY: number) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -158,15 +174,24 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       defaultLayerIndex = 0,
       maxLayerIndex = 4,
       currentDrawingLayer,
+      onPinchZoom,
+      onPinchGestureEnd,
     },
     ref,
   ) => {
     // ── Canvas refs ──────────────────────────────────────────────────────────
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);         // pointer-capture only (transparent, no rendering)
     const backgroundCanvasRef = useRef<HTMLCanvasElement>(null);
-    const belowOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
     const activeStrokeCanvasRef = useRef<HTMLCanvasElement>(null);
+    // Per-layer canvases — one per layer index so animated GIFs can be interleaved
+    const layerCanvasRefs = useRef<(HTMLCanvasElement | null)[]>(
+      Array.from({ length: 5 }, () => null)
+    );
+
+    // Stable ref so render functions always read the current drawing layer without
+    // being listed as useCallback deps (avoids constant callback recreation).
+    const currentDrawingLayerRef = useRef(currentDrawingLayer ?? defaultLayerIndex);
 
     // ── Drawing state ────────────────────────────────────────────────────────
     const isDrawing = useRef(false);
@@ -186,9 +211,18 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const undoneStrokesRef = useRef<LocalStrokeEntry[]>([]);
     
     // ── Remote strokes from collaborators ────────────────────────────────────
-    // These persist across render cycles so they're not cleared by renderLiveCanvas
+    // These persist across render cycles so they're not cleared by renderAllLayerCanvases
     const remoteStrokesRef = useRef<SyncStroke[]>([]);
     const [remoteStrokesVersion, setRemoteStrokesVersion] = useState(0);
+
+    // ── Multi-touch pan / pinch refs ─────────────────────────────────────────
+    // Tracks all active pointers by id so we can detect 2-finger gestures.
+    const mtPointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+    const isPinchPanRef = useRef(false);
+    const pinchCentroidRef = useRef({ x: 0, y: 0 });
+    const pinchDistRef = useRef(0);
+    const pinchLastTimeRef = useRef(0);
+    const pinchVelRef = useRef({ x: 0, y: 0 });
 
     // ── Washi / select drag refs ─────────────────────────────────────────────
     const washiStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -253,6 +287,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const [displayScale, setDisplayScale] = useState(1);
     const assetImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const paperImageRef = useRef<HTMLImageElement | null>(null);
+    // Keep currentDrawingLayerRef in sync on every render so render callbacks always
+    // read the correct layer without being listed as useCallback deps.
+    currentDrawingLayerRef.current = currentDrawingLayer ?? defaultLayerIndex;
+
     // Stable ref so getCompositeCanvas closure always sees fresh placedItems
     // Items sorted by layerIndex (0=back → 4=front) — used for render + hit detection
     const sortedByLayer = useMemo(
@@ -342,183 +380,80 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       });
     }, []);
 
-    // ── Restore session base + replay local strokes (for undo/redo) ──────────
-    const restoreAndReplay = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (sessionBaseRef.current) {
-        ctx.drawImage(sessionBaseRef.current, 0, 0);
+    // ── Shared stroke render helper ──────────────────────────────────────────
+    // Renders all data (local + remote + db strokes + items) into `ctx` for a
+    // contiguous range of layer indices [fromLayer..toLayer] (inclusive).
+    const renderLayerRange = useCallback((
+      ctx: CanvasRenderingContext2D,
+      fromLayer: number,
+      toLayer: number,
+    ) => {
+      type AnyStroke = { tool: string; pts: [number,number,number][]; color: string; size: number };
+
+      const drawStroke = (s: AnyStroke) => {
+        const isEraser = s.tool === "eraser";
+        const outline = getStroke(s.pts, strokeOpts(s.size, isEraser));
+        if (!outline.length) return;
+        ctx.save();
+        if (isEraser) { ctx.globalCompositeOperation = "destination-out"; ctx.fillStyle = "rgba(0,0,0,1)"; }
+        else { ctx.fillStyle = s.color; }
+        ctx.fill(strokeToPath2D(outline));
+        ctx.restore();
+      };
+
+      // Index all stroke and item data by layer
+      const localByLayer: Record<number, LocalStrokeEntry[]> = {};
+      for (const s of localStrokesRef.current) {
+        (localByLayer[s.layerIndex] ??= []).push(s);
       }
-      
-      // Group strokes by layer
-      const strokesByLayer: Record<number, LocalStrokeEntry[]> = {};
-      for (const stroke of localStrokesRef.current) {
-        if (!strokesByLayer[stroke.layerIndex]) {
-          strokesByLayer[stroke.layerIndex] = [];
-        }
-        strokesByLayer[stroke.layerIndex].push(stroke);
+      const remoteByLayer: Record<number, SyncStroke[]> = {};
+      for (const s of remoteStrokesRef.current) {
+        (remoteByLayer[s.layerIndex ?? 0] ??= []).push(s);
       }
-      
-      // Group items by layer (excluding animated items)
+      const dbByLayer: Record<number, SyncStroke[]> = {};
+      for (const s of (dbStrokes ?? [])) {
+        (dbByLayer[s.layerIndex ?? 0] ??= []).push(s);
+      }
       const itemsByLayer: Record<number, PlacedSticker[]> = {};
       for (const item of placedItemsRef.current) {
         if (item.isAnimated) continue;
-        const layerIdx = item.layerIndex ?? 0;
-        if (!itemsByLayer[layerIdx]) {
-          itemsByLayer[layerIdx] = [];
-        }
-        itemsByLayer[layerIdx].push(item);
+        (itemsByLayer[item.layerIndex ?? 0] ??= []).push(item);
       }
-      
-      // Render layers in order
-      const maxLayer = Math.max(
-        ...Object.keys(strokesByLayer).map(Number),
-        ...Object.keys(itemsByLayer).map(Number),
-        maxLayerIndex
-      );
-      
-      for (let layerIdx = 0; layerIdx <= maxLayer; layerIdx++) {
-        // Draw strokes for this layer
-        const layerStrokes = strokesByLayer[layerIdx] ?? [];
-        for (const stroke of layerStrokes) {
-          const isEraser = stroke.tool === "eraser";
-          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
-          if (!outline.length) continue;
-          ctx.save();
-          if (isEraser) {
-            ctx.globalCompositeOperation = "destination-out";
-            ctx.fillStyle = "rgba(0,0,0,1)";
-          } else {
-            ctx.fillStyle = stroke.color;
-          }
-          ctx.fill(strokeToPath2D(outline));
-          ctx.restore();
-        }
-        
-        // Draw items for this layer
-        const layerItems = itemsByLayer[layerIdx] ?? [];
-        renderItemsToCtx(ctx, layerItems);
-      }
-    }, [maxLayerIndex, renderItemsToCtx]);
 
-    // ── Live rendering of strokes + items (layer-aware) ─────────────────────────
-    const renderLiveCanvas = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Group strokes by layer
-      const strokesByLayer: Record<number, LocalStrokeEntry[]> = {};
-      for (const stroke of localStrokesRef.current) {
-        if (!strokesByLayer[stroke.layerIndex]) {
-          strokesByLayer[stroke.layerIndex] = [];
-        }
-        strokesByLayer[stroke.layerIndex].push(stroke);
+      for (let li = fromLayer; li <= toLayer; li++) {
+        for (const s of (dbByLayer[li] ?? [])) drawStroke(s);
+        for (const s of (remoteByLayer[li] ?? [])) drawStroke(s);
+        for (const s of (localByLayer[li] ?? [])) drawStroke(s);
+        renderItemsToCtx(ctx, itemsByLayer[li] ?? []);
       }
-      
-      // Group items by layer (excluding animated items which are rendered separately)
-      const itemsByLayer: Record<number, PlacedSticker[]> = {};
-      for (const item of placedItemsRef.current) {
-        if (item.isAnimated) continue;
-        const layerIdx = item.layerIndex ?? 0;
-        if (!itemsByLayer[layerIdx]) {
-          itemsByLayer[layerIdx] = [];
-        }
-        itemsByLayer[layerIdx].push(item);
-      }
-      
-      // Include remote strokes in layer grouping
-      const remoteStrokesByLayer: Record<number, SyncStroke[]> = {};
-      for (const stroke of remoteStrokesRef.current) {
-        const layerIdx = 0; // Remote strokes default to layer 0 for now
-        if (!remoteStrokesByLayer[layerIdx]) {
-          remoteStrokesByLayer[layerIdx] = [];
-        }
-        remoteStrokesByLayer[layerIdx].push(stroke);
-      }
-      
-      // Include DB strokes in layer grouping
-      const dbStrokesByLayer: Record<number, SyncStroke[]> = {};
-      for (const stroke of (dbStrokes ?? [])) {
-        const layerIdx = 0; // DB strokes default to layer 0 for now
-        if (!dbStrokesByLayer[layerIdx]) {
-          dbStrokesByLayer[layerIdx] = [];
-        }
-        dbStrokesByLayer[layerIdx].push(stroke);
-      }
-      // Render layers in order (0 = back, max = front)
-      const maxLayer = Math.max(
-        ...Object.keys(strokesByLayer).map(Number),
-        ...Object.keys(itemsByLayer).map(Number),
-        ...Object.keys(remoteStrokesByLayer).map(Number),
-        ...Object.keys(dbStrokesByLayer).map(Number),
-        maxLayerIndex
-      );
-      for (let layerIdx = 0; layerIdx <= maxLayer; layerIdx++) {
-        // Draw local strokes for this layer
-        const layerStrokes = strokesByLayer[layerIdx] ?? [];
-        for (const stroke of layerStrokes) {
-          const isEraser = stroke.tool === "eraser";
-          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
-          if (!outline.length) continue;
-          ctx.save();
-          if (isEraser) {
-            ctx.globalCompositeOperation = "destination-out";
-            ctx.fillStyle = "rgba(0,0,0,1)";
-          } else {
-            ctx.fillStyle = stroke.color;
-          }
-          ctx.fill(strokeToPath2D(outline));
-          ctx.restore();
-        }
-        
-        // Draw remote strokes for this layer
-        const layerRemoteStrokes = remoteStrokesByLayer[layerIdx] ?? [];
-        for (const stroke of layerRemoteStrokes) {
-          const isEraser = stroke.tool === "eraser";
-          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
-          if (!outline.length) continue;
-          ctx.save();
-          if (isEraser) {
-            ctx.globalCompositeOperation = "destination-out";
-            ctx.fillStyle = "rgba(0,0,0,1)";
-          } else {
-            ctx.fillStyle = stroke.color;
-          }
-          ctx.fill(strokeToPath2D(outline));
-          ctx.restore();
-        }
-        
-        // Draw DB strokes for this layer (initial load from database)
-        const layerDbStrokes = dbStrokesByLayer[layerIdx] ?? [];
-        for (const stroke of layerDbStrokes) {
-          const isEraser = stroke.tool === "eraser";
-          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
-          if (!outline.length) continue;
-          ctx.save();
-          if (isEraser) {
-            ctx.globalCompositeOperation = "destination-out";
-            ctx.fillStyle = "rgba(0,0,0,1)";
-          } else {
-            ctx.fillStyle = stroke.color;
-          }
-          ctx.fill(strokeToPath2D(outline));
-          ctx.restore();
-        }
-        
-        // Draw items for this layer
-        const layerItems = itemsByLayer[layerIdx] ?? [];
-        renderItemsToCtx(ctx, layerItems);
-      }
-    }, [maxLayerIndex, renderItemsToCtx, remoteStrokesVersion, dbStrokes]);
+    }, [renderItemsToCtx, remoteStrokesVersion, dbStrokes]);
 
-    useEffect(() => { renderLiveCanvas(); }, [renderLiveCanvas, placedItems, remoteStrokesVersion, dbStrokes]);
+    // ── Per-layer canvas rendering ────────────────────────────────────────────
+    // layerCanvasRefs[L] → renders exactly layer L
+    // activeStrokeCanvas sits above layer currentDrawingLayer at z = L*3+3
+    // animated GIF DOM items sit between layer canvases at z = L*3+2
+
+    const renderAllLayerCanvases = useCallback(() => {
+      for (let li = 0; li <= maxLayerIndex; li++) {
+        const canvas = layerCanvasRefs.current[li];
+        if (!canvas) continue;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) continue;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        renderLayerRange(ctx, li, li);
+      }
+    }, [renderLayerRange, maxLayerIndex]);
+
+    const renderAllLayerCanvasesRef = useRef(renderAllLayerCanvases);
+    renderAllLayerCanvasesRef.current = renderAllLayerCanvases;
+
+    const renderAll = useCallback(() => {
+      renderAllLayerCanvasesRef.current();
+    }, []);
+
+    useEffect(() => {
+      renderAllLayerCanvases();
+    }, [renderAllLayerCanvases, placedItems, remoteStrokesVersion, dbStrokes, currentDrawingLayer]);
 
     // ── Active stroke rendering (RAF loop) ───────────────────────────────────
     const renderActiveStroke = useCallback(() => {
@@ -533,7 +468,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       const path = strokeToPath2D(stroke);
 
       if (isEraser) {
-        const canvas = canvasRef.current;
+        const activeLayerIdx = currentDrawingLayerRef.current ?? 0;
+        const canvas = layerCanvasRefs.current[activeLayerIdx];
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
@@ -561,7 +497,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (uncommitted > FREEZE_AT + LIVE_WINDOW) {
           const newFreezeEnd = pts.length - LIVE_WINDOW;
           const headOutline = getStroke(pts.slice(0, newFreezeEnd), strokeOpts(size, false, false));
-          const mainCtx = canvasRef.current?.getContext("2d");
+          const mainCtx = layerCanvasRefs.current[currentDrawingLayerRef.current ?? 0]?.getContext("2d");
           if (mainCtx) {
             mainCtx.save();
             mainCtx.fillStyle = color;
@@ -602,7 +538,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           const img = new Image();
           img.crossOrigin = "anonymous";
           img.src = item.imageData;
-          img.onload = () => renderOverlay();
+          img.onload = () => renderAllLayerCanvasesRef.current();
           assetImagesRef.current.set(item.id, img);
         }
       });
@@ -626,12 +562,6 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (ctx) ctx.clearRect(0, 0, above.width, above.height);
       }
 
-      // Clear below overlay as it's no longer used
-      const below = belowOverlayCanvasRef.current;
-      if (below) {
-        const ctx = below.getContext("2d");
-        if (ctx) ctx.clearRect(0, 0, below.width, below.height);
-      }
     }, []);
 
     useEffect(() => { renderOverlay(); }, [renderOverlay]);
@@ -783,6 +713,38 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     // ── Pointer handlers ──────────────────────────────────────────────────────
     const handlePointerDown = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
+        // Track every pointer for pinch/pan detection
+        mtPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (mtPointersRef.current.size >= 2) {
+          // Capture this pointer so its pointermove events are guaranteed to reach
+          // the canvas — without this, iOS only delivers moves for the primary pointer.
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+
+          // Second finger — abort any in-progress stroke and enter pan/pinch mode
+          if (isDrawing.current) {
+            isDrawing.current = false;
+            activeStrokePointsRef.current = [];
+            allStrokePointsRef.current = [];
+            if (rafIdRef.current !== null) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
+            activeStrokeCanvasRef.current?.getContext("2d")?.clearRect(
+              0, 0,
+              activeStrokeCanvasRef.current.width,
+              activeStrokeCanvasRef.current.height,
+            );
+          }
+          isPinchPanRef.current = true;
+          const pts = [...mtPointersRef.current.values()];
+          pinchCentroidRef.current = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+          const ddx = pts[1].x - pts[0].x;
+          const ddy = pts[1].y - pts[0].y;
+          pinchDistRef.current = Math.sqrt(ddx * ddx + ddy * ddy);
+          e.preventDefault();
+          return;
+        }
+
+        if (isPinchPanRef.current) { e.preventDefault(); return; }
+
         e.preventDefault();
         // Only allow primary pointer or if no pointer is active (prevents multi-touch drawing)
         if (!e.isPrimary && activePointerIdRef.current !== null) {
@@ -881,13 +843,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         frozenPointCountRef.current = 0;
 
         if (brushSettings.tool === "eraser") {
-          const drawCtx = canvasRef.current?.getContext("2d");
-          if (drawCtx && canvasRef.current) {
+          const activeLayerIdx = currentDrawingLayer ?? defaultLayerIndex;
+          const drawCanvas = layerCanvasRefs.current[activeLayerIdx];
+          const drawCtx = drawCanvas?.getContext("2d");
+          if (drawCtx && drawCanvas) {
             preStrokeSnapshotRef.current = drawCtx.getImageData(
               0,
               0,
-              canvasRef.current.width,
-              canvasRef.current.height,
+              drawCanvas.width,
+              drawCanvas.height,
             );
           }
         } else {
@@ -919,11 +883,50 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         onPlaceAsset,
         renderLoop,
         selectItem,
+        currentDrawingLayer,
+        defaultLayerIndex,
       ],
     );
 
     const handlePointerMove = useCallback(
       (e: React.PointerEvent<HTMLCanvasElement>) => {
+        // Keep multitouch map current
+        if (mtPointersRef.current.has(e.pointerId)) {
+          mtPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }
+
+        if (isPinchPanRef.current && mtPointersRef.current.size >= 2) {
+          e.preventDefault();
+          const pts = [...mtPointersRef.current.values()];
+          const cx = (pts[0].x + pts[1].x) / 2;
+          const cy = (pts[0].y + pts[1].y) / 2;
+          const ddx = pts[1].x - pts[0].x;
+          const ddy = pts[1].y - pts[0].y;
+          const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+
+          // Track velocity for momentum after gesture end
+          const now = performance.now();
+          const dt = now - pinchLastTimeRef.current;
+          pinchLastTimeRef.current = now;
+          if (dt > 0 && dt < 200) {
+            pinchVelRef.current = {
+              x: (cx - pinchCentroidRef.current.x) / dt * 16,
+              y: (cy - pinchCentroidRef.current.y) / dt * 16,
+            };
+          }
+
+          // Fire ONE combined callback — parent handles pan+zoom in a single
+          // scroll calculation to avoid double-write interference.
+          const scaleDelta = pinchDistRef.current > 0 && dist > 0
+            ? dist / pinchDistRef.current
+            : 1;
+          onPinchZoom?.(scaleDelta, pinchCentroidRef.current.x, pinchCentroidRef.current.y, cx, cy);
+
+          pinchCentroidRef.current = { x: cx, y: cy };
+          pinchDistRef.current = dist;
+          return;
+        }
+
         if (!isDrawing.current) return;
         // Only process events from the active pointer (prevents multi-touch issues)
         if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) {
@@ -1003,6 +1006,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               brushSettings.size,
               tool,
               false,
+              currentDrawingLayer ?? defaultLayerIndex,
             );
           }
         }
@@ -1016,11 +1020,31 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         paintWashiStrip,
         onStrokeUpdate,
         getCanvasPoint,
+        onPinchZoom,
+        currentDrawingLayer,
+        defaultLayerIndex,
       ],
     );
 
     const handlePointerUp = useCallback(
       (e?: React.PointerEvent<HTMLCanvasElement>) => {
+        // Clean up multitouch tracking
+        if (e) {
+          mtPointersRef.current.delete(e.pointerId);
+        } else {
+          mtPointersRef.current.clear();
+        }
+        if (mtPointersRef.current.size < 2) {
+          const wasPinching = isPinchPanRef.current;
+          isPinchPanRef.current = false;
+          if (wasPinching) {
+            onPinchGestureEnd?.(pinchVelRef.current.x, pinchVelRef.current.y);
+            pinchVelRef.current = { x: 0, y: 0 };
+          }
+        }
+        // Still in pinch mode (one finger remains) — don't process as stroke end
+        if (isPinchPanRef.current) return;
+
         if (e) {
           try {
             e.currentTarget.releasePointerCapture(e.pointerId);
@@ -1047,31 +1071,36 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           const allPts = allStrokePointsRef.current;   // full unbounded history
           const { color, size } = brushSettings;
           const strokeId = currentStrokeIdRef.current;
+          const strokeLayer = currentDrawingLayer ?? defaultLayerIndex;
 
           // Send any remaining unbroadcast points with isLast = true
           const remainingDelta = allPts.slice(lastBroadcastIndexRef.current);
-          onStrokeUpdate?.(strokeId, remainingDelta, color, size, tool, true);
+          onStrokeUpdate?.(strokeId, remainingDelta, color, size, tool, true, strokeLayer);
 
-          // Commit pen stroke from active canvas to drawing canvas
+          // Clear the active stroke canvas — the stroke now lives in localStrokesRef
+          // and renderAll below will composite it at the correct layer depth.
           const ac = activeStrokeCanvasRef.current;
-          const dc = canvasRef.current;
-          if (ac && dc) {
-            dc.getContext("2d")?.drawImage(ac, 0, 0);
+          if (ac) {
             ac.getContext("2d")?.clearRect(0, 0, ac.width, ac.height);
           }
 
           // Track this stroke locally for undo (full points)
-          localStrokesRef.current.push({ id: strokeId, pts: allPts, color, size, tool, layerIndex: currentDrawingLayer ?? defaultLayerIndex });
+          localStrokesRef.current.push({ id: strokeId, pts: allPts, color, size, tool, layerIndex: strokeLayer });
           undoneStrokesRef.current = []; // clear redo stack on new stroke
 
+          // Re-render everything in correct layer order so the new stroke appears
+          // at its proper depth relative to items and strokes on other layers.
+          renderAll();
+
           // Persist immediately with full accumulated points
-          onStrokeComplete?.(strokeId, allPts, color, size, tool);
+          onStrokeComplete?.(strokeId, allPts, color, size, tool, strokeLayer);
           currentStrokeIdRef.current = "";
         } else if (isDrawing.current) {
-          // Washi — commit the overlay-canvas preview to the main drawing canvas
+          // Washi — commit the overlay-canvas preview to the active layer canvas
           if (brushSettings.tool === "washi" && washiStartRef.current) {
             const ov = overlayCanvasRef.current;
-            const dc = canvasRef.current;
+            const activeLayerIdx = currentDrawingLayer ?? defaultLayerIndex;
+            const dc = layerCanvasRefs.current[activeLayerIdx];
             if (ov && dc) {
               dc.getContext("2d")?.drawImage(ov, 0, 0);
               ov.getContext("2d")?.clearRect(0, 0, ov.width, ov.height);
@@ -1089,56 +1118,68 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         selectionDragRef.current = null;
         changedDuringPointerRef.current = false;
       },
-      [renderActiveStroke, onStrokeUpdate, onStrokeComplete, brushSettings],
+      [renderActiveStroke, onStrokeUpdate, onStrokeComplete, brushSettings, onPinchGestureEnd, renderAll, currentDrawingLayer, defaultLayerIndex],
     );
     handlePointerUpRef.current = handlePointerUp;
 
     // ── Canvas operations ─────────────────────────────────────────────────────
     const clearCanvas = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let li = 0; li <= maxLayerIndex; li++) {
+        const canvas = layerCanvasRefs.current[li];
+        if (!canvas) continue;
+        canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      }
       // Reset local undo history — clearing is not undoable
       localStrokesRef.current = [];
       undoneStrokesRef.current = [];
       // Update the session base to reflect the cleared state
-      void createImageBitmap(canvas).then((bitmap) => {
-        sessionBaseRef.current?.close();
-        sessionBaseRef.current = bitmap;
-      });
-    }, []);
+      const canvas0 = layerCanvasRefs.current[0];
+      if (canvas0) {
+        void createImageBitmap(canvas0).then((bitmap) => {
+          sessionBaseRef.current?.close();
+          sessionBaseRef.current = bitmap;
+        });
+      }
+    }, [maxLayerIndex]);
 
     const undo = useCallback(() => {
       const last = localStrokesRef.current[localStrokesRef.current.length - 1];
       if (!last) return;
       localStrokesRef.current = localStrokesRef.current.slice(0, -1);
       undoneStrokesRef.current = [...undoneStrokesRef.current, last];
-      restoreAndReplay();
+      renderAll();
       onUndoStroke?.(last.id);
-    }, [restoreAndReplay, onUndoStroke]);
+    }, [onUndoStroke, renderAll]);
 
     const redo = useCallback(() => {
       const next = undoneStrokesRef.current[undoneStrokesRef.current.length - 1];
       if (!next) return;
       undoneStrokesRef.current = undoneStrokesRef.current.slice(0, -1);
       localStrokesRef.current = [...localStrokesRef.current, next];
-      restoreAndReplay();
+      renderAll();
       onRedoStroke?.(next);
-    }, [restoreAndReplay, onRedoStroke]);
+    }, [onRedoStroke, renderAll]);
 
     const setSessionBase = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+      const w = width;
+      const h = height;
+      const composite = document.createElement("canvas");
+      composite.width = w;
+      composite.height = h;
+      const ctx = composite.getContext("2d");
+      if (!ctx) return;
+      for (let li = 0; li <= maxLayerIndex; li++) {
+        const lc = layerCanvasRefs.current[li];
+        if (lc) ctx.drawImage(lc, 0, 0);
+      }
       // ImageBitmap is GPU-backed — far cheaper than a 115 MB ImageData array
-      void createImageBitmap(canvas).then((bitmap) => {
+      void createImageBitmap(composite).then((bitmap) => {
         sessionBaseRef.current?.close();
         sessionBaseRef.current = bitmap;
         localStrokesRef.current = [];
         undoneStrokesRef.current = [];
       });
-    }, []);
+    }, [width, height, maxLayerIndex]);
 
     // Draws background + strokes + static stickers. No GIFs — use as animation base.
     const getBaseCanvas = useCallback(() => {
@@ -1149,7 +1190,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       base.height = h;
       const ctx = base.getContext("2d");
       if (!ctx) return base;
-      
+
       // Draw background
       if (backgroundCanvasRef.current) {
         ctx.drawImage(backgroundCanvasRef.current, 0, 0);
@@ -1157,62 +1198,60 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, w, h);
       }
-      
-      // Group strokes by layer
+
+      // Group local strokes by layer
       const strokesByLayer: Record<number, LocalStrokeEntry[]> = {};
       for (const stroke of localStrokesRef.current) {
-        if (!strokesByLayer[stroke.layerIndex]) {
-          strokesByLayer[stroke.layerIndex] = [];
-        }
+        if (!strokesByLayer[stroke.layerIndex]) strokesByLayer[stroke.layerIndex] = [];
         strokesByLayer[stroke.layerIndex].push(stroke);
       }
-      
+
+      // Group DB strokes by layer (so exports include persisted strokes)
+      const dbStrokesByLayer: Record<number, SyncStroke[]> = {};
+      for (const stroke of (dbStrokes ?? [])) {
+        const li = stroke.layerIndex ?? 0;
+        if (!dbStrokesByLayer[li]) dbStrokesByLayer[li] = [];
+        dbStrokesByLayer[li].push(stroke);
+      }
+
       // Group items by layer
       const itemsByLayer: Record<number, PlacedSticker[]> = {};
       for (const item of placedItemsRef.current) {
-        if (item.isAnimated) continue; // Animated items handled separately
+        if (item.isAnimated) continue;
         const layerIdx = item.layerIndex ?? 0;
-        if (!itemsByLayer[layerIdx]) {
-          itemsByLayer[layerIdx] = [];
-        }
+        if (!itemsByLayer[layerIdx]) itemsByLayer[layerIdx] = [];
         itemsByLayer[layerIdx].push(item);
       }
-      
-      // Render layers in order (0 = back, max = front)
+
       const maxLayer = Math.max(
         ...Object.keys(strokesByLayer).map(Number),
+        ...Object.keys(dbStrokesByLayer).map(Number),
         ...Object.keys(itemsByLayer).map(Number),
-        maxLayerIndex
+        maxLayerIndex,
       );
-      
+
+      const drawStroke = (s: { tool: string; pts: [number, number, number][]; color: string; size: number }) => {
+        const isEraser = s.tool === "eraser";
+        const outline = getStroke(s.pts, strokeOpts(s.size, isEraser));
+        if (!outline.length) return;
+        ctx.save();
+        if (isEraser) { ctx.globalCompositeOperation = "destination-out"; ctx.fillStyle = "rgba(0,0,0,1)"; }
+        else { ctx.fillStyle = s.color; }
+        ctx.fill(strokeToPath2D(outline));
+        ctx.restore();
+      };
+
       for (let layerIdx = 0; layerIdx <= maxLayer; layerIdx++) {
-        // Draw strokes for this layer
-        const layerStrokes = strokesByLayer[layerIdx] ?? [];
-        for (const stroke of layerStrokes) {
-          const isEraser = stroke.tool === "eraser";
-          const outline = getStroke(stroke.pts, strokeOpts(stroke.size, isEraser));
-          if (!outline.length) continue;
-          ctx.save();
-          if (isEraser) {
-            ctx.globalCompositeOperation = "destination-out";
-            ctx.fillStyle = "rgba(0,0,0,1)";
-          } else {
-            ctx.fillStyle = stroke.color;
-          }
-          ctx.fill(strokeToPath2D(outline));
-          ctx.restore();
-        }
-        
-        // Draw items for this layer
-        const layerItems = itemsByLayer[layerIdx] ?? [];
-        renderItemsToCtx(ctx, layerItems);
+        for (const s of (dbStrokesByLayer[layerIdx] ?? [])) drawStroke(s);
+        for (const s of (strokesByLayer[layerIdx] ?? [])) drawStroke(s);
+        renderItemsToCtx(ctx, itemsByLayer[layerIdx] ?? []);
       }
-      
+
       // Draw active stroke if any
       if (activeStrokeCanvasRef.current) ctx.drawImage(activeStrokeCanvasRef.current, 0, 0);
-      
+
       return base;
-    }, [width, height, maxLayerIndex, renderItemsToCtx]);
+    }, [width, height, maxLayerIndex, renderItemsToCtx, dbStrokes]);
 
     // Stamps current animated-GIF frames onto an external context. Call each rAF tick.
     // Uses animatedImgRefsRef (live DOM elements) so the browser's GIF frame
@@ -1258,30 +1297,44 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
     const shiftContent = useCallback(
       (dx: number, dy: number) => {
-        shiftSingleCanvas(canvasRef.current, dx, dy);
+        for (let li = 0; li <= maxLayerIndex; li++) {
+          shiftSingleCanvas(layerCanvasRefs.current[li], dx, dy);
+        }
         shiftSingleCanvas(activeStrokeCanvasRef.current, dx, dy);
         shiftSingleCanvas(overlayCanvasRef.current, dx, dy);
         // Shift the session base too so undo remains aligned
         const base = sessionBaseRef.current;
         if (base && (dx !== 0 || dy !== 0)) {
-          void createImageBitmap(canvasRef.current!).then((bitmap) => {
-            base.close();
-            sessionBaseRef.current = bitmap;
-          });
+          const w = layerCanvasRefs.current[0]?.width ?? 0;
+          const h = layerCanvasRefs.current[0]?.height ?? 0;
+          if (w && h) {
+            const composite = document.createElement("canvas");
+            composite.width = w;
+            composite.height = h;
+            const ctx = composite.getContext("2d");
+            if (ctx) {
+              for (let li = 0; li <= maxLayerIndex; li++) {
+                const lc = layerCanvasRefs.current[li];
+                if (lc) ctx.drawImage(lc, 0, 0);
+              }
+              void createImageBitmap(composite).then((bitmap) => {
+                base.close();
+                sessionBaseRef.current = bitmap;
+              });
+            }
+          }
         }
       },
-      [shiftSingleCanvas],
+      [shiftSingleCanvas, maxLayerIndex],
     );
 
     const getCanvasImageData = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return null;
-      return canvas.toDataURL("image/png");
-    }, []);
+      return getBaseCanvas().toDataURL("image/png");
+    }, [getBaseCanvas]);
 
     const setCanvasImageData = useCallback(
       (imageData: string | null, options?: { shiftX?: number; shiftY?: number }) => {
-        const canvas = canvasRef.current;
+        const canvas = layerCanvasRefs.current[0];
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
@@ -1329,8 +1382,17 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     }, [textOverlay?.value]);
 
     // ── Imperative handle ─────────────────────────────────────────────────────
+    const swapStrokeLayers = useCallback((layerA: number, layerB: number) => {
+      localStrokesRef.current = localStrokesRef.current.map((s) => {
+        if (s.layerIndex === layerA) return { ...s, layerIndex: layerB };
+        if (s.layerIndex === layerB) return { ...s, layerIndex: layerA };
+        return s;
+      });
+      renderAll();
+    }, [renderAll]);
+
     useImperativeHandle(ref, () => ({
-      getCanvas: () => canvasRef.current,
+      getCanvas: () => layerCanvasRefs.current[0],
       getCanvasImageData,
       setCanvasImageData,
       clearCanvas,
@@ -1341,6 +1403,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       drawAnimatedLayer,
       shiftContent,
       setSessionBase,
+      swapStrokeLayers,
     }));
 
     // ── Cursor ────────────────────────────────────────────────────────────────
@@ -1499,48 +1562,73 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         className={fillContainer ? "relative h-full w-full" : "relative"}
         style={fillContainer ? undefined : { width, height }}
       >
+        {/* z-stack (back → front) for maxLayerIndex=4:
+              z:0   background
+              z:1   layerCanvasRefs[0]   — layer 0 strokes/stickers
+              z:2   animated items layer 0  (DOM <img>)
+              z:3   activeStrokeCanvas   — live preview when drawing on layer 0
+              z:4   layerCanvasRefs[1]   — layer 1
+              z:5   animated items layer 1
+              z:6   activeStrokeCanvas   — live preview when drawing on layer 1
+              … (formula: layer L canvas = L*3+1, items = L*3+2, active stroke = L*3+3)
+              z:16  canvasRef            — transparent pointer-capture only (maxLayerIndex*3+4)
+              z:17  overlayCanvasRef     — washi tape preview / UI */}
         <canvas
           ref={backgroundCanvasRef}
           width={width}
           height={height}
           className="absolute inset-0"
-          style={{ imageRendering: "crisp-edges", width: "100%", height: "100%" }}
+          style={{ imageRendering: "crisp-edges", width: "100%", height: "100%", zIndex: 0 }}
         />
+
+        {/* Layer canvases — one per layer, z-indexed so DOM animated items can sit between them */}
+        {Array.from({ length: maxLayerIndex + 1 }, (_, li) => (
+          <canvas
+            key={li}
+            ref={(el) => { layerCanvasRefs.current[li] = el; }}
+            width={width}
+            height={height}
+            className="pointer-events-none absolute inset-0"
+            style={{ width: "100%", height: "100%", zIndex: li * 3 + 1 }}
+          />
+        ))}
+
+        {/* Active stroke preview — z-index tracks currentDrawingLayer so it sits above that layer */}
         <canvas
-          ref={belowOverlayCanvasRef}
+          ref={activeStrokeCanvasRef}
           width={width}
           height={height}
           className="pointer-events-none absolute inset-0"
-          style={{ width: "100%", height: "100%" }}
+          style={{ width: "100%", height: "100%", zIndex: (currentDrawingLayer ?? defaultLayerIndex) * 3 + 3 }}
         />
+
+        {/* Pointer capture canvas — transparent, sits above all layer canvases, handles all touch/mouse events */}
         <canvas
           ref={canvasRef}
           width={width}
           height={height}
           className="absolute inset-0"
-          style={{ touchAction: "none", cursor, width: "100%", height: "100%", zIndex: 1 }}
+          style={{ touchAction: "none", cursor, width: "100%", height: "100%", zIndex: maxLayerIndex * 3 + 4, opacity: 0 }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
           onPointerCancel={handlePointerUp}
         />
-        <canvas
-          ref={activeStrokeCanvasRef}
-          width={width}
-          height={height}
-          className="pointer-events-none absolute inset-0"
-          style={{ width: "100%", height: "100%" }}
-        />
+
         <canvas
           ref={overlayCanvasRef}
           width={width}
           height={height}
           className="pointer-events-none absolute inset-0"
-          style={{ width: "100%", height: "100%" }}
+          style={{ width: "100%", height: "100%", zIndex: maxLayerIndex * 3 + 5 }}
         />
 
-        {animatedItems.map((item) => (
+        {animatedItems.map((item) => {
+          // Each animated item sits between its layer canvas (L*3+1) and the next
+          // layer canvas ((L+1)*3+1 = L*3+4), so z = L*3+2.
+          const itemZIndex = (item.layerIndex ?? 0) * 3 + 2;
+          return (
           <div
             key={item.id}
             className="group absolute"
@@ -1550,6 +1638,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               width: `${(item.width / width) * 100}%`,
               height: `${(item.height / height) * 100}%`,
               pointerEvents: "none",
+              zIndex: itemZIndex,
             }}
           >
             {/* GIF render — pointer-events-none so drawing still works over it */}
@@ -1560,6 +1649,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 else animatedImgRefsRef.current.delete(item.id);
               }}
               src={item.imageData}
+              crossOrigin="anonymous"
               alt=""
               className="absolute inset-0 h-full w-full"
               style={{
@@ -1587,7 +1677,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               ×
             </button>
           </div>
-        ))}
+          );
+        })}
 
         {brushSettings.tool === "select" && selectedItem !== null ? (
           <>

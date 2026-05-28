@@ -1,58 +1,99 @@
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { GIFEncoder, quantize, applyPalette } = require("gifenc");
+
 import type { PlacedSticker } from "@/types";
 import { DrawingCanvasHandle } from "./DrawingCanvas";
+
+export interface CropRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type StaticFormat = "png" | "jpeg";
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Main export entry point.
- * - Animated items present → WebM video (full colour, no palette limit)
- * - Static only            → JPEG (compact, high quality)
+ * - Animated stickers present → GIF (high quality, loops forever)
+ * - Static only               → PNG or JPEG (lossless PNG by default)
+ * Pass cropRegion (canvas coordinates) to export only a portion.
  */
 export async function exportCanvas(
   canvasHandle: DrawingCanvasHandle,
   placedItems: PlacedSticker[],
   filename = "mochimail",
   durationMs = 3000,
+  cropRegion?: CropRegion,
+  staticFormat: StaticFormat = "png",
 ): Promise<void> {
   if (placedItems.some((p) => p.isAnimated)) {
-    await _exportWebM(canvasHandle, placedItems, filename, durationMs);
+    await _exportGif(canvasHandle, placedItems, filename, durationMs, cropRegion);
   } else {
-    _exportJpeg(canvasHandle, filename);
+    _exportStatic(canvasHandle, filename, cropRegion, staticFormat);
   }
 }
 
-// ─── JPEG (static) ────────────────────────────────────────────────────────────
+// ─── PNG / JPEG (static) ──────────────────────────────────────────────────────
 
-function _exportJpeg(canvasHandle: DrawingCanvasHandle, filename: string) {
+function _exportStatic(
+  canvasHandle: DrawingCanvasHandle,
+  filename: string,
+  cropRegion?: CropRegion,
+  format: StaticFormat = "png",
+) {
   const composite = canvasHandle.getCompositeCanvas();
+  let src: HTMLCanvasElement = composite;
+
+  if (cropRegion) {
+    const { x, y, width, height } = cropRegion;
+    const cropped = document.createElement("canvas");
+    cropped.width = width;
+    cropped.height = height;
+    cropped.getContext("2d")!.drawImage(composite, x, y, width, height, 0, 0, width, height);
+    src = cropped;
+  }
+
   const link = document.createElement("a");
-  link.download = `${filename}.jpg`;
-  link.href = composite.toDataURL("image/jpeg", 0.92);
+  if (format === "jpeg") {
+    link.download = `${filename}.jpg`;
+    link.href = src.toDataURL("image/jpeg", 0.95);
+  } else {
+    link.download = `${filename}.png`;
+    link.href = src.toDataURL("image/png");
+  }
   link.click();
 }
 
-// ─── WebM video (animated) ────────────────────────────────────────────────────
+// ─── Animated GIF ─────────────────────────────────────────────────────────────
 
-async function _exportWebM(
+const GIF_FPS = 15;
+const GIF_MAX_DIM = 800;
+
+async function _exportGif(
   canvasHandle: DrawingCanvasHandle,
   placedItems: PlacedSticker[],
   filename: string,
   durationMs: number,
+  cropRegion?: CropRegion,
 ): Promise<void> {
   const base = canvasHandle.getBaseCanvas();
   const cw = base.width;
   const ch = base.height;
 
-  // Scale so longest edge ≤ 1200 px — keeps file size manageable
-  const MAX_DIM = 1200;
-  const scale = Math.min(1, MAX_DIM / Math.max(cw, ch));
-  const sw = Math.round(cw * scale);
-  const sh = Math.round(ch * scale);
+  const srcX = cropRegion?.x ?? 0;
+  const srcY = cropRegion?.y ?? 0;
+  const srcW = cropRegion?.width ?? cw;
+  const srcH = cropRegion?.height ?? ch;
+
+  const scale = Math.min(1, GIF_MAX_DIM / Math.max(srcW, srcH));
+  const sw = Math.round(srcW * scale);
+  const sh = Math.round(srcH * scale);
 
   // ── CORS-safe animated images ─────────────────────────────────────────────
-  // Must have real CSS dimensions (not width:0/height:0) so the browser
-  // advances their GIF frames. opacity:0 keeps them invisible.
   const corsContainer = document.createElement("div");
   corsContainer.style.cssText =
     "position:fixed;top:0;left:0;opacity:0;pointer-events:none;z-index:-9999;overflow:hidden";
@@ -77,7 +118,6 @@ async function _exportWebM(
     ),
   );
 
-  // Give the browser time to decode GIFs and start their animation loops
   await new Promise<void>((r) => setTimeout(r, 250));
 
   // ── Frame canvas ──────────────────────────────────────────────────────────
@@ -86,47 +126,35 @@ async function _exportWebM(
   frameCanvas.height = sh;
   const ctx = frameCanvas.getContext("2d")!;
 
-  // Pre-scale static base once
+  // Pre-scale the static base (cropped)
   const scaledBase = document.createElement("canvas");
   scaledBase.width = sw;
   scaledBase.height = sh;
-  scaledBase.getContext("2d")!.drawImage(base, 0, 0, sw, sh);
+  scaledBase.getContext("2d")!.drawImage(base, srcX, srcY, srcW, srcH, 0, 0, sw, sh);
 
-  // ── MediaRecorder setup ───────────────────────────────────────────────────
-  const mimeType =
-    MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-      ? "video/webm;codecs=vp9"
-      : MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
-        ? "video/webm;codecs=vp8"
-        : "video/webm";
+  // ── GIF encoder ───────────────────────────────────────────────────────────
+  const gif = GIFEncoder();
+  const frameDelayMs = Math.round(1000 / GIF_FPS);
+  const totalFrames = Math.round((durationMs / 1000) * GIF_FPS);
 
-  const FPS = 30;
-  const stream = frameCanvas.captureStream(FPS);
-  const recorder = new MediaRecorder(stream, {
-    mimeType,
-    videoBitsPerSecond: 6_000_000,
-  });
-  const chunks: Blob[] = [];
-  recorder.ondataavailable = (e) => {
-    if (e.data.size > 0) chunks.push(e.data);
-  };
-
-  const recordingDone = new Promise<void>((resolve) => {
-    recorder.onstop = () => resolve();
-  });
-
-  recorder.start(100); // flush data every 100 ms
-
-  // ── Draw loop — runs for durationMs, rAF advances source GIF frames ───────
-  const startTime = performance.now();
+  // Capture frames via rAF so GIF source images advance their animation
   await new Promise<void>((resolve) => {
-    function step() {
+    let frameIndex = 0;
+
+    function captureFrame() {
+      // Render this frame
       ctx.clearRect(0, 0, sw, sh);
       ctx.drawImage(scaledBase, 0, 0);
 
       ctx.save();
       ctx.scale(scale, scale);
+      ctx.translate(-srcX, -srcY);
       for (const item of animatedItems) {
+        if (cropRegion) {
+          const ir = item.x + item.width;
+          const ib = item.y + item.height;
+          if (ir < srcX || item.x > srcX + srcW || ib < srcY || item.y > srcY + srcH) continue;
+        }
         const img = corsImgs.get(item.id);
         if (!img || img.naturalWidth === 0) continue;
         ctx.save();
@@ -139,25 +167,37 @@ async function _exportWebM(
       ctx.globalAlpha = 1;
       ctx.restore();
 
-      if (performance.now() - startTime < durationMs) {
-        requestAnimationFrame(step);
+      // Encode this frame
+      const imageData = ctx.getImageData(0, 0, sw, sh);
+      const palette = quantize(imageData.data, 256, { format: "rgb565" });
+      const index = applyPalette(imageData.data, palette, "rgb565");
+      gif.writeFrame(index, sw, sh, {
+        palette,
+        delay: frameDelayMs,
+        // repeat on the first frame only
+        ...(frameIndex === 0 ? { repeat: 0 } : {}),
+      });
+
+      frameIndex++;
+      if (frameIndex < totalFrames) {
+        requestAnimationFrame(captureFrame);
       } else {
         resolve();
       }
     }
-    requestAnimationFrame(step);
+
+    requestAnimationFrame(captureFrame);
   });
 
-  recorder.stop();
-  await recordingDone;
-
+  gif.finish();
   document.body.removeChild(corsContainer);
 
-  const blob = new Blob(chunks, { type: mimeType });
+  const bytes: Uint8Array = gif.bytes();
+  const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "image/gif" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${filename}.webm`;
+  a.download = `${filename}.gif`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

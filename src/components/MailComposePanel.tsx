@@ -7,6 +7,7 @@ import StickerCreator from "./StickerCreator";
 import WashiTapeCreator from "./WashiTapeCreator";
 import MailAssetCreator from "./MailAssetCreator";
 import { FiArrowLeft, FiClock, FiLayers, FiMove, FiPenTool, FiRotateCcw, FiRotateCw, FiSend, FiTrash2, FiType } from "react-icons/fi";
+import { ArrowRight, Zap, Plane, Clock, Heart, Leaf, Sparkles, Gift, Moon, Star, Wind } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
@@ -35,6 +36,28 @@ const BUILTIN_TEXT_FONTS = [
 ] as const;
 
 const GIF_SEARCH_URL = "/api/gifs/search";
+
+function getStampIcon(style: string, size = 18): React.ReactNode {
+  if (style === "💌" || style === "💝") return <Heart size={size} />;
+  if (style === "🌸") return <Leaf size={size} />;
+  if (style === "✨") return <Sparkles size={size} />;
+  if (style === "🎀") return <Gift size={size} />;
+  if (style === "🌙") return <Moon size={size} />;
+  if (style === "🍡") return <Star size={size} />;
+  if (style === "🫧") return <Wind size={size} />;
+  return <Star size={size} />;
+}
+
+const STAMP_LABELS: Record<string, string> = {
+  "💌": "Love", "💝": "Adore", "🌸": "Bloom", "✨": "Shine",
+  "🎀": "Bow", "🌙": "Moon", "🍡": "Mochi", "🫧": "Airy",
+};
+
+const SPEED_ICONS: Record<string, React.ReactNode> = {
+  express: <Zap size={20} />,
+  standard: <Plane size={20} />,
+  slow: <Clock size={20} />,
+};
 
 type ComposeSurface = "letter" | "envelope";
 type ToolDrawer = "stickers" | "washi" | "paper" | "envelopes" | "stamps" | "gifs" | "create" | null;
@@ -423,8 +446,15 @@ export default function MailComposePanel({
       const envelopeCanvas = await createEnvelopeCanvas();
       if (!letterCanvas || !envelopeCanvas) return;
 
-      const letterImageData = letterCanvas.toDataURL("image/png");
-      const envelopeImageData = envelopeCanvas.toDataURL("image/png");
+      let letterImageData: string;
+      let envelopeImageData: string;
+      try {
+        letterImageData = letterCanvas.toDataURL("image/png");
+        envelopeImageData = envelopeCanvas.toDataURL("image/png");
+      } catch {
+        toast("Can't export letter — if you added GIFs from search, remove them and try again.", { variant: "error", icon: "warning" });
+        return;
+      }
       const payload: LetterSendPayload = {
         receiverName: receiver.trim(),
         imageData: letterImageData,
@@ -497,7 +527,7 @@ export default function MailComposePanel({
             {sendPreview.stampImageData ? (
               <img src={sendPreview.stampImageData} alt="Stamp" className="h-20 w-16 rounded-[14px] object-cover" />
             ) : (
-              <div className="flex h-20 w-16 items-center justify-center text-3xl">{sendPreview.stampStyle}</div>
+              <div className="flex h-20 w-16 flex-col items-center justify-center gap-1 rounded-[14px] bg-white" style={{ color: "var(--pink)" }}>{getStampIcon(sendPreview.stampStyle, 24)}<span className="text-[9px] font-semibold">{STAMP_LABELS[sendPreview.stampStyle]}</span></div>
             )}
           </div>
         </div>
@@ -533,7 +563,7 @@ export default function MailComposePanel({
               {senderName}
             </div>
           </div>
-          <div className="flex h-full items-center justify-center pb-2 text-2xl" style={{ color: "var(--muted)" }}>→</div>
+          <div className="flex h-full items-center justify-center pb-2" style={{ color: "var(--muted)" }}><ArrowRight size={18} /></div>
           <div>
             <label htmlFor="mail-compose-to" className="mb-1 block text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
               To
@@ -672,7 +702,7 @@ export default function MailComposePanel({
                 {selectedStamp?.imageData ? (
                   <img src={selectedStamp.imageData} alt={selectedStamp.name} className="h-24 w-20 rounded-[14px] object-cover" />
                 ) : (
-                  <div className="flex h-24 w-20 items-center justify-center rounded-[14px] bg-white text-4xl">{stampStyle}</div>
+                  <div className="flex h-24 w-20 flex-col items-center justify-center gap-1 rounded-[14px] bg-white" style={{ color: "var(--pink)" }}>{getStampIcon(stampStyle, 28)}<span className="text-[9px] font-semibold">{STAMP_LABELS[stampStyle]}</span></div>
                 )}
               </div>
             </div>
@@ -879,7 +909,10 @@ export default function MailComposePanel({
                   <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--muted)" }}>Stamp emoji</p>
                   <div className="flex flex-wrap gap-2">
                     {STAMP_STYLES.map((value) => (
-                      <button key={value} onClick={() => setStampStyle(value)} className="btn-smooth flex h-10 w-10 items-center justify-center rounded-xl text-xl" style={{ background: stampStyle === value ? "rgba(255,107,157,0.15)" : "var(--surface)", border: stampStyle === value ? "1px solid rgba(255,107,157,0.3)" : "1px solid var(--border)" }}>{value}</button>
+                      <button key={value} onClick={() => setStampStyle(value)} className="btn-smooth flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-xs font-semibold" style={{ background: stampStyle === value ? "rgba(255,107,157,0.15)" : "var(--surface)", border: stampStyle === value ? "1px solid rgba(255,107,157,0.3)" : "1px solid var(--border)", color: stampStyle === value ? "var(--pink)" : "var(--muted-strong)" }}>
+                        {getStampIcon(value, 13)}
+                        <span>{STAMP_LABELS[value] ?? value}</span>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -918,9 +951,9 @@ export default function MailComposePanel({
               <div className="space-y-3">
                 <StickerCreator onSave={onSaveSticker} />
                 <WashiTapeCreator onSave={onSaveWashi} />
-                <MailAssetCreator buttonLabel="📝 Create Paper" title="Paper Creator" accent="#67d4f1" width={360} height={240} placeholder="Paper name..." helperText="Draw a new paper design to use in letters and publish in the shop." onSave={onSavePaper} />
-                <MailAssetCreator buttonLabel="📮 Create Envelope" title="Envelope Creator" accent="#ffb347" width={420} height={260} placeholder="Envelope name..." helperText="Design the envelope base that your letter will slide into." onSave={onSaveEnvelope} />
-                <MailAssetCreator buttonLabel="📬 Create Stamp" title="Stamp Creator" accent="#ff6b9d" width={160} height={180} placeholder="Stamp name..." helperText="Draw a custom postage stamp for outgoing mail." onSave={onSaveStamp} />
+                <MailAssetCreator buttonLabel="Create Paper" title="Paper Creator" accent="#67d4f1" width={360} height={240} placeholder="Paper name..." helperText="Draw a new paper design to use in letters and publish in the shop." onSave={onSavePaper} />
+                <MailAssetCreator buttonLabel="Create Envelope" title="Envelope Creator" accent="#ffb347" width={420} height={260} placeholder="Envelope name..." helperText="Design the envelope base that your letter will slide into." onSave={onSaveEnvelope} />
+                <MailAssetCreator buttonLabel="Create Stamp" title="Stamp Creator" accent="#ff6b9d" width={160} height={180} placeholder="Stamp name..." helperText="Draw a custom postage stamp for outgoing mail." onSave={onSaveStamp} />
                 <FontTracerCreator onSave={onSaveCustomFont} />
               </div>
             ) : null}
@@ -941,7 +974,7 @@ export default function MailComposePanel({
             <div className="grid gap-2 sm:grid-cols-3">
               {DELIVERY_SPEEDS.map((option) => (
                 <button key={option.id} onClick={() => setSpeed(option.id)} className="btn-smooth rounded-2xl p-3 text-left" style={{ background: speed === option.id ? "rgba(167,139,250,0.14)" : "var(--surface)", border: speed === option.id ? "1px solid rgba(167,139,250,0.3)" : "1px solid var(--border)" }}>
-                  <div className="text-xl">{option.emoji}</div>
+                  <div className="flex items-center" style={{ color: speed === option.id ? "var(--lavender)" : "var(--muted)" }}>{SPEED_ICONS[option.id]}</div>
                   <div className="mt-1 text-[10px]" style={{ color: "var(--muted)" }}>{option.description}</div>
                 </button>
               ))}
@@ -965,7 +998,7 @@ export default function MailComposePanel({
                 Sealing…
               </>
             ) : (
-              <><span>{stampStyle}</span> <FiSend /> Send</>
+              <><FiSend /> Send</>
             )}
           </button>
         </div>

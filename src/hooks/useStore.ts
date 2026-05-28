@@ -7,7 +7,7 @@ import type { Json } from "@/types/database";
 import { createCanvas } from "@/lib/canvas/utils";
 
 type VisualAsset = Sticker | WashiTape | PaperBackground | MailStamp | EnvelopeStyle;
-
+export type StoreSortBy = "likes" | "downloads" | "newest" | "oldest";
 
 const STORE_KEY = "mochimail_store";
 const COLLECTION_KEY = "mochimail_store_collection";
@@ -37,7 +37,8 @@ function loadStore(key: string): StoreItem[] {
           tags: ["paper", "graph", "cute"],
         };
       }
-      return item;
+      // Ensure likes field exists on migrated items
+      return { ...item, likes: item.likes ?? 0 };
     });
     localStorage.setItem(STORE_KEY, JSON.stringify(migrated));
     return migrated;
@@ -204,7 +205,6 @@ function makeStoreEnvelope(): string {
 }
 
 function getDefaultStoreItems(): StoreItem[] {
-  // Only generate defaults in browser
   if (typeof document === "undefined") return [];
   return [
     {
@@ -215,6 +215,7 @@ function getDefaultStoreItems(): StoreItem[] {
       authorName: "MochiTeam",
       authorId: "system",
       downloads: 42,
+      likes: 18,
       createdAt: Date.now() - 86400000,
       width: 80,
       height: 80,
@@ -228,6 +229,7 @@ function getDefaultStoreItems(): StoreItem[] {
       authorName: "MochiTeam",
       authorId: "system",
       downloads: 38,
+      likes: 12,
       createdAt: Date.now() - 172800000,
       width: 80,
       height: 80,
@@ -241,6 +243,7 @@ function getDefaultStoreItems(): StoreItem[] {
       authorName: "MochiTeam",
       authorId: "system",
       downloads: 27,
+      likes: 9,
       createdAt: Date.now() - 259200000,
       opacity: 0.7,
       width: 240,
@@ -255,6 +258,7 @@ function getDefaultStoreItems(): StoreItem[] {
       authorName: "MochiTeam",
       authorId: "system",
       downloads: 19,
+      likes: 7,
       createdAt: Date.now() - 345600000,
       width: 1200,
       height: 800,
@@ -268,6 +272,7 @@ function getDefaultStoreItems(): StoreItem[] {
       authorName: "MochiTeam",
       authorId: "system",
       downloads: 14,
+      likes: 5,
       createdAt: Date.now() - 432000000,
       width: 140,
       height: 160,
@@ -281,6 +286,7 @@ function getDefaultStoreItems(): StoreItem[] {
       authorName: "MochiTeam",
       authorId: "system",
       downloads: 11,
+      likes: 4,
       createdAt: Date.now() - 518400000,
       width: 820,
       height: 520,
@@ -289,11 +295,23 @@ function getDefaultStoreItems(): StoreItem[] {
   ];
 }
 
+function applySort(items: StoreItem[], sortBy: StoreSortBy): StoreItem[] {
+  const arr = [...items];
+  switch (sortBy) {
+    case "likes":     return arr.sort((a, b) => b.likes - a.likes);
+    case "downloads": return arr.sort((a, b) => b.downloads - a.downloads);
+    case "newest":    return arr.sort((a, b) => b.createdAt - a.createdAt);
+    case "oldest":    return arr.sort((a, b) => a.createdAt - b.createdAt);
+  }
+}
+
 export function useStore(user: ViewerIdentity) {
   const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
   const [collection, setCollection] = useState<string[]>([]);
+  const [likedItemIds, setLikedItemIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope" | "kit">("all");
+  const [sortBy, setSortBy] = useState<StoreSortBy>("newest");
   const [hydratedRemote, setHydratedRemote] = useState(false);
   const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
   const storeKey = storeKeyFor(user);
@@ -314,19 +332,20 @@ export function useStore(user: ViewerIdentity) {
     const loadRemote = async () => {
       try {
         const supabase = createSupabaseBrowserClient();
-        const { data, error } = await supabase
+
+        // Load published items from all users
+        const { data: storeData, error: storeError } = await supabase
           .from("store_states")
           .select("owner_id, payload");
 
-        if (error) throw error;
+        if (storeError) throw storeError;
         if (cancelled) return;
 
-        // Merge published items from all users, deduplicating by id
         const seen = new Set<string>();
         const publishedItems: StoreItem[] = [];
         let remoteCollection = localCollection;
 
-        for (const row of (data ?? [])) {
+        for (const row of (storeData ?? [])) {
           const payload = (row.payload ?? null) as { storeItems?: StoreItem[]; collection?: string[] } | null;
           if (!payload) continue;
           if (row.owner_id === ownerId && payload.collection) {
@@ -335,23 +354,49 @@ export function useStore(user: ViewerIdentity) {
           for (const item of (payload.storeItems ?? [])) {
             if (!seen.has(item.id)) {
               seen.add(item.id);
-              publishedItems.push(item);
+              publishedItems.push({ ...item, likes: item.likes ?? 0 });
             }
           }
         }
 
-        // Append hardcoded defaults only if not already present from DB
         for (const def of getDefaultStoreItems()) {
           if (!seen.has(def.id)) publishedItems.push(def);
         }
 
-        setStoreItems(publishedItems);
-        setCollection(remoteCollection);
-        saveStoreByKey(storeKey, publishedItems);
-        saveCollectionByKey(collectionKey, remoteCollection);
+        // Load global stats and merge into items
+        const { data: statsData } = await supabase
+          .from("store_item_stats")
+          .select("item_id, downloads, likes");
+
+        if (!cancelled && statsData && statsData.length > 0) {
+          const statsMap = new Map(statsData.map((s) => [s.item_id, s]));
+          for (const item of publishedItems) {
+            const stat = statsMap.get(item.id);
+            if (stat) {
+              item.downloads = stat.downloads;
+              item.likes = stat.likes;
+            }
+          }
+        }
+
+        // Load this user's likes
+        const { data: likesData } = await supabase
+          .from("store_item_likes")
+          .select("item_id")
+          .eq("user_id", ownerId);
+
+        if (!cancelled && likesData) {
+          setLikedItemIds(new Set(likesData.map((l) => l.item_id)));
+        }
+
+        if (!cancelled) {
+          setStoreItems(publishedItems);
+          setCollection(remoteCollection);
+          saveStoreByKey(storeKey, publishedItems);
+          saveCollectionByKey(collectionKey, remoteCollection);
+        }
       } catch (err) {
         console.error("[store] Failed to load from Supabase:", err);
-        // Keep local fallback.
       } finally {
         if (!cancelled) setHydratedRemote(true);
       }
@@ -363,6 +408,7 @@ export function useStore(user: ViewerIdentity) {
     };
   }, [ownerId, storeKey, collectionKey]);
 
+  // Persist own published items + collection back to Supabase
   useEffect(() => {
     if (!hydratedRemote) return;
     saveStoreByKey(storeKey, storeItems);
@@ -373,7 +419,6 @@ export function useStore(user: ViewerIdentity) {
       void (async () => {
         try {
           const supabase = createSupabaseBrowserClient();
-          // Only persist items published by this user — not the merged global list
           const myPublishedItems = storeItems.filter((item) => item.authorId === ownerId);
           await supabase
             .from("store_states")
@@ -400,6 +445,7 @@ export function useStore(user: ViewerIdentity) {
         authorName,
         authorId,
         downloads: 0,
+        likes: 0,
         createdAt: Date.now(),
         width: kit.elements[0]?.width ?? 160,
         height: kit.elements[0]?.height ?? 160,
@@ -438,6 +484,7 @@ export function useStore(user: ViewerIdentity) {
         authorName,
         authorId,
         downloads: 0,
+        likes: 0,
         createdAt: Date.now(),
         opacity: isWashi ? (item as WashiTape).opacity : undefined,
         width: isFont ? fontItem?.glyphWidth ?? 52 : (visualItem?.width ?? 80),
@@ -488,7 +535,7 @@ export function useStore(user: ViewerIdentity) {
         saveCollectionByKey(collectionKey, updated);
         return updated;
       });
-      // Increment download count
+      // Optimistic local increment
       setStoreItems((prev) => {
         const updated = prev.map((item) =>
           item.id === itemId ? { ...item, downloads: item.downloads + 1 } : item
@@ -496,6 +543,15 @@ export function useStore(user: ViewerIdentity) {
         saveStoreByKey(storeKey, updated);
         return updated;
       });
+      // Persist global download count in Supabase
+      void (async () => {
+        try {
+          const supabase = createSupabaseBrowserClient();
+          await supabase.rpc("increment_store_downloads", { p_item_id: itemId });
+        } catch (err) {
+          console.warn("[store] Failed to increment downloads:", err);
+        }
+      })();
     },
     [collection, collectionKey, storeKey]
   );
@@ -513,18 +569,65 @@ export function useStore(user: ViewerIdentity) {
     [collection]
   );
 
-  const filteredItems = storeItems.filter((item) => {
-    if (filterType !== "all" && item.type !== filterType) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return (
-        item.name.toLowerCase().includes(q) ||
-        item.authorName.toLowerCase().includes(q) ||
-        item.tags.some((t) => t.toLowerCase().includes(q))
+  const toggleLike = useCallback(
+    async (itemId: string) => {
+      if (!ownerId) return;
+      const isLiked = likedItemIds.has(itemId);
+
+      // Optimistic update
+      setLikedItemIds((prev) => {
+        const next = new Set(prev);
+        if (isLiked) next.delete(itemId);
+        else next.add(itemId);
+        return next;
+      });
+      setStoreItems((prev) =>
+        prev.map((item) =>
+          item.id === itemId
+            ? { ...item, likes: Math.max(0, item.likes + (isLiked ? -1 : 1)) }
+            : item
+        )
       );
-    }
-    return true;
-  });
+
+      try {
+        const supabase = createSupabaseBrowserClient();
+        await supabase.rpc("toggle_store_like", { p_item_id: itemId, p_user_id: ownerId });
+      } catch (err) {
+        // Revert optimistic update on failure
+        console.warn("[store] Failed to toggle like:", err);
+        setLikedItemIds((prev) => {
+          const next = new Set(prev);
+          if (isLiked) next.add(itemId);
+          else next.delete(itemId);
+          return next;
+        });
+        setStoreItems((prev) =>
+          prev.map((item) =>
+            item.id === itemId
+              ? { ...item, likes: Math.max(0, item.likes + (isLiked ? 1 : -1)) }
+              : item
+          )
+        );
+      }
+    },
+    [ownerId, likedItemIds]
+  );
+
+  const filteredItems = applySort(
+    storeItems.filter((item) => {
+      if (filterType !== "all" && item.type !== filterType) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return (
+          item.name.toLowerCase().includes(q) ||
+          item.authorName.toLowerCase().includes(q) ||
+          item.tags.some((t) => t.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    }),
+    sortBy
+  );
 
   const getStoreItemAsAsset = useCallback(
     (itemId: string): Sticker | WashiTape | PaperBackground | CustomFont | MailStamp | EnvelopeStyle | null => {
@@ -590,15 +693,19 @@ export function useStore(user: ViewerIdentity) {
     storeItems: filteredItems,
     allStoreItems: storeItems,
     collection,
+    likedItemIds,
     searchQuery,
     setSearchQuery,
     filterType,
     setFilterType,
+    sortBy,
+    setSortBy,
     publishToStore,
     publishKitToStore,
     addToCollection,
     removeFromCollection,
     isInCollection,
+    toggleLike,
     getStoreItemAsAsset,
     removeFromStore,
     updateStoreItem,

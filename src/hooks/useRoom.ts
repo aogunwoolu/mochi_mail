@@ -138,6 +138,7 @@ export interface UseRoomReturn {
   /** The invite_token — also the ?room= URL param. Share this URL to invite others. */
   activeRoomToken: string | null;
   isPublic: boolean;
+  hasPassword: boolean;
   isOwner: boolean;
   /** null until the room is ready; used to gate stroke sync. */
   collabScope: string | null;
@@ -146,6 +147,7 @@ export interface UseRoomReturn {
   error: string | null;
   trackCursor: (pos: { x: number; y: number }, activeLayer?: number, tool?: string) => void;
   setRoomPublic: (pub: boolean) => Promise<void>;
+  setRoomPassword: (password: string | null) => Promise<void>;
 }
 
 export function useRoom({
@@ -161,6 +163,7 @@ export function useRoom({
   const [activeRoomTitle, setActiveRoomTitle] = useState<string | null>(null);
   const [activeRoomToken, setActiveRoomToken] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(false);
+  const [hasPassword, setHasPassword] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -274,7 +277,7 @@ export function useRoom({
           // Fetch full room details now that we have membership (RLS will allow it).
           const { data: room } = await supabase
             .from("rooms")
-            .select("id, title, invite_token, is_public, owner_id")
+            .select("id, title, invite_token, is_public, owner_id, password_hash")
             .eq("id", joinData[0].room_id)
             .single();
           if (room) {
@@ -283,6 +286,7 @@ export function useRoom({
             setActiveRoomTitle(room.title);
             setActiveRoomToken(room.invite_token);
             setIsPublic(room.is_public);
+            setHasPassword(Boolean(room.password_hash));
             setIsOwner(Boolean(currentUser && room.owner_id === currentUser.id));
             setPhase("drawing");
             return;
@@ -294,7 +298,7 @@ export function useRoom({
         // have RLS read access so no join RPC is needed.
         const { data: directRoom } = await supabase
           .from("rooms")
-          .select("id, title, invite_token, is_public, owner_id")
+          .select("id, title, invite_token, is_public, owner_id, password_hash")
           .eq("invite_token", token)
           .maybeSingle();
 
@@ -305,6 +309,7 @@ export function useRoom({
           setActiveRoomTitle(directRoom.title);
           setActiveRoomToken(directRoom.invite_token);
           setIsPublic(directRoom.is_public);
+          setHasPassword(Boolean(directRoom.password_hash));
           setIsOwner(Boolean(currentUser && directRoom.owner_id === currentUser.id));
           setPhase("drawing");
           return;
@@ -322,7 +327,7 @@ export function useRoom({
           });
           if (apiRes.ok) {
             const { room: apiRoom } = (await apiRes.json()) as {
-              room: { id: string; title: string; invite_token: string; is_public: boolean; owner_id: string };
+              room: { id: string; title: string; invite_token: string; is_public: boolean; owner_id: string; password_hash?: string | null };
             };
             if (apiRoom) {
               console.log(`[useRoom:apiPath] resolved room id=${apiRoom.id}`);
@@ -336,6 +341,7 @@ export function useRoom({
               setActiveRoomTitle(apiRoom.title);
               setActiveRoomToken(apiRoom.invite_token);
               setIsPublic(apiRoom.is_public);
+              setHasPassword(Boolean(apiRoom.password_hash));
               setIsOwner(Boolean(currentUser && apiRoom.owner_id === currentUser.id));
               setPhase("drawing");
               return;
@@ -560,12 +566,28 @@ export function useRoom({
     [activeRoomId],
   );
 
+  // ── Set or clear room password (owner only) ────────────────────────────────
+  const setRoomPassword = useCallback(
+    async (password: string | null) => {
+      if (!activeRoomId) return;
+      const supabase = createSupabaseBrowserClient();
+      await supabase.rpc("update_room_security", {
+        p_room_id: activeRoomId,
+        p_is_public: isPublic,
+        p_password: password?.trim() || null,
+      });
+      setHasPassword(Boolean(password?.trim()));
+    },
+    [activeRoomId, isPublic],
+  );
+
   return {
     phase,
     activeRoomId,
     activeRoomTitle,
     activeRoomToken,
     isPublic,
+    hasPassword,
     isOwner,
     collabScope,
     members,
@@ -573,5 +595,6 @@ export function useRoom({
     error,
     trackCursor,
     setRoomPublic,
+    setRoomPassword,
   };
 }

@@ -1,7 +1,8 @@
 
 import React, { useState } from "react";
+import { Search, Store, Heart, Download, Check } from "lucide-react";
 import { StoreItem, Sticker, WashiTape, PaperBackground, CustomFont, MailStamp, EnvelopeStyle } from "@/types";
-import { exportImageAsset, exportFont } from "@/lib/exportAsset";
+import type { StoreSortBy } from "@/hooks/useStore";
 import MyStorefront from "./MyStorefront";
 
 type StoreFilterType = "all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope" | "kit";
@@ -13,9 +14,10 @@ interface StoreViewProps {
   setFilterType: (type: StoreFilterType) => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  isInCollection: (id: string) => boolean;
-  addToCollection: (id: string) => void;
-  removeFromCollection: (id: string) => void;
+  sortBy: StoreSortBy;
+  setSortBy: (sort: StoreSortBy) => void;
+  likedItemIds: Set<string>;
+  onLike: (id: string) => void;
   onAddToAssets: (item: StoreItem) => void;
   // For publishing
   userStickers: Sticker[];
@@ -53,6 +55,13 @@ function itemTypeLabel(type: StoreItem["type"]): string {
   return "Sticker";
 }
 
+const SORT_OPTIONS: { value: StoreSortBy; label: string }[] = [
+  { value: "likes",     label: "Most Liked" },
+  { value: "downloads", label: "Most Downloaded" },
+  { value: "newest",    label: "Newest" },
+  { value: "oldest",    label: "Oldest" },
+];
+
 export default function StoreView({
   storeItems,
   allStoreItems,
@@ -60,9 +69,10 @@ export default function StoreView({
   setFilterType,
   searchQuery,
   setSearchQuery,
-  isInCollection,
-  addToCollection,
-  removeFromCollection,
+  sortBy,
+  setSortBy,
+  likedItemIds,
+  onLike,
   onAddToAssets,
   userStickers,
   userWashiTapes,
@@ -80,6 +90,12 @@ export default function StoreView({
   const [showPublish, setShowPublish] = useState(false);
   const [publishTags, setPublishTags] = useState("");
   const [selectedPublish, setSelectedPublish] = useState<{ id: string; type: StoreItem["type"] } | null>(null);
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+
+  const handleAdd = (item: StoreItem) => {
+    onAddToAssets(item);
+    setAddedIds((prev) => new Set(prev).add(item.id));
+  };
 
   const allUserAssets = [
     ...userStickers.map((s) => ({ ...s, assetType: "sticker" as const })),
@@ -107,7 +123,6 @@ export default function StoreView({
     setShowPublish(false);
     setPublishTags("");
     setSelectedPublish(null);
-    // Reset filter so the newly published item is always visible
     setFilterType("all");
     setSearchQuery("");
   };
@@ -173,7 +188,7 @@ export default function StoreView({
       {storeView === "community" && (
       <>
       {/* Search + Filter bar */}
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <input
             type="text"
@@ -184,14 +199,25 @@ export default function StoreView({
             style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--foreground)" }}
             suppressHydrationWarning
           />
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: "var(--muted)" }}>🔍</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--muted)" }}><Search size={14} /></span>
         </div>
+        <button
+          onClick={() => setShowPublish(!showPublish)}
+          className="btn-smooth rounded-xl px-4 py-2.5 text-sm font-semibold"
+          style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))", color: "white" }}
+        >
+          + Publish
+        </button>
+      </div>
+
+      {/* Filter + Sort row */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex gap-1 flex-wrap rounded-xl p-1" style={{ background: "var(--surface)" }}>
           {(["all", "sticker", "washi", "background", "stamp", "envelope", "font", "kit"] as const).map((type) => (
             <button
               key={type}
               onClick={() => setFilterType(type)}
-              className={`btn-smooth rounded-lg px-3 py-1.5 text-xs font-semibold capitalize`}
+              className="btn-smooth rounded-lg px-3 py-1.5 text-xs font-semibold capitalize"
               style={{
                 background: filterType === type ? "rgba(167,139,250,0.2)" : "transparent",
                 color: filterType === type ? "var(--lavender)" : "var(--muted)",
@@ -201,13 +227,24 @@ export default function StoreView({
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setShowPublish(!showPublish)}
-          className="btn-smooth rounded-xl px-4 py-2.5 text-sm font-semibold"
-          style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))", color: "white" }}
-        >
-          + Publish
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className="text-[10px] font-medium" style={{ color: "var(--muted)" }}>Sort:</span>
+          <div className="flex rounded-lg p-0.5" style={{ background: "var(--surface)" }}>
+            {SORT_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setSortBy(opt.value)}
+                className="btn-smooth rounded-md px-2.5 py-1 text-[10px] font-semibold"
+                style={{
+                  background: sortBy === opt.value ? "rgba(167,139,250,0.2)" : "transparent",
+                  color: sortBy === opt.value ? "var(--lavender)" : "var(--muted)",
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Publish panel */}
@@ -227,7 +264,7 @@ export default function StoreView({
                   <button
                     key={`${asset.assetType}-${asset.id}`}
                     onClick={() => setSelectedPublish({ id: asset.id, type: asset.assetType })}
-                    className={`btn-smooth flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl p-1`}
+                    className="btn-smooth flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl p-1"
                     style={{
                       background:
                         selectedPublish?.id === asset.id && selectedPublish.type === asset.assetType
@@ -260,7 +297,7 @@ export default function StoreView({
                 className="btn-smooth w-full rounded-lg py-2 text-xs font-semibold text-white disabled:opacity-30"
                 style={{ background: "var(--pink)" }}
               >
-                Publish ✨
+                + Publish
               </button>
             </>
           )}
@@ -268,19 +305,19 @@ export default function StoreView({
       )}
 
       {/* Store Grid */}
-      {storeView === "community" && storeItems.length === 0 ? (
+      {storeItems.length === 0 ? (
         <div className="py-16 text-center">
-          <div className="text-5xl opacity-40">🏪</div>
+          <div className="opacity-30" style={{ color: "var(--muted)" }}><Store size={48} /></div>
           <div className="mt-3 text-sm" style={{ color: "var(--muted)" }}>
             {searchQuery ? "No matching goodies found" : "Store is empty"}
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" style={{ gridAutoRows: "1fr" }}>
           {storeItems.map((item) => {
-            const inCollection = isInCollection(item.id);
             const isKit = item.type === "kit";
             const kitData = item.kitData;
+            const isLiked = likedItemIds.has(item.id);
 
             // ── Kit card ────────────────────────────────────────────────────
             if (isKit && kitData) {
@@ -288,13 +325,13 @@ export default function StoreView({
               return (
                 <div
                   key={item.id}
-                  className="glass group rounded-2xl overflow-hidden transition-all hover:scale-[1.02]"
+                  className="glass group flex flex-col rounded-2xl overflow-hidden transition-all hover:scale-[1.02]"
                   style={{ border: `1.5px solid ${accent}33` }}
                 >
                   {/* Kit header */}
                   <div className="px-3 py-2" style={{ background: `${accent}18`, borderBottom: `1px solid ${accent}22` }}>
                     <p className="text-xs font-bold truncate" style={{ color: accent }}>{item.name}</p>
-                    <p className="text-[10px] truncate" style={{ color: accent, opacity: 0.7 }}>by {item.authorName} · {item.downloads} ⬇</p>
+                    <p className="text-[10px] truncate" style={{ color: accent, opacity: 0.7 }}>by {item.authorName}</p>
                   </div>
                   {/* Element thumbnails */}
                   <div className="grid grid-cols-2 gap-1 p-2">
@@ -309,39 +346,36 @@ export default function StoreView({
                     ))}
                   </div>
                   {/* Tags */}
-                  {item.tags.length > 0 && (
-                    <div className="px-2 pb-1 flex flex-wrap gap-1">
-                      {item.tags.slice(0, 3).map((tag) => (
-                        <span key={tag} className="rounded-full px-1.5 py-px text-[9px]" style={{ background: `${accent}15`, color: accent }}>{tag}</span>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex gap-1.5 p-2 pt-0">
+                  <div className="px-2 pb-1 flex flex-wrap gap-1 min-h-5">
+                    {item.tags.slice(0, 3).map((tag) => (
+                      <span key={tag} className="rounded-full px-1.5 py-px text-[9px]" style={{ background: `${accent}15`, color: accent }}>{tag}</span>
+                    ))}
+                  </div>
+                  {/* Stats + actions */}
+                  <div className="mt-auto flex items-center gap-1.5 p-2 pt-1">
                     <button
-                      onClick={() => inCollection ? removeFromCollection(item.id) : addToCollection(item.id)}
-                      className="btn-smooth flex-1 rounded-lg py-1.5 text-xs font-semibold"
+                      onClick={() => onLike(item.id)}
+                      disabled={isGuest}
+                      className="btn-smooth flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs"
                       style={{
-                        background: inCollection ? "rgba(110,231,183,0.15)" : "var(--surface)",
-                        color: inCollection ? "var(--mint)" : "var(--muted-strong)",
-                        border: inCollection ? "1px solid rgba(110,231,183,0.3)" : "1px solid var(--border)",
+                        background: isLiked ? "rgba(255,107,157,0.15)" : "var(--surface)",
+                        color: isLiked ? "var(--pink)" : "var(--muted)",
+                        border: `1px solid ${isLiked ? "rgba(255,107,157,0.3)" : "var(--border)"}`,
                       }}
+                      title={isGuest ? "Sign in to like" : undefined}
                     >
-                      {inCollection ? "✓ Saved" : "♡ Save"}
+                      <Heart size={11} className={isLiked ? "fill-current" : ""} /> {item.likes}
                     </button>
+                    <span className="flex items-center gap-0.5 text-[10px]" style={{ color: "var(--muted)" }}><Download size={10} /> {item.downloads}</span>
                     <button
-                      onClick={() => exportImageAsset(item.name, item.authorName, item.imageData)}
-                      className="btn-smooth rounded-lg px-2 py-1.5 text-xs font-semibold"
-                      style={{ background: "var(--surface)", color: "var(--lavender)", border: "1px solid var(--border)" }}
-                      title="Download"
+                      onClick={() => handleAdd(item)}
+                      className="btn-smooth ml-auto flex flex-1 items-center justify-center gap-1 rounded-lg py-1.5 text-xs font-semibold"
+                      style={addedIds.has(item.id)
+                        ? { background: "rgba(110,231,183,0.15)", color: "var(--mint)", border: "1px solid rgba(110,231,183,0.3)" }
+                        : { background: accent, color: "#fff" }
+                      }
                     >
-                      ↓
-                    </button>
-                    <button
-                      onClick={() => onAddToAssets(item)}
-                      className="btn-smooth rounded-lg px-2.5 py-1.5 text-xs font-semibold"
-                      style={{ background: accent, color: "#fff" }}
-                    >
-                      Use
+                      {addedIds.has(item.id) ? <><Check size={11} /> Added</> : "+ Add"}
                     </button>
                   </div>
                 </div>
@@ -352,14 +386,21 @@ export default function StoreView({
             return (
               <div
                 key={item.id}
-                className="glass group rounded-2xl p-3 transition-all hover:scale-[1.02]"
+                className="glass group flex flex-col rounded-2xl p-3 transition-all hover:scale-[1.02]"
               >
-                <div className={`relative mb-2 flex items-center justify-center overflow-hidden rounded-xl ${item.type === "background" || item.type === "font" || item.type === "envelope" ? "aspect-4/3" : "aspect-square"}`} style={{ background: "rgba(255,255,255,0.03)" }}>
+                {/* Preview image */}
+                <div
+                  className={`relative mb-2 flex items-center justify-center overflow-hidden rounded-xl ${item.type === "background" || item.type === "font" || item.type === "envelope" ? "aspect-4/3" : "aspect-square"}`}
+                  style={{ background: "rgba(255,255,255,0.03)" }}
+                >
                   <img
                     src={item.imageData}
                     alt={item.name}
                     className="h-full w-full object-cover"
-                    style={{ imageRendering: item.type === "background" || item.type === "font" || item.type === "envelope" ? "auto" : "pixelated", opacity: item.type === "washi" ? item.opacity ?? 0.7 : 1 }}
+                    style={{
+                      imageRendering: item.type === "background" || item.type === "font" || item.type === "envelope" ? "auto" : "pixelated",
+                      opacity: item.type === "washi" ? item.opacity ?? 0.7 : 1,
+                    }}
                   />
                   {item.isAnimated && (
                     <span className="absolute bottom-1 right-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold" style={{ background: "rgba(217,119,6,0.9)", color: "#fff" }}>
@@ -367,56 +408,50 @@ export default function StoreView({
                     </span>
                   )}
                 </div>
-                <div className="mb-1 truncate text-sm font-semibold">{item.name}</div>
-                <div className="mb-2 flex items-center justify-between text-[10px]" style={{ color: "var(--muted)" }}>
-                  <span>{item.authorName}</span>
-                  <span>{item.downloads} ⬇</span>
+
+                {/* Name */}
+                <div className="mb-0.5 truncate text-sm font-semibold">{item.name}</div>
+
+                {/* Author + type */}
+                <div className="mb-1 flex items-center justify-between text-[10px]" style={{ color: "var(--muted)" }}>
+                  <span className="truncate">{item.authorName}</span>
+                  <span className="ml-1 shrink-0 uppercase tracking-wide">{itemTypeLabel(item.type)}</span>
                 </div>
-                <div className="mb-2 text-[10px] uppercase tracking-wide" style={{ color: "var(--muted)" }}>
-                  {itemTypeLabel(item.type)}
+
+                {/* Tags — fixed min-height so cards without tags don't collapse */}
+                <div className="mb-2 flex min-h-5 flex-wrap gap-1">
+                  {item.tags.slice(0, 3).map((tag) => (
+                    <span key={tag} className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--surface)", color: "var(--muted)" }}>
+                      {tag}
+                    </span>
+                  ))}
                 </div>
-                {item.tags.length > 0 && (
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    {item.tags.slice(0, 3).map((tag) => (
-                      <span key={tag} className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--surface)", color: "var(--muted)" }}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="flex gap-1.5">
+
+                {/* Stats + Add button — pinned to bottom */}
+                <div className="mt-auto flex items-center gap-1.5">
                   <button
-                    onClick={() => inCollection ? removeFromCollection(item.id) : addToCollection(item.id)}
-                    className="btn-smooth flex-1 rounded-lg py-1.5 text-xs font-semibold"
+                    onClick={() => onLike(item.id)}
+                    disabled={isGuest}
+                    className="btn-smooth flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs"
                     style={{
-                      background: inCollection ? "rgba(110,231,183,0.15)" : "var(--surface)",
-                      color: inCollection ? "var(--mint)" : "var(--muted-strong)",
-                      border: inCollection ? "1px solid rgba(110,231,183,0.3)" : "1px solid var(--border)",
+                      background: isLiked ? "rgba(255,107,157,0.15)" : "var(--surface)",
+                      color: isLiked ? "var(--pink)" : "var(--muted)",
+                      border: `1px solid ${isLiked ? "rgba(255,107,157,0.3)" : "var(--border)"}`,
                     }}
+                    title={isGuest ? "Sign in to like" : undefined}
                   >
-                    {inCollection ? "✓ Saved" : "♡ Save"}
+                    <Heart size={11} className={isLiked ? "fill-current" : ""} /> {item.likes}
                   </button>
+                  <span className="flex items-center gap-0.5 text-[10px]" style={{ color: "var(--muted)" }}><Download size={10} /> {item.downloads}</span>
                   <button
-                    onClick={() => {
-                      if (item.type === "font" && item.fontData) {
-                        exportFont(item.fontData, item.authorName);
-                      } else {
-                        exportImageAsset(item.name, item.authorName, item.imageData);
-                      }
-                    }}
-                    className="btn-smooth rounded-lg px-2 py-1.5 text-xs font-semibold"
-                    style={{ background: "var(--surface)", color: "var(--lavender)", border: "1px solid var(--border)" }}
-                    title={item.type === "font" ? "Download font (.json)" : "Download PNG"}
+                    onClick={() => handleAdd(item)}
+                    className="btn-smooth ml-auto flex flex-1 items-center justify-center gap-1 rounded-lg py-1.5 text-xs font-semibold"
+                    style={addedIds.has(item.id)
+                      ? { background: "rgba(110,231,183,0.15)", color: "var(--mint)", border: "1px solid rgba(110,231,183,0.3)" }
+                      : { background: "linear-gradient(135deg, var(--pink), var(--lavender))", color: "#fff" }
+                    }
                   >
-                    ↓
-                  </button>
-                  <button
-                    onClick={() => onAddToAssets(item)}
-                    className="btn-smooth rounded-lg px-3 py-1.5 text-xs font-semibold"
-                    style={{ background: "var(--surface)", color: "var(--lavender)", border: "1px solid var(--border)" }}
-                    title="Add to your assets"
-                  >
-                    {item.type === "background" || item.type === "font" || item.type === "stamp" || item.type === "envelope" ? "Use" : "+"}
+                    {addedIds.has(item.id) ? <><Check size={11} /> Added</> : "+ Add"}
                   </button>
                 </div>
               </div>

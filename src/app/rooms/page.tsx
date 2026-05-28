@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FiArrowLeft, FiCopy, FiCheck, FiExternalLink, FiLock, FiGlobe, FiPlus, FiRefreshCw } from "react-icons/fi";
 import { useAccount } from "@/hooks/useAccount";
@@ -137,9 +137,15 @@ function RoomsPageInner() {
   // Allow anonymous users with a session to use rooms
   const canUseRooms = account.hydrated && account.hasSession && roomIdentity;
 
-  // Build the canvas URL that preserves the last open room.
-  // Falls back to "/" if the user hasn't opened the canvas yet.
+  const primaryRoom = rooms.myRooms.find((r) => r.isOwner) ?? rooms.myRooms[0] ?? null;
+  const otherRooms = rooms.publicRooms.filter((r) => r.id !== primaryRoom?.id);
+
+  // Build the canvas URL for the "Back" button.
+  // Prefer the primary room's token so the owner lands in the same room they see
+  // on this page (and the room others will join via the invite link shown here).
+  // Falls back to localStorage, then bare "/" so useRoom auto-creates a room.
   const canvasUrl = (): string => {
+    if (primaryRoom?.inviteToken) return `/?room=${encodeURIComponent(primaryRoom.inviteToken)}`;
     try {
       const token = globalThis.localStorage?.getItem(ROOM_TOKEN_KEY) ?? "";
       return token ? `/?room=${encodeURIComponent(token)}` : "/";
@@ -170,11 +176,7 @@ function RoomsPageInner() {
     );
   }
 
-  const primaryRoom = rooms.myRooms.find((r) => r.isOwner) ?? rooms.myRooms[0] ?? null;
-  const otherRooms = rooms.publicRooms.filter((r) => r.id !== primaryRoom?.id);
-
   // Stable room link uses room ID — the invite token can be rotated separately
-  const getRoomLink = (room: RoomSummary) => `${globalThis.location.origin}/rooms/${room.id}`;
   const getInviteLink = (room: RoomSummary) => `${globalThis.location.origin}/rooms/${room.inviteToken}`;
 
   const handleJoin = async () => {
@@ -197,9 +199,6 @@ function RoomsPageInner() {
       flash(errMsg(err, "Unable to join room."), true);
     }
   };
-
-  const formatCode = (code: string) =>
-    code.length === 6 ? `${code.slice(0, 3)}-${code.slice(3)}` : code;
 
   const handleCreate = async () => {
     setError(null);
@@ -239,8 +238,7 @@ function RoomsPageInner() {
         <div className="rounded-xl px-3 py-2 text-xs font-medium" style={{ background: "rgba(209,250,229,0.8)", color: "#065f46", border: "1px solid rgba(52,211,153,0.3)" }}>{status}</div>
       ) : null}
 
-      {/* Primary room hero */}
-      {/* Primary room — the user's own room. Created automatically when they first open the canvas. */}
+      {/* Primary room */}
       {primaryRoom ? (
         <section className="rounded-2xl border p-5 flex flex-col gap-4" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
           <div className="flex items-start justify-between gap-3">
@@ -251,19 +249,12 @@ function RoomsPageInner() {
                   {primaryRoom.visibility === "public" ? <FiGlobe size={10} /> : <FiLock size={10} />}
                   {primaryRoom.visibility}
                 </span>
-              </div>
-              {primaryRoom.roomCode ? (
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="text-[10px] font-medium" style={{ color: "var(--muted)" }}>Room code</span>
-                  <span
-                    className="rounded-lg px-2.5 py-1 font-mono text-sm font-bold tracking-widest"
-                    style={{ background: "linear-gradient(135deg, rgba(255,107,157,0.12), rgba(167,139,250,0.12))", color: "var(--foreground)", border: "1px solid rgba(167,139,250,0.25)" }}
-                  >
-                    {formatCode(primaryRoom.roomCode)}
+                {primaryRoom.hasPassword && (
+                  <span className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "rgba(244,114,182,0.12)", color: "#be185d" }}>
+                    <FiLock size={9} /> password
                   </span>
-                  <CopyButton text={primaryRoom.roomCode} label="Copy code" />
-                </div>
-              ) : null}
+                )}
+              </div>
               {primaryRoom.description ? (
                 <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>{primaryRoom.description}</p>
               ) : null}
@@ -277,27 +268,15 @@ function RoomsPageInner() {
             </button>
           </div>
 
-          {/* Room link (by ID — stable even when invite token rotates) */}
+          {/* Invite link — the one link to share */}
           <div>
-            <FieldLabel>Room link</FieldLabel>
+            <FieldLabel>Invite link</FieldLabel>
             <div className="flex items-center gap-2 rounded-xl px-3 py-2.5" style={{ background: "var(--surface-active)" }}>
-              <span className="flex-1 truncate font-mono text-xs" style={{ color: "var(--muted-strong)" }}>{getRoomLink(primaryRoom)}</span>
-              <CopyButton text={getRoomLink(primaryRoom)} />
+              <span className="flex-1 truncate font-mono text-xs" style={{ color: "var(--muted-strong)" }}>{getInviteLink(primaryRoom)}</span>
+              <CopyButton text={getInviteLink(primaryRoom)} />
             </div>
-            <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted)" }}>Share this so people can find your room. Members can open it directly; others will be prompted to request access.</p>
+            <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted)" }}>Share this link so others can join. Rotate it to revoke access.</p>
           </div>
-
-          {/* Invite link (token-based — can be rotated to revoke) */}
-          {primaryRoom.isOwner ? (
-            <div>
-              <FieldLabel>Invite link <span className="font-normal" style={{ color: "var(--muted)" }}>— grants access to new members</span></FieldLabel>
-              <div className="flex items-center gap-2 rounded-xl px-3 py-2.5" style={{ background: "var(--surface-active)" }}>
-                <span className="flex-1 truncate font-mono text-xs" style={{ color: "var(--muted-strong)" }}>{getInviteLink(primaryRoom)}</span>
-                <CopyButton text={getInviteLink(primaryRoom)} label="Copy invite" />
-              </div>
-              <p className="mt-1.5 text-[11px]" style={{ color: "var(--muted)" }}>Anyone with this link can join. Rotate it to revoke access without changing the room link.</p>
-            </div>
-          ) : null}
 
           {/* Owner actions */}
           {primaryRoom.isOwner ? (
@@ -306,7 +285,7 @@ function RoomsPageInner() {
                 onClick={async () => {
                   try {
                     await rooms.rotateRoomInviteToken(primaryRoom.id);
-                    flash("Invite link rotated — old invite link no longer works.");
+                    flash("Invite link rotated — old link no longer works.");
                   } catch (err) {
                     flash(errMsg(err, "Failed to rotate invite link."), true);
                   }
@@ -314,7 +293,7 @@ function RoomsPageInner() {
                 className="btn-smooth flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold"
                 style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}
               >
-                <FiRefreshCw size={12} /> Rotate invite link
+                <FiRefreshCw size={12} /> Rotate link
               </button>
               <button
                 onClick={async () => {
@@ -361,18 +340,15 @@ function RoomsPageInner() {
         <h2 className="mb-3 text-sm font-semibold">Join a room</h2>
         <div className="flex flex-col gap-3">
           <div>
-            <FieldLabel>Room code or invite link</FieldLabel>
+            <FieldLabel>Invite link</FieldLabel>
             <input
               value={joinToken}
               onChange={(e) => setJoinToken(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void handleJoin(); }}
-              className="input-soft w-full px-3 py-2 font-mono text-sm outline-none"
-              placeholder="ABC-123  or  https://…"
+              className="input-soft w-full px-3 py-2 text-sm outline-none"
+              placeholder="Paste invite link here…"
               maxLength={200}
             />
-            <p className="mt-1 text-[11px]" style={{ color: "var(--muted)" }}>
-              Enter the 6-character code (e.g. <strong>ABC-123</strong>) or paste a full invite link.
-            </p>
           </div>
           <div>
             <FieldLabel>Password <span className="font-normal" style={{ color: "var(--muted)" }}>— only if the room requires one</span></FieldLabel>
@@ -405,7 +381,7 @@ function RoomsPageInner() {
                 room={room}
                 onOpen={() => router.push(`/?room=${encodeURIComponent(room.inviteToken)}`)}
                 onCopyLink={async () => {
-                  const link = getRoomLink(room);
+                  const link = getInviteLink(room);
                   try {
                     if (navigator.clipboard?.writeText) {
                       await navigator.clipboard.writeText(link);

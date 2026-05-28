@@ -101,7 +101,11 @@ class SpaceItemUtil extends ShapeUtil<SpaceItemShape> {
           userSelect: 'none', pointerEvents: 'none',
         }}>
           <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-            {pinned && <span style={{ fontSize: 11 }}>📌</span>}
+            {pinned && (
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+                <path d="M12 2l3 7h5l-4 3 1.5 7L12 15l-5.5 4L8 12 4 9h5z" stroke="rgba(53,39,66,0.55)" strokeWidth="1.8" strokeLinejoin="round" fill="rgba(53,39,66,0.15)" />
+              </svg>
+            )}
             {visitorMode && (
               <span style={{
                 borderRadius: 9999, padding: '2px 6px', fontSize: 8,
@@ -298,11 +302,26 @@ interface SpaceBoardProps {
 
 export default function SpaceBoard({ items, isOwner, onItemChange, onSelectItem, selectedItemId }: SpaceBoardProps) {
   return (
-    <div className="absolute inset-0" style={{ ['--color-background' as string]: 'transparent' }}>
+    <div
+      className="absolute inset-0"
+      style={{
+        ['--color-background' as string]: 'transparent',
+        touchAction: 'none',
+        overscrollBehavior: 'none',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+      } as React.CSSProperties}
+    >
       <Tldraw
         shapeUtils={SHAPE_UTILS}
         hideUi
         components={{ Background: () => null }}
+        options={{
+          // Lower friction = longer glide after finger lift (iOS-native feel)
+          cameraSlideFriction: 0.05,
+          // Don't debounce zoom — keep pinch-zoom responsive frame-by-frame
+          debouncedZoom: false,
+        }}
       >
         <ShapeSyncer items={items} isOwner={isOwner} onItemChange={onItemChange} />
         <SelectionMonitor onSelectItem={onSelectItem} selectedItemId={selectedItemId} />

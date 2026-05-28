@@ -39,6 +39,11 @@
   -webkit-touch-callout: none;
 }
 
+html {
+  /* Prevents elastic scroll on iPad from competing with canvas pan */
+  overscroll-behavior: none;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -47,6 +52,10 @@ body {
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Stop iOS rubber-band bounce which fights canvas momentum pan */
+  overscroll-behavior: none;
+  /* Prevent body-level scroll from stealing canvas touch events */
+  touch-action: manipulation;
 }
 
 /* Ambient background gradient */

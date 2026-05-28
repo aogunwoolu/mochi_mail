@@ -72,7 +72,6 @@ interface StudioToolbarProps {
   onClear: () => void;
   onExport: () => void;
   isExporting?: boolean;
-  triggerOpenAssets?: number;
   stickers: Sticker[];
   washiTapes: WashiTape[];
   papers: PaperBackground[];
@@ -325,7 +324,6 @@ function CollaboratorAvatars({
 
 export default function StudioToolbar({
   brushSettings, onBrushChange, onUndo, onRedo, onClear, onExport, isExporting = false,
-  triggerOpenAssets = 0,
   stickers, washiTapes, papers, customFonts, kitLibrary, storeItems,
   selectedAsset, selectedPaper, viewer,
   onSelectSticker, onSelectWashi, onSelectPaper, onDeselectAsset,
@@ -361,13 +359,6 @@ export default function StudioToolbar({
   }, []);
 
   useEffect(() => { setCustomColor(brushSettings.color); }, [brushSettings.color]);
-
-  useEffect(() => {
-    if (triggerOpenAssets > 0) {
-      setDrawerOpen(true);
-      setActiveSection("assets");
-    }
-  }, [triggerOpenAssets]);
 
   // Persist custom palette
   useEffect(() => {
@@ -566,7 +557,7 @@ export default function StudioToolbar({
               maxWidth: 280,
             }}
           >
-            <span style={{ fontSize: 14 }}>✓</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             <span className="truncate">{feedbackMsg}</span>
           </div>
         </div>

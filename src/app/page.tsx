@@ -14,7 +14,9 @@ import RoomControl from "@/components/RoomControl";
 import { AppHeader } from "@/components/AppHeader";
 import { FiEdit3, FiLayers, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
 import { Pencil, Eraser, MousePointer, Type, Scissors, Image, Sparkles } from "lucide-react";
-import { exportCanvas } from "@/components/ExportUtil";
+import { exportCanvas, CropRegion, StaticFormat } from "@/components/ExportUtil";
+import ExportModal from "@/components/ExportModal";
+import CanvasRegionSelector from "@/components/CanvasRegionSelector";
 import { toast } from "@/lib/toast";
 import { useRoom } from "@/hooks/useRoom";
 import type { RoomMember } from "@/hooks/useRoom";
@@ -130,6 +132,7 @@ export default function Home() {
     phase: roomPhase,
     activeRoomId,
     isPublic: roomIsPublic,
+    hasPassword: roomHasPassword,
     isOwner: roomIsOwner,
     collabScope,
     members: roomMembers,
@@ -137,6 +140,7 @@ export default function Home() {
     selfColor,
     error: roomError,
     setRoomPublic,
+    setRoomPassword,
   } = useRoom({
     hasSession: account.hasSession,
     hydrated: account.hydrated,
@@ -194,8 +198,9 @@ export default function Home() {
       size: number,
       tool: "pen" | "eraser",
       isLast: boolean,
+      layerIndex: number,
     ) => {
-      broadcastStroke(strokeId, pts, color, size, tool, isLast);
+      broadcastStroke(strokeId, pts, color, size, tool, isLast, layerIndex);
     },
     [broadcastStroke],
   );
@@ -207,8 +212,9 @@ export default function Home() {
       color: string,
       size: number,
       tool: "pen" | "eraser",
+      layerIndex: number,
     ) => {
-      void saveStroke(strokeId, pts, color, size, tool);
+      void saveStroke(strokeId, pts, color, size, tool, layerIndex);
     },
     [saveStroke],
   );
@@ -273,66 +279,88 @@ export default function Home() {
   );
 
   const [isExporting, setIsExporting] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [selectingRegion, setSelectingRegion] = useState(false);
+  const [staticFormat, setStaticFormat] = useState<StaticFormat>("png");
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
   const [layerCount, setLayerCount] = useState(1);
   const [activeLayer, setActiveLayer] = useState(0);
 
+  // When loaded data arrives (DB strokes or placed items), auto-expand layerCount
+  // so all layers that have content become visible without requiring a manual "add layer".
+  useEffect(() => {
+    const maxStroke = dbStrokes.reduce((m, s) => Math.max(m, s.layerIndex ?? 0), 0);
+    const maxItem = placedItems.reduce((m, i) => Math.max(m, i.layerIndex ?? 0), 0);
+    const needed = Math.min(5, Math.max(maxStroke, maxItem) + 1);
+    setLayerCount((prev) => Math.max(prev, needed));
+  }, [dbStrokes, placedItems]);
+
 
   const handleMoveLayerUp = useCallback((layerIdx: number) => {
     if (layerIdx >= layerCount - 1) return;
-    // Swap items between layerIdx and layerIdx + 1
-    const itemsAbove = placedItems.filter((i) => (i.layerIndex ?? 0) === layerIdx + 1);
-    const itemsBelow = placedItems.filter((i) => (i.layerIndex ?? 0) === layerIdx);
-    
-    itemsAbove.forEach((item) => {
-      updatePlacedItem(item.id, { layerIndex: layerIdx });
-    });
-    itemsBelow.forEach((item) => {
-      updatePlacedItem(item.id, { layerIndex: layerIdx + 1 });
-    });
-    
-    // Update active layer if it was the one being moved
-    if (activeLayer === layerIdx) {
-      setActiveLayer(layerIdx + 1);
-    } else if (activeLayer === layerIdx + 1) {
-      setActiveLayer(layerIdx);
-    }
+    const target = layerIdx + 1;
+    // Swap items
+    placedItems
+      .filter((i) => (i.layerIndex ?? 0) === target)
+      .forEach((item) => updatePlacedItem(item.id, { layerIndex: layerIdx }));
+    placedItems
+      .filter((i) => (i.layerIndex ?? 0) === layerIdx)
+      .forEach((item) => updatePlacedItem(item.id, { layerIndex: target }));
+    // Swap strokes inside the canvas
+    canvasRef.current?.swapStrokeLayers(layerIdx, target);
+    // Keep active layer tracking in sync
+    if (activeLayer === layerIdx) setActiveLayer(target);
+    else if (activeLayer === target) setActiveLayer(layerIdx);
   }, [layerCount, placedItems, updatePlacedItem, activeLayer]);
 
   const handleMoveLayerDown = useCallback((layerIdx: number) => {
     if (layerIdx <= 0) return;
-    // Swap items between layerIdx and layerIdx - 1
-    const itemsAbove = placedItems.filter((i) => (i.layerIndex ?? 0) === layerIdx);
-    const itemsBelow = placedItems.filter((i) => (i.layerIndex ?? 0) === layerIdx - 1);
-    
-    itemsAbove.forEach((item) => {
-      updatePlacedItem(item.id, { layerIndex: layerIdx - 1 });
-    });
-    itemsBelow.forEach((item) => {
-      updatePlacedItem(item.id, { layerIndex: layerIdx });
-    });
-    
-    // Update active layer if it was the one being moved
-    if (activeLayer === layerIdx) {
-      setActiveLayer(layerIdx - 1);
-    } else if (activeLayer === layerIdx - 1) {
-      setActiveLayer(layerIdx);
-    }
+    const target = layerIdx - 1;
+    // Swap items
+    placedItems
+      .filter((i) => (i.layerIndex ?? 0) === layerIdx)
+      .forEach((item) => updatePlacedItem(item.id, { layerIndex: target }));
+    placedItems
+      .filter((i) => (i.layerIndex ?? 0) === target)
+      .forEach((item) => updatePlacedItem(item.id, { layerIndex: layerIdx }));
+    // Swap strokes inside the canvas
+    canvasRef.current?.swapStrokeLayers(layerIdx, target);
+    // Keep active layer tracking in sync
+    if (activeLayer === layerIdx) setActiveLayer(target);
+    else if (activeLayer === target) setActiveLayer(layerIdx);
   }, [placedItems, updatePlacedItem, activeLayer]);
 
 
-  const handleExport = useCallback(() => {
+  const runExport = useCallback((cropRegion?: CropRegion) => {
     if (!canvasRef.current || isExporting) return;
     setIsExporting(true);
-    exportCanvas(canvasRef.current, placedItems, "mochimail_letter")
+    setExportModalOpen(false);
+    exportCanvas(canvasRef.current, placedItems, "mochimail_letter", 3000, cropRegion, staticFormat)
       .then(() => toast("Canvas saved!", { icon: "save" }))
       .catch(() => toast("Export failed — try again", { variant: "error", icon: "warning" }))
       .finally(() => setIsExporting(false));
     trackCanvasExport();
   }, [placedItems, isExporting, trackCanvasExport]);
 
-  const [triggerOpenAssets, setTriggerOpenAssets] = useState(0);
+  const handleExport = useCallback(() => {
+    if (isExporting) return;
+    setExportModalOpen(true);
+  }, [isExporting]);
+
+  const handleExportWhole = useCallback(() => {
+    runExport();
+  }, [runExport]);
+
+  const handleSelectRegion = useCallback(() => {
+    setExportModalOpen(false);
+    setSelectingRegion(true);
+  }, []);
+
+  const handleRegionConfirm = useCallback((region: CropRegion) => {
+    setSelectingRegion(false);
+    runExport(region);
+  }, [runExport]);
 
   const handleStoreAddToAssets = useCallback(
     (item: StoreItem) => {
@@ -355,9 +383,7 @@ export default function Home() {
           item.fontData.glyphHeight,
         );
       trackItemAdded(item.id, item.type, item.name);
-      toast(`${item.name} added to your studio!`, { icon: "sparkle" });
-      setActiveTab("studio");
-      setTriggerOpenAssets((n) => n + 1);
+      toast(`${item.name} added to your assets!`, { icon: "sparkle" });
     },
     [addSticker, addWashiTape, addPaper, addStamp, addEnvelope, addCustomFont, setSelectedPaper, trackItemAdded],
   );
@@ -381,50 +407,70 @@ export default function Home() {
     [account.viewer, store, trackItemPublished],
   );
 
-  // ── Canvas zoom (Ctrl+wheel / pinch) — optimized with RAF throttling ──────
-  const pinchStateRef = useRef<{
-    startDist: number;
-    startZoom: number;
-    centerX: number;
-    centerY: number;
-    initialScrollLeft: number;
-    initialScrollTop: number;
-  } | null>(null);
-  
-  // Use refs for smooth zoom animation without React re-renders
+  // ── Canvas zoom (Ctrl+wheel / pinch) ─────────────────────────────────────
   const zoomStateRef = useRef({ current: 1, target: 1, isAnimating: false });
   const canvasWorldRef = useRef<HTMLDivElement>(null);
+  const canvasOuterRef = useRef<HTMLDivElement>(null);
   const zoomRafRef = useRef<number | null>(null);
-  const gestureStartDistRef = useRef(0);
-  const gestureStartZoomRef = useRef(1);
-  const gestureCenterRef = useRef({ x: 0, y: 0 });
-  const gestureScrollRef = useRef({ left: 0, top: 0 });
+  const momentumVelRef = useRef({ x: 0, y: 0 });
+  const momentumRafRef = useRef<number | null>(null);
+  const zoomDisplayThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPinchRef = useRef<{
+    scaleDelta: number; prevCx: number; prevCy: number; cx: number; cy: number;
+  } | null>(null);
+  const pinchRafRef = useRef<number | null>(null);
+  const isPinchingRef = useRef(false);
 
-  // Apply zoom using CSS transform for GPU acceleration (no React render)
-  const applyZoomTransform = useCallback((zoom: number, centerX?: number, centerY?: number) => {
+  /**
+   * Apply zoom + optional pan in one atomic DOM update.
+   *
+   * prevCx/prevCy = the screen point that should remain visible (old centroid).
+   * cx/cy         = where that world-point should appear after the transform (new centroid).
+   * For button-zoom (no pan) pass the same value for both pairs.
+   *
+   * Formula:  S_new = focal * Z_new - vx_new
+   * where focal = (S_old + vx_prev) / Z_old  (world coord under old centroid)
+   */
+  const applyZoomTransform = useCallback((
+    zoom: number,
+    cx?: number, cy?: number,
+    prevCx?: number, prevCy?: number,
+  ) => {
     const worldEl = canvasWorldRef.current;
+    const outerEl = canvasOuterRef.current;
     const scrollEl = studioScrollRef.current;
-    if (!worldEl || !scrollEl) return;
+    if (!worldEl || !outerEl || !scrollEl) return;
 
-    // Use CSS transform for GPU-accelerated zooming
+    let newScrollLeft = scrollEl.scrollLeft;
+    let newScrollTop  = scrollEl.scrollTop;
+
+    if (cx !== undefined && cy !== undefined) {
+      const rect     = scrollEl.getBoundingClientRect();
+      const vx       = cx      - rect.left;
+      const vy       = cy      - rect.top;
+      const vxPrev   = (prevCx ?? cx) - rect.left;
+      const vyPrev   = (prevCy ?? cy) - rect.top;
+      const prevZoom = zoomStateRef.current.current;
+
+      // World point that was under the previous centroid
+      const focalX = (scrollEl.scrollLeft + vxPrev) / prevZoom;
+      const focalY = (scrollEl.scrollTop  + vyPrev) / prevZoom;
+
+      // Place that world point under the new centroid
+      newScrollLeft = focalX * zoom - vx;
+      newScrollTop  = focalY * zoom - vy;
+    }
+
     worldEl.style.transform = `scale(${zoom})`;
     worldEl.style.transformOrigin = "top left";
-    
-    // Adjust container size to match zoom
-    const scaledW = CANVAS_W * zoom;
-    const scaledH = CANVAS_H * zoom;
-    worldEl.style.width = `${scaledW}px`;
-    worldEl.style.height = `${scaledH}px`;
-    
-    // Keep focal point stable if center coordinates provided
-    if (centerX !== undefined && centerY !== undefined) {
-      const rect = scrollEl.getBoundingClientRect();
-      const viewportX = centerX - rect.left;
-      const viewportY = centerY - rect.top;
-      const focalWorldX = (scrollEl.scrollLeft + viewportX) / zoomStateRef.current.current;
-      const focalWorldY = (scrollEl.scrollTop + viewportY) / zoomStateRef.current.current;
-      scrollEl.scrollLeft = focalWorldX * zoom - viewportX;
-      scrollEl.scrollTop = focalWorldY * zoom - viewportY;
+    outerEl.style.width  = `${CANVAS_W * zoom}px`;
+    outerEl.style.height = `${CANVAS_H * zoom}px`;
+
+    if (cx !== undefined && cy !== undefined) {
+      const maxLeft = Math.max(0, CANVAS_W * zoom - scrollEl.clientWidth);
+      const maxTop  = Math.max(0, CANVAS_H * zoom - scrollEl.clientHeight);
+      scrollEl.scrollLeft = Math.max(0, Math.min(maxLeft, newScrollLeft));
+      scrollEl.scrollTop  = Math.max(0, Math.min(maxTop,  newScrollTop));
     }
   }, []);
 
@@ -490,151 +536,74 @@ export default function Home() {
     setZoomSmooth(1);
   }, [setZoomSmooth]);
 
+  const startMomentum = useCallback((velX: number, velY: number) => {
+    isPinchingRef.current = false;
+    // Sync scroll position back to React state now that the gesture is done
+    const syncEl = studioScrollRef.current;
+    if (syncEl) setScrollPos({ left: syncEl.scrollLeft, top: syncEl.scrollTop });
+    if (momentumRafRef.current) cancelAnimationFrame(momentumRafRef.current);
+    momentumVelRef.current = { x: -velX, y: -velY };
+    const DECAY = 0.93;
+    const MIN_VEL = 0.4;
+    const tick = () => {
+      const el = studioScrollRef.current;
+      if (!el) { momentumRafRef.current = null; return; }
+      const { x, y } = momentumVelRef.current;
+      if (Math.abs(x) < MIN_VEL && Math.abs(y) < MIN_VEL) {
+        momentumRafRef.current = null;
+        return;
+      }
+      const zoom = zoomStateRef.current.current;
+      const maxLeft = Math.max(0, CANVAS_W * zoom - el.clientWidth);
+      const maxTop  = Math.max(0, CANVAS_H * zoom - el.clientHeight);
+      el.scrollLeft = Math.max(0, Math.min(maxLeft, el.scrollLeft + x));
+      el.scrollTop  = Math.max(0, Math.min(maxTop,  el.scrollTop  + y));
+      momentumVelRef.current = { x: x * DECAY, y: y * DECAY };
+      momentumRafRef.current = requestAnimationFrame(tick);
+    };
+    momentumRafRef.current = requestAnimationFrame(tick);
+  }, []);
+
   useEffect(() => {
     if (activeTab !== "studio") return;
     const el = studioScrollRef.current;
     if (!el) return;
 
-    // Wheel zoom with Ctrl/Meta - throttled with RAF
-    let wheelTimeout: ReturnType<typeof setTimeout> | null = null;
-    let accumulatedDelta = 0;
-    
     const onWheel = (e: WheelEvent) => {
-      // Normal scroll (no modifier) - let browser handle it natively
-      if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-        return;
-      }
-      
+      if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      
-      // Accumulate delta for smooth zooming
-      accumulatedDelta += -e.deltaY * 0.002;
-      
-      if (wheelTimeout) {
-        clearTimeout(wheelTimeout);
-      } else {
-        // First wheel event - capture focal point
-        const rect = el.getBoundingClientRect();
-        gestureCenterRef.current = { x: e.clientX, y: e.clientY };
-        gestureScrollRef.current = { left: el.scrollLeft, top: el.scrollTop };
-      }
-      
-      wheelTimeout = setTimeout(() => {
-        const rect = el.getBoundingClientRect();
-        const viewportX = gestureCenterRef.current.x - rect.left;
-        const viewportY = gestureCenterRef.current.y - rect.top;
-        const focalWorldX = (gestureScrollRef.current.left + viewportX) / zoomStateRef.current.target;
-        const focalWorldY = (gestureScrollRef.current.top + viewportY) / zoomStateRef.current.target;
-        
-        const newZoom = Math.min(3, Math.max(0.25, zoomStateRef.current.target * (1 + accumulatedDelta)));
-        setZoomSmooth(newZoom, gestureCenterRef.current.x, gestureCenterRef.current.y);
-        
-        accumulatedDelta = 0;
-        wheelTimeout = null;
-      }, 16); // One frame delay for batching
-    };
-
-    // Touch pinch zoom - optimized
-    const getTouchDistance = (t1: Touch, t2: Touch) => {
-      const dx = t2.clientX - t1.clientX;
-      const dy = t2.clientY - t1.clientY;
-      return Math.sqrt(dx * dx + dy * dy);
-    };
-
-    const getTouchCenter = (t1: Touch, t2: Touch) => ({
-      x: (t1.clientX + t2.clientX) / 2,
-      y: (t1.clientY + t2.clientY) / 2,
-    });
-
-    const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 2) {
-        e.preventDefault();
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        const center = getTouchCenter(t1, t2);
-        gestureStartDistRef.current = getTouchDistance(t1, t2);
-        gestureStartZoomRef.current = zoomStateRef.current.target;
-        gestureCenterRef.current = center;
-        gestureScrollRef.current = { left: el.scrollLeft, top: el.scrollTop };
-        pinchStateRef.current = {
-          startDist: gestureStartDistRef.current,
-          startZoom: gestureStartZoomRef.current,
-          centerX: center.x,
-          centerY: center.y,
-          initialScrollLeft: el.scrollLeft,
-          initialScrollTop: el.scrollTop,
-        };
-      }
-    };
-
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 2 && pinchStateRef.current) {
-        e.preventDefault();
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        
-        const newDist = getTouchDistance(t1, t2);
-        const scale = newDist / pinchStateRef.current.startDist;
-        const nextZoom = Math.min(3, Math.max(0.25, pinchStateRef.current.startZoom * scale));
-        
-        const currentCenter = getTouchCenter(t1, t2);
-        
-        // Apply zoom immediately for responsive pinch
-        zoomStateRef.current.target = nextZoom;
-        if (!zoomStateRef.current.isAnimating) {
-          zoomStateRef.current.current = nextZoom;
-          applyZoomTransform(nextZoom, currentCenter.x, currentCenter.y);
-        }
-      }
-    };
-
-    const onTouchEnd = () => {
-      if (pinchStateRef.current) {
-        // Sync final zoom to React state
-        setCanvasZoom(zoomStateRef.current.target);
-        pinchStateRef.current = null;
-      }
-    };
-
-    // Legacy Safari gesture events (backup for older iOS)
-    const onGestureStart = (e: Event) => {
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      gestureStartZoomRef.current = zoomStateRef.current.target;
-      gestureCenterRef.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      gestureScrollRef.current = { left: el.scrollLeft, top: el.scrollTop };
-    };
-    
-    const onGestureChange = (e: Event) => {
-      e.preventDefault();
-      const ge = e as unknown as { scale: number };
-      if (typeof ge.scale === "number") {
-        const nextZoom = Math.min(3, Math.max(0.25, gestureStartZoomRef.current * ge.scale));
-        setZoomSmooth(nextZoom, gestureCenterRef.current.x, gestureCenterRef.current.y);
+      // Stop any ongoing inertia — user is actively zooming
+      if (momentumRafRef.current) { cancelAnimationFrame(momentumRafRef.current); momentumRafRef.current = null; }
+      // Normalize pixel vs line delta; clamp to cap per-event zoom jumps
+      const raw = e.deltaMode === 1 ? e.deltaY * 8 : e.deltaY;
+      const delta = Math.max(-80, Math.min(80, raw));
+      // Exponential scale: symmetric (zoom in 3× then out 3× = identity) and feels natural
+      const factor = Math.exp(-delta * 0.004);
+      const newZoom = Math.min(3, Math.max(0.25, zoomStateRef.current.current * factor));
+      applyZoomTransform(newZoom, e.clientX, e.clientY, e.clientX, e.clientY);
+      zoomStateRef.current.current = newZoom;
+      zoomStateRef.current.target = newZoom;
+      zoomStateRef.current.isAnimating = false;
+      // Throttle React re-render — only used for the display %, doesn't affect rendering
+      if (!zoomDisplayThrottleRef.current) {
+        zoomDisplayThrottleRef.current = setTimeout(() => {
+          setCanvasZoom(zoomStateRef.current.current);
+          zoomDisplayThrottleRef.current = null;
+        }, 80);
       }
     };
 
     el.addEventListener("wheel", onWheel, { passive: false });
-    el.addEventListener("touchstart", onTouchStart, { passive: false });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
-    el.addEventListener("touchend", onTouchEnd);
-    el.addEventListener("touchcancel", onTouchEnd);
-    el.addEventListener("gesturestart", onGestureStart, { passive: false } as EventListenerOptions);
-    el.addEventListener("gesturechange", onGestureChange, { passive: false } as EventListenerOptions);
-    
     return () => {
-      if (zoomRafRef.current) {
-        cancelAnimationFrame(zoomRafRef.current);
-      }
+      if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
+      if (momentumRafRef.current) { cancelAnimationFrame(momentumRafRef.current); momentumRafRef.current = null; }
+      if (pinchRafRef.current) { cancelAnimationFrame(pinchRafRef.current); pinchRafRef.current = null; }
+      if (zoomDisplayThrottleRef.current) { clearTimeout(zoomDisplayThrottleRef.current); zoomDisplayThrottleRef.current = null; }
+      isPinchingRef.current = false;
+      pendingPinchRef.current = null;
       el.removeEventListener("wheel", onWheel);
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
-      el.removeEventListener("touchend", onTouchEnd);
-      el.removeEventListener("touchcancel", onTouchEnd);
-      el.removeEventListener("gesturestart", onGestureStart);
-      el.removeEventListener("gesturechange", onGestureChange);
     };
-  }, [activeTab, applyZoomTransform, setZoomSmooth]);
+  }, [activeTab, applyZoomTransform]);
 
   // ── Infinite canvas scroll ────────────────────────────────────────────────
 
@@ -685,14 +654,22 @@ export default function Home() {
     const centerTop = Math.max(0, Math.floor((CANVAS_H - el.clientHeight) / 2));
 
     const onScroll = () => {
+      // Skip during active pinch — scroll is set programmatically every frame
+      if (isPinchingRef.current) return;
       const maxLeft = Math.max(0, CANVAS_W - el.clientWidth);
       const maxTop = Math.max(0, CANVAS_H - el.clientHeight);
       let dx = 0;
       let dy = 0;
-      if (el.scrollLeft < thresholdX || el.scrollLeft > maxLeft - thresholdX)
-        dx = centerLeft - el.scrollLeft;
-      if (el.scrollTop < thresholdY || el.scrollTop > maxTop - thresholdY)
-        dy = centerTop - el.scrollTop;
+      // shiftContent math uses unzoomed CANVAS_W — only valid at 1:1 zoom.
+      // At any other zoom level the scroll range is CANVAS_W*zoom, so the thresholds
+      // fire at the wrong scroll positions and shift pixel data into the wrong location.
+      const atNativeZoom = Math.abs(zoomStateRef.current.current - 1) < 0.01;
+      if (atNativeZoom) {
+        if (el.scrollLeft < thresholdX || el.scrollLeft > maxLeft - thresholdX)
+          dx = centerLeft - el.scrollLeft;
+        if (el.scrollTop < thresholdY || el.scrollTop > maxTop - thresholdY)
+          dy = centerTop - el.scrollTop;
+      }
 
       if (dx !== 0 || dy !== 0) {
         canvasRef.current?.shiftContent(dx, dy);
@@ -868,10 +845,12 @@ export default function Home() {
         <RoomControl
           phase={roomPhase}
           isPublic={roomIsPublic}
+          hasPassword={roomHasPassword}
           isOwner={roomIsOwner}
           shareUrl={mounted ? globalThis.location?.href ?? "" : ""}
           error={roomError}
           onTogglePublic={setRoomPublic}
+          onSetPassword={setRoomPassword}
         />
 
         {/* Edge pointers for off-screen collaborators */}
@@ -964,8 +943,9 @@ export default function Home() {
           })}
 
         {/* Scrollable infinite canvas */}
-        <div ref={studioScrollRef} className="h-full w-full overflow-auto" style={{ touchAction: "pan-x pan-y pinch-zoom" }}>
+        <div ref={studioScrollRef} className="h-full w-full overflow-auto" style={{ touchAction: "none" }}>
           <div
+            ref={canvasOuterRef}
             className="relative"
             style={{
               width: CANVAS_W,
@@ -983,6 +963,40 @@ export default function Home() {
             >
             <DrawingCanvas
               ref={canvasRef}
+              onPinchZoom={(scaleDelta, prevCx, prevCy, cx, cy) => {
+                isPinchingRef.current = true;
+                if (momentumRafRef.current) { cancelAnimationFrame(momentumRafRef.current); momentumRafRef.current = null; }
+
+                // iOS fires one pointermove per finger, so we may get 2 calls per display
+                // frame. Accumulate them and apply a single DOM update in the next RAF to
+                // avoid the intermediate (stale-pointer) state causing a visible jump.
+                if (pendingPinchRef.current) {
+                  // Combine with queued update: multiply scale deltas, advance centroid
+                  pendingPinchRef.current.scaleDelta *= scaleDelta;
+                  pendingPinchRef.current.cx = cx;
+                  pendingPinchRef.current.cy = cy;
+                } else {
+                  pendingPinchRef.current = { scaleDelta, prevCx, prevCy, cx, cy };
+                  pinchRafRef.current = requestAnimationFrame(() => {
+                    pinchRafRef.current = null;
+                    const p = pendingPinchRef.current;
+                    if (!p) return;
+                    pendingPinchRef.current = null;
+                    const next = Math.min(3, Math.max(0.25, zoomStateRef.current.current * p.scaleDelta));
+                    applyZoomTransform(next, p.cx, p.cy, p.prevCx, p.prevCy);
+                    zoomStateRef.current.current = next;
+                    zoomStateRef.current.target = next;
+                    zoomStateRef.current.isAnimating = false;
+                    if (!zoomDisplayThrottleRef.current) {
+                      zoomDisplayThrottleRef.current = setTimeout(() => {
+                        setCanvasZoom(zoomStateRef.current.current);
+                        zoomDisplayThrottleRef.current = null;
+                      }, 80);
+                    }
+                  });
+                }
+              }}
+              onPinchGestureEnd={startMomentum}
               brushSettings={brushSettings}
               placedItems={placedItems}
               selectedAsset={selectedAsset}
@@ -1102,45 +1116,79 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Zoom controls */}
+        {/* Export modal */}
+        {exportModalOpen && (
+          <ExportModal
+            isExporting={isExporting}
+            hasAnimation={placedItems.some((p) => p.isAnimated)}
+            staticFormat={staticFormat}
+            onStaticFormatChange={setStaticFormat}
+            onExportWhole={handleExportWhole}
+            onSelectRegion={handleSelectRegion}
+            onClose={() => setExportModalOpen(false)}
+          />
+        )}
+
+        {/* Region selector overlay */}
+        {selectingRegion && studioScrollRef.current && (
+          <CanvasRegionSelector
+            scrollEl={studioScrollRef.current}
+            zoom={zoomStateRef.current.current}
+            onZoom={(deltaY, deltaMode, clientX, clientY) => {
+              const raw = deltaMode === 1 ? deltaY * 8 : deltaY;
+              const delta = Math.max(-80, Math.min(80, raw));
+              const factor = Math.exp(-delta * 0.004);
+              const newZoom = Math.min(3, Math.max(0.25, zoomStateRef.current.current * factor));
+              applyZoomTransform(newZoom, clientX, clientY, clientX, clientY);
+              zoomStateRef.current.current = newZoom;
+              zoomStateRef.current.target = newZoom;
+              zoomStateRef.current.isAnimating = false;
+              setCanvasZoom(newZoom);
+            }}
+            onConfirm={handleRegionConfirm}
+            onCancel={() => setSelectingRegion(false)}
+          />
+        )}
+
+        {/* Zoom controls — horizontal pill, bottom-left */}
         <div
-          className="pointer-events-auto absolute bottom-20 right-4 z-50 flex flex-col items-center gap-1 rounded-2xl p-1.5"
+          className="pointer-events-auto absolute z-50 flex items-center gap-0.5 rounded-2xl p-1.5"
           style={{
-            background: "rgba(255,255,255,0.95)",
+            left: "calc(4.5rem + env(safe-area-inset-left, 0px))",
+            bottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))",
+            background: "rgba(255,255,255,0.96)",
             border: "1px solid rgba(186,156,214,0.3)",
             boxShadow: "0 2px 12px rgba(0,0,0,0.12)",
             backdropFilter: "blur(10px)",
           }}
         >
           <button
-            onClick={zoomIn}
-            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold transition-all hover:scale-105"
-            style={{ color: "var(--muted-strong)" }}
-            title="Zoom in (+)"
-          >
-            +
-          </button>
-          
-          <div className="flex h-8 items-center justify-center">
-            <span className="text-[11px] font-semibold tabular-nums" style={{ color: "var(--muted-strong)" }}>
-              {Math.round(canvasZoom * 100)}%
-            </span>
-          </div>
-          
-          <button
             onClick={zoomOut}
-            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold transition-all hover:scale-105"
+            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold"
             style={{ color: "var(--muted-strong)" }}
             title="Zoom out (-)"
           >
             −
           </button>
-          
-          <div className="my-0.5 h-px w-5 bg-[rgba(186,156,214,0.3)]" />
-          
+
+          <span className="min-w-12 text-center text-[11px] font-semibold tabular-nums" style={{ color: "var(--muted-strong)" }}>
+            {Math.round(canvasZoom * 100)}%
+          </span>
+
+          <button
+            onClick={zoomIn}
+            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold"
+            style={{ color: "var(--muted-strong)" }}
+            title="Zoom in (+)"
+          >
+            +
+          </button>
+
+          <div className="mx-0.5 h-5 w-px bg-[rgba(186,156,214,0.3)]" />
+
           <button
             onClick={zoomReset}
-            className="btn-smooth flex h-7 w-8 items-center justify-center rounded-lg text-[10px] font-bold"
+            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-[13px] font-bold"
             style={{ background: canvasZoom !== 1 ? "rgba(167,139,250,0.15)" : "transparent", color: "#6d28d9" }}
             title="Reset zoom (100%)"
             disabled={canvasZoom === 1}
@@ -1198,7 +1246,6 @@ export default function Home() {
           onClear={() => { canvasRef.current?.clearCanvas(); clearDbStrokes(); }}
           onExport={handleExport}
           isExporting={isExporting}
-          triggerOpenAssets={triggerOpenAssets}
           stickers={stickers}
           washiTapes={washiTapes}
           papers={papers}
@@ -1389,9 +1436,10 @@ export default function Home() {
             setFilterType={store.setFilterType}
             searchQuery={store.searchQuery}
             setSearchQuery={store.setSearchQuery}
-            isInCollection={store.isInCollection}
-            addToCollection={store.addToCollection}
-            removeFromCollection={store.removeFromCollection}
+            sortBy={store.sortBy}
+            setSortBy={store.setSortBy}
+            likedItemIds={store.likedItemIds}
+            onLike={store.toggleLike}
             onAddToAssets={handleStoreAddToAssets}
             userStickers={stickers}
             userWashiTapes={washiTapes}

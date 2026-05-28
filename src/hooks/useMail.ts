@@ -3,8 +3,9 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { generateId } from "@/lib/id";
 import { Letter, DELIVERY_SPEEDS, LetterSendPayload, ViewerIdentity } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { Json } from "@/types/database";
+import type { Database } from "@/types/database";
 
+type LetterRow = Database["public"]["Tables"]["letters"]["Row"];
 
 function normalizeName(user: ViewerIdentity): string {
   return user.name?.trim() || user.username?.trim() || "Guest";
@@ -24,90 +25,89 @@ function loadLetters(storageKey: string): Letter[] {
   try {
     const raw = localStorage.getItem(storageKey);
     return raw ? (JSON.parse(raw) as Letter[]) : [];
-  } catch (err) {
-    console.error("[useMail] Failed to load letters from localStorage:", err);
+  } catch {
     return [];
   }
 }
 
 function saveLetters(storageKey: string, letters: Letter[]) {
   if (!globalThis.window) return;
-  try { localStorage.setItem(storageKey, JSON.stringify(letters)); } catch (err) { console.warn("[useMail] localStorage quota exceeded:", err); }
+  try { localStorage.setItem(storageKey, JSON.stringify(letters)); } catch { /* quota */ }
+}
+
+function rowToLetter(row: LetterRow): Letter {
+  return {
+    id: row.id,
+    senderId: row.sender_id,
+    senderName: row.sender_name,
+    receiverId: row.receiver_id ?? row.receiver_username,
+    receiverName: row.receiver_name,
+    imageData: row.image_data,
+    envelopeImageData: row.envelope_image_data ?? undefined,
+    envelopeName: row.envelope_name ?? undefined,
+    stampImageData: row.stamp_image_data ?? undefined,
+    stampName: row.stamp_name ?? undefined,
+    stampStyle: row.stamp_style,
+    sentAt: row.sent_at,
+    deliveryDuration: row.delivery_duration,
+    deliverySpeed: row.delivery_speed as Letter["deliverySpeed"],
+    read: row.read,
+  };
 }
 
 export function useMail(user: ViewerIdentity) {
   const [letters, setLetters] = useState<Letter[]>([]);
   const [tick, setTick] = useState(0);
-  const [hydratedRemote, setHydratedRemote] = useState(false);
   const viewerName = normalizeName(user);
   const normalizedUser = useMemo(() => ({ ...user, name: viewerName }), [user, viewerName]);
   const storageKey = useMemo(() => storageKeyFor(user), [user]);
   const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
 
-  useEffect(() => {
-    const local = loadLetters(storageKey);
-    setLetters(local);
+  const fetchLetters = useCallback(async () => {
+    if (!ownerId) return;
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const [{ data: sentData }, { data: inboxData }] = await Promise.all([
+        supabase.from("letters").select("*").eq("sender_id", ownerId).order("sent_at", { ascending: true }),
+        supabase.from("letters").select("*").eq("receiver_id", ownerId).order("sent_at", { ascending: true }),
+      ]);
+      const seen = new Set<string>();
+      const all: Letter[] = [];
+      for (const row of [...(sentData ?? []), ...(inboxData ?? [])]) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id);
+          all.push(rowToLetter(row));
+        }
+      }
+      setLetters(all);
+    } catch (err) {
+      console.error("[useMail] Failed to fetch letters:", err);
+    }
+  }, [ownerId]);
 
+  // Initial load
+  useEffect(() => {
     if (!ownerId) {
-      setHydratedRemote(true);
+      setLetters(loadLetters(storageKey));
       return;
     }
+    void fetchLetters();
+  }, [ownerId, storageKey, fetchLetters]);
 
-    let cancelled = false;
-    const loadRemote = async () => {
-      try {
-        const supabase = createSupabaseBrowserClient();
-        const { data } = await supabase
-          .from("mail_states")
-          .select("payload")
-          .eq("owner_id", ownerId)
-          .maybeSingle();
-
-        if (cancelled) return;
-
-        const remoteLetters = ((data?.payload as { letters?: Letter[] } | null)?.letters ?? null);
-        if (Array.isArray(remoteLetters)) {
-          setLetters(remoteLetters);
-          saveLetters(storageKey, remoteLetters);
-        } else if (local.length > 0) {
-          await supabase
-            .from("mail_states")
-            .upsert({ owner_id: ownerId, payload: ({ letters: local } as unknown as Json), updated_at: new Date().toISOString() }, { onConflict: "owner_id" });
-        }
-      } catch {
-        // Keep local fallback when Supabase is unavailable.
-      } finally {
-        if (!cancelled) setHydratedRemote(true);
-      }
-    };
-
-    void loadRemote();
-    return () => {
-      cancelled = true;
-    };
-  }, [ownerId, storageKey]);
-
+  // Poll every 30s for new incoming letters
   useEffect(() => {
-    if (!hydratedRemote) return;
-    saveLetters(storageKey, letters);
     if (!ownerId) return;
+    const interval = globalThis.setInterval(() => void fetchLetters(), 30_000);
+    return () => globalThis.clearInterval(interval);
+  }, [ownerId, fetchLetters]);
 
-    const timeout = globalThis.setTimeout(() => {
-      void (async () => {
-        try {
-          const supabase = createSupabaseBrowserClient();
-          await supabase
-            .from("mail_states")
-            .upsert({ owner_id: ownerId, payload: ({ letters } as unknown as Json), updated_at: new Date().toISOString() }, { onConflict: "owner_id" });
-        } catch {
-          // Local persistence already succeeded.
-        }
-      })();
-    }, 350);
+  // Persist guest letters to localStorage
+  useEffect(() => {
+    if (ownerId) return;
+    saveLetters(storageKey, letters);
+  }, [letters, ownerId, storageKey]);
 
-    return () => globalThis.clearTimeout(timeout);
-  }, [letters, ownerId, storageKey, hydratedRemote]);
-
+  // Tick to drive delivery progress
   useEffect(() => {
     const interval = globalThis.setInterval(() => setTick((t) => t + 1), 5000);
     return () => globalThis.clearInterval(interval);
@@ -123,13 +123,14 @@ export function useMail(user: ViewerIdentity) {
       envelopeName,
       stampImageData,
       stampName,
-    }: LetterSendPayload) => {
+    }: LetterSendPayload): Letter => {
       const speedConfig = DELIVERY_SPEEDS.find((s) => s.id === speed)!;
+      const receiverUsername = receiverName.toLowerCase().replaceAll(/\s+/g, "_");
       const letter: Letter = {
         id: generateId(),
         senderId: user.id,
         senderName: viewerName,
-        receiverId: receiverName.toLowerCase().replaceAll(/\s+/g, "_"),
+        receiverId: receiverUsername,
         receiverName,
         imageData,
         envelopeImageData,
@@ -142,20 +143,63 @@ export function useMail(user: ViewerIdentity) {
         read: false,
         stampStyle,
       };
+
       setLetters((prev) => [...prev, letter]);
+
+      if (ownerId) {
+        void (async () => {
+          try {
+            const supabase = createSupabaseBrowserClient();
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("id")
+              .eq("username", receiverUsername)
+              .maybeSingle();
+            const receiverId = profile?.id ?? null;
+
+            await supabase.from("letters").insert({
+              id: letter.id,
+              sender_id: ownerId,
+              sender_name: letter.senderName,
+              receiver_id: receiverId,
+              receiver_username: receiverUsername,
+              receiver_name: receiverName,
+              image_data: letter.imageData,
+              envelope_image_data: letter.envelopeImageData ?? null,
+              envelope_name: letter.envelopeName ?? null,
+              stamp_image_data: letter.stampImageData ?? null,
+              stamp_name: letter.stampName ?? null,
+              stamp_style: letter.stampStyle,
+              sent_at: letter.sentAt,
+              delivery_duration: letter.deliveryDuration,
+              delivery_speed: letter.deliverySpeed,
+              read: false,
+            });
+
+            if (receiverId) {
+              setLetters((prev) =>
+                prev.map((l) => (l.id === letter.id ? { ...l, receiverId } : l))
+              );
+            }
+          } catch (err) {
+            console.error("[useMail] Failed to persist letter:", err);
+          }
+        })();
+      }
+
       return letter;
     },
-    [user.id, viewerName]
+    [ownerId, user.id, viewerName]
   );
 
   const isDelivered = useCallback((letter: Letter) => {
     return Date.now() >= letter.sentAt + letter.deliveryDuration;
-  }, [tick]);
+  }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getDeliveryProgress = useCallback((letter: Letter) => {
     const elapsed = Date.now() - letter.sentAt;
     return Math.min(1, elapsed / letter.deliveryDuration);
-  }, [tick]);
+  }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getTimeRemaining = useCallback((letter: Letter) => {
     const remaining = (letter.sentAt + letter.deliveryDuration) - Date.now();
@@ -166,18 +210,26 @@ export function useMail(user: ViewerIdentity) {
     if (hours > 0) return `${hours}h ${minutes}m`;
     if (minutes > 0) return `${minutes}m ${seconds}s`;
     return `${seconds}s`;
-  }, [tick]);
+  }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const markAsRead = useCallback((letterId: string) => {
     setLetters((prev) => prev.map((l) => (l.id === letterId ? { ...l, read: true } : l)));
-  }, []);
+    if (!ownerId) return;
+    void createSupabaseBrowserClient()
+      .from("letters")
+      .update({ read: true })
+      .eq("id", letterId);
+  }, [ownerId]);
 
-  const inbox = letters.filter(
-    (letter) =>
-      letter.receiverId === user.id ||
-      safeLower(letter.receiverName) === safeLower(viewerName)
-  );
-  const sent = letters.filter((l) => l.senderId === user.id);
+  const inbox = ownerId
+    ? letters.filter((l) => l.receiverId === ownerId)
+    : letters.filter(
+        (l) =>
+          l.receiverId === user.id ||
+          safeLower(l.receiverName) === safeLower(viewerName)
+      );
+
+  const sent = letters.filter((l) => l.senderId === (ownerId ?? user.id));
 
   return {
     user: normalizedUser,

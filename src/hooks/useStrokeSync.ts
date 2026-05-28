@@ -15,6 +15,7 @@ export type SyncStroke = {
   color: string;
   size: number;
   pts: [number, number, number][];
+  layerIndex?: number;
 };
 
 type LiveStrokePayload = {
@@ -25,6 +26,7 @@ type LiveStrokePayload = {
   size: number;
   tool: "pen" | "eraser";
   isLast: boolean;
+  layerIndex?: number;
 };
 
 type BoardUpdatePayload = {
@@ -262,13 +264,28 @@ export function useStrokeSync({
         }
       } else if (rows?.length) {
         // Store DB strokes in state so DrawingCanvas can render them properly
-        const loadedStrokes: SyncStroke[] = rows.map(row => ({
-          id: row.id,
-          tool: row.tool === "eraser" ? "eraser" : "pen",
-          color: row.color ?? "#000000",
-          size: row.size ?? 4,
-          pts: ((row.points as unknown) ?? []) as [number, number, number][],
-        }));
+        const loadedStrokes: SyncStroke[] = rows.map(row => {
+          const raw = row.points as unknown;
+          let pts: [number, number, number][];
+          let layerIndex = 0;
+          if (Array.isArray(raw)) {
+            pts = raw as [number, number, number][];
+          } else if (raw && typeof raw === "object" && "pts" in (raw as object)) {
+            const wrapped = raw as { v?: number; l?: number; pts: unknown };
+            pts = (wrapped.pts as [number, number, number][]) ?? [];
+            layerIndex = wrapped.l ?? 0;
+          } else {
+            pts = [];
+          }
+          return {
+            id: row.id,
+            tool: row.tool === "eraser" ? "eraser" : "pen",
+            color: row.color ?? "#000000",
+            size: row.size ?? 4,
+            pts,
+            layerIndex,
+          };
+        });
         setDbStrokes(loadedStrokes);
         for (const stroke of loadedStrokes) {
           renderedStrokeIdsRef.current.add(stroke.id);
@@ -310,13 +327,14 @@ export function useStrokeSync({
           remoteActiveStrokesRef.current.delete(data.artistId);
           renderedStrokeIdsRef.current.add(data.strokeId);
           if (acc) {
-            // Store the completed stroke so DrawingCanvas can render it
+            // Store the completed stroke so DrawingCanvas can render it in the correct layer
             setRemoteCompletedStrokes(prev => [...prev, {
               id: data.strokeId,
               tool: acc.tool,
               color: acc.color,
               size: acc.size,
               pts: acc.allPts,
+              layerIndex: data.layerIndex ?? 0,
             }]);
             commitAccToCanvas(canvasRef, acc, data.strokeId);
           }
@@ -455,6 +473,7 @@ export function useStrokeSync({
       size: number,
       tool: "pen" | "eraser",
       isLast: boolean,
+      layerIndex = 0,
     ) => {
       const ch = channelRef.current;
       if (!ch) {
@@ -464,7 +483,7 @@ export function useStrokeSync({
       void ch.send({
         type: "broadcast",
         event: "stroke",
-        payload: { artistId: selfIdRef.current, strokeId, pts, color, size, tool, isLast },
+        payload: { artistId: selfIdRef.current, strokeId, pts, color, size, tool, isLast, layerIndex },
       });
     },
     [hasSession, collabScope],
@@ -478,10 +497,16 @@ export function useStrokeSync({
       color: string,
       size: number,
       tool: "pen" | "eraser",
+      layerIndex = 0,
     ) => {
       if (!hasSession || !collabScope || !isSessionReadyRef.current) return;
       renderedStrokeIdsRef.current.add(strokeId);
       const supabase = createSupabaseBrowserClient();
+      // Encode layerIndex into the points payload so it survives a page refresh.
+      // Old strokes stored as plain arrays default to layer 0 on load.
+      const pointsPayload: Json = layerIndex !== 0
+        ? ({ v: 2, l: layerIndex, pts } as unknown as Json)
+        : (pts as unknown as Json);
       const { error } = await supabase.from("board_strokes").insert({
         id: strokeId,
         room_id: collabScope,
@@ -489,8 +514,7 @@ export function useStrokeSync({
         tool,
         color,
         size,
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-        points: pts as unknown as Json,
+        points: pointsPayload,
         seq: Date.now(),
       });
       if (error) {
@@ -525,7 +549,7 @@ export function useStrokeSync({
   // Re-insert a stroke that was previously deleted (called on redo)
   const restoreStroke = useCallback(
     async (stroke: SyncStroke) => {
-      await saveStroke(stroke.id, stroke.pts, stroke.color, stroke.size, stroke.tool);
+      await saveStroke(stroke.id, stroke.pts, stroke.color, stroke.size, stroke.tool, stroke.layerIndex ?? 0);
     },
     [saveStroke],
   );

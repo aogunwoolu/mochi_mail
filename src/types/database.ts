@@ -129,6 +129,48 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["room_members"]["Insert"]>;
         Relationships: [];
       };
+      letters: {
+        Row: {
+          id: string;
+          sender_id: string;
+          sender_name: string;
+          receiver_id: string | null;
+          receiver_username: string;
+          receiver_name: string;
+          image_data: string;
+          envelope_image_data: string | null;
+          envelope_name: string | null;
+          stamp_image_data: string | null;
+          stamp_name: string | null;
+          stamp_style: string;
+          sent_at: number;
+          delivery_duration: number;
+          delivery_speed: string;
+          read: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id: string;
+          sender_id: string;
+          sender_name: string;
+          receiver_id?: string | null;
+          receiver_username: string;
+          receiver_name: string;
+          image_data: string;
+          envelope_image_data?: string | null;
+          envelope_name?: string | null;
+          stamp_image_data?: string | null;
+          stamp_name?: string | null;
+          stamp_style?: string;
+          sent_at: number;
+          delivery_duration: number;
+          delivery_speed: string;
+          read?: boolean;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["letters"]["Insert"]>;
+        Relationships: [];
+      };
       mail_states: {
         Row: {
           owner_id: string;
@@ -169,6 +211,36 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["store_states"]["Insert"]>;
+        Relationships: [];
+      };
+      store_item_stats: {
+        Row: {
+          item_id: string;
+          downloads: number;
+          likes: number;
+          updated_at: string;
+        };
+        Insert: {
+          item_id: string;
+          downloads?: number;
+          likes?: number;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["store_item_stats"]["Insert"]>;
+        Relationships: [];
+      };
+      store_item_likes: {
+        Row: {
+          item_id: string;
+          user_id: string;
+          created_at: string;
+        };
+        Insert: {
+          item_id: string;
+          user_id: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["store_item_likes"]["Insert"]>;
         Relationships: [];
       };
       studio_boards: {
@@ -218,6 +290,14 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      increment_store_downloads: {
+        Args: { p_item_id: string };
+        Returns: void;
+      };
+      toggle_store_like: {
+        Args: { p_item_id: string; p_user_id: string };
+        Returns: number;
+      };
       create_room: {
         Args: {
           p_title: string;

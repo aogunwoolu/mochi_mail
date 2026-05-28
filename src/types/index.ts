@@ -231,6 +231,7 @@ export interface StoreItem {
   authorName: string;
   authorId: string;
   downloads: number;
+  likes: number;
   createdAt: number;
   opacity?: number;
   width: number;
@@ -267,10 +268,10 @@ export const PASTEL_COLORS = [
 
 export const BRUSH_SIZES = [2, 4, 8, 14, 22, 32];
 
-export const DELIVERY_SPEEDS: { id: DeliverySpeed; label: string; duration: number; emoji: string; description: string }[] = [
-  { id: "express", label: "Express", duration: 1000 * 60 * 5, emoji: "⚡", description: "5 minutes" },
-  { id: "standard", label: "Standard", duration: 1000 * 60 * 60, emoji: "✈️", description: "1 hour" },
-  { id: "slow", label: "Snail Mail", duration: 1000 * 60 * 60 * 24, emoji: "🐌", description: "24 hours" },
+export const DELIVERY_SPEEDS: { id: DeliverySpeed; label: string; duration: number; description: string }[] = [
+  { id: "express", label: "Express", duration: 1000 * 60 * 5, description: "5 minutes" },
+  { id: "standard", label: "Standard", duration: 1000 * 60 * 60, description: "1 hour" },
+  { id: "slow", label: "Snail Mail", duration: 1000 * 60 * 60 * 24, description: "24 hours" },
 ];
 
 export const STAMP_STYLES = ["💌", "💝", "🌸", "✨", "🎀", "🌙", "🍡", "🫧"];

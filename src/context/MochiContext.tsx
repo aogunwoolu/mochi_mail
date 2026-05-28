@@ -89,6 +89,10 @@ interface MochiStore {
   setFilterType: (t: StoreItem["type"] | "all") => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
+  sortBy: import("@/hooks/useStore").StoreSortBy;
+  setSortBy: (sort: import("@/hooks/useStore").StoreSortBy) => void;
+  likedItemIds: Set<string>;
+  toggleLike: (id: string) => Promise<void>;
   isInCollection: (id: string) => boolean;
   addToCollection: (id: string) => void;
   removeFromCollection: (id: string) => void;
