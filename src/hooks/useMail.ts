@@ -69,17 +69,17 @@ export function useMail(user: ViewerIdentity) {
     if (!ownerId) return;
     try {
       const supabase = createSupabaseBrowserClient();
-      const queries: Promise<{ data: LetterRow[] | null }>[] = [
+      const base = [
         supabase.from("letters").select("*").eq("sender_id", ownerId).order("sent_at", { ascending: true }),
         supabase.from("letters").select("*").eq("receiver_id", ownerId).order("sent_at", { ascending: true }),
-      ];
+      ] as const;
       // Fallback: catch letters where receiver_id was null at send time (profile didn't exist yet)
-      if (receiverUsername) {
-        queries.push(
-          supabase.from("letters").select("*").is("receiver_id", null).eq("receiver_username", receiverUsername).order("sent_at", { ascending: true })
-        );
-      }
-      const results = await Promise.all(queries);
+      const results = receiverUsername
+        ? await Promise.all([
+            ...base,
+            supabase.from("letters").select("*").is("receiver_id", null).eq("receiver_username", receiverUsername).order("sent_at", { ascending: true }),
+          ])
+        : await Promise.all(base);
       const seen = new Set<string>();
       const all: Letter[] = [];
       for (const { data } of results) {
