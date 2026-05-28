@@ -1969,12 +1969,38 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               zIndex: 10,
             }}
           >
-            Click anywhere to add text · Enter for new line · Ctrl+Enter to finish
+            Tap anywhere to add text · Enter for new line
           </div>
         )}
 
         {textOverlay !== null && (
-          <>
+          <div
+            style={{
+              position: "absolute",
+              left: `${(textOverlay.x / width) * 100}%`,
+              top: `${(textOverlay.y / height) * 100}%`,
+              zIndex: 50,
+              display: "flex",
+              flexDirection: "column",
+              gap: 4,
+            }}
+          >
+            <div
+              className="pointer-events-none"
+              style={{
+                fontSize: 10,
+                color: "rgba(109,40,217,0.7)",
+                fontFamily: "monospace",
+                whiteSpace: "nowrap",
+                background: "rgba(255,255,255,0.85)",
+                borderRadius: 6,
+                padding: "1px 7px",
+                border: "1px solid rgba(167,139,250,0.3)",
+                alignSelf: "flex-start",
+              }}
+            >
+              Enter for new line · Ctrl+Enter to finish
+            </div>
             <textarea
               ref={textareaRef}
               autoFocus
@@ -2002,10 +2028,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 // plain Enter inserts a newline (default textarea behaviour)
               }}
               style={{
-                position: "absolute",
-                left: `${(textOverlay.x / width) * 100}%`,
-                top: `${(textOverlay.y / height) * 100}%`,
-                width: `${Math.max(160, textFontSize * 8 * displayScale)}px`,
+                width: `${Math.max(200, textFontSize * 8 * displayScale)}px`,
                 minHeight: `${Math.max(32, textFontSize * 2 * displayScale)}px`,
                 fontSize: `${Math.max(10, Math.round(textFontSize * displayScale))}px`,
                 fontFamily: textFontFamily,
@@ -2019,29 +2042,58 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 resize: "none",
                 overflow: "hidden",
                 boxShadow: "0 4px 20px rgba(167,139,250,0.25), 0 1px 6px rgba(0,0,0,0.08)",
-                zIndex: 50,
                 whiteSpace: "pre-wrap",
               }}
             />
-            <div
-              className="pointer-events-none absolute"
-              style={{
-                left: `${(textOverlay.x / width) * 100}%`,
-                top: `calc(${(textOverlay.y / height) * 100}% - 22px)`,
-                fontSize: 10,
-                color: "rgba(109,40,217,0.7)",
-                fontFamily: "monospace",
-                whiteSpace: "nowrap",
-                background: "rgba(255,255,255,0.85)",
-                borderRadius: 6,
-                padding: "1px 7px",
-                border: "1px solid rgba(167,139,250,0.3)",
-                zIndex: 50,
-              }}
-            >
-              Ctrl+Enter to finish · Esc to cancel
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  (removePlacedItem ?? removeAnimatedSticker)?.(textOverlay.id);
+                  setTextOverlay(null);
+                  selectItem(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: "10px 0",
+                  borderRadius: 8,
+                  border: "1.5px solid rgba(167,139,250,0.4)",
+                  background: "rgba(255,255,255,0.94)",
+                  color: "rgba(109,40,217,0.8)",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "monospace",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  const txt = textOverlay.value.trim();
+                  if (txt) commitTextBlock(txt, textOverlay.id);
+                  else (removePlacedItem ?? removeAnimatedSticker)?.(textOverlay.id);
+                  setTextOverlay(null);
+                  selectItem(null);
+                }}
+                style={{
+                  flex: 2,
+                  padding: "10px 0",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "rgba(167,139,250,0.85)",
+                  color: "white",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "monospace",
+                }}
+              >
+                Enter ↵
+              </button>
             </div>
-          </>
+          </div>
         )}
       </div>
     );

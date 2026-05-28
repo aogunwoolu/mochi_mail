@@ -63,27 +63,38 @@ export function useMail(user: ViewerIdentity) {
   const storageKey = useMemo(() => storageKeyFor(user), [user]);
   const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
 
+  const receiverUsername = user.username ?? null;
+
   const fetchLetters = useCallback(async () => {
     if (!ownerId) return;
     try {
       const supabase = createSupabaseBrowserClient();
-      const [{ data: sentData }, { data: inboxData }] = await Promise.all([
+      const queries: Promise<{ data: LetterRow[] | null }>[] = [
         supabase.from("letters").select("*").eq("sender_id", ownerId).order("sent_at", { ascending: true }),
         supabase.from("letters").select("*").eq("receiver_id", ownerId).order("sent_at", { ascending: true }),
-      ]);
+      ];
+      // Fallback: catch letters where receiver_id was null at send time (profile didn't exist yet)
+      if (receiverUsername) {
+        queries.push(
+          supabase.from("letters").select("*").is("receiver_id", null).eq("receiver_username", receiverUsername).order("sent_at", { ascending: true })
+        );
+      }
+      const results = await Promise.all(queries);
       const seen = new Set<string>();
       const all: Letter[] = [];
-      for (const row of [...(sentData ?? []), ...(inboxData ?? [])]) {
-        if (!seen.has(row.id)) {
-          seen.add(row.id);
-          all.push(rowToLetter(row));
+      for (const { data } of results) {
+        for (const row of (data ?? [])) {
+          if (!seen.has(row.id)) {
+            seen.add(row.id);
+            all.push(rowToLetter(row));
+          }
         }
       }
       setLetters(all);
     } catch (err) {
       console.error("[useMail] Failed to fetch letters:", err);
     }
-  }, [ownerId]);
+  }, [ownerId, receiverUsername]);
 
   // Initial load
   useEffect(() => {
@@ -94,11 +105,23 @@ export function useMail(user: ViewerIdentity) {
     void fetchLetters();
   }, [ownerId, storageKey, fetchLetters]);
 
-  // Poll every 30s for new incoming letters
+  // Real-time subscription for new letters; fall back to 30s polling if unavailable
   useEffect(() => {
     if (!ownerId) return;
-    const interval = globalThis.setInterval(() => void fetchLetters(), 30_000);
-    return () => globalThis.clearInterval(interval);
+    const supabase = createSupabaseBrowserClient();
+
+    const channel = supabase
+      .channel(`letters:${ownerId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "letters", filter: `receiver_id=eq.${ownerId}` }, () => void fetchLetters())
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "letters", filter: `sender_id=eq.${ownerId}` }, () => void fetchLetters())
+      .subscribe();
+
+    const fallback = globalThis.setInterval(() => void fetchLetters(), 30_000);
+
+    return () => {
+      void supabase.removeChannel(channel);
+      globalThis.clearInterval(fallback);
+    };
   }, [ownerId, fetchLetters]);
 
   // Persist guest letters to localStorage
@@ -222,7 +245,7 @@ export function useMail(user: ViewerIdentity) {
   }, [ownerId]);
 
   const inbox = ownerId
-    ? letters.filter((l) => l.receiverId === ownerId)
+    ? letters.filter((l) => l.receiverId === ownerId || (receiverUsername && l.receiverId === receiverUsername))
     : letters.filter(
         (l) =>
           l.receiverId === user.id ||

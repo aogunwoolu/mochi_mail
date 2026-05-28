@@ -186,6 +186,8 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const rafIdRef = useRef<number | null>(null);
     // Stable ref so handlePointerMove can call handlePointerUp without a dep cycle
     const handlePointerUpRef = useRef<((e?: React.PointerEvent<HTMLCanvasElement>) => void) | null>(null);
+    // Stable ref so the RAF loop always calls the latest renderActiveStroke without recreating renderLoop
+    const renderActiveStrokeRef = useRef<(() => void) | null>(null);
 
     // Full accumulated points for the current stroke — used for broadcasting and DB
     // persistence.  activeStrokePointsRef is trimmed by the freeze algorithm (for
@@ -244,13 +246,16 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       const path = strokeToPath2D(stroke);
 
       if (isEraser) {
+        // Safety guard: if there's no pre-stroke snapshot it means the stroke
+        // was started as a pen and the tool changed mid-stroke.  Applying
+        // destination-out without a snapshot would silently erase the canvas,
+        // so bail out instead.
+        if (!preStrokeSnapshotRef.current) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
-        if (preStrokeSnapshotRef.current) {
-          ctx.putImageData(preStrokeSnapshotRef.current, 0, 0);
-        }
+        ctx.putImageData(preStrokeSnapshotRef.current, 0, 0);
         ctx.save();
         ctx.globalCompositeOperation = "destination-out";
         ctx.fillStyle = "rgba(0,0,0,1)";
@@ -299,6 +304,9 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           streamline: 0.4,
           simulatePressure: false,
         });
+        // Only clear+redraw when there's a path to show — avoids a blank frame
+        // when liveOutline is empty (e.g. stroke is only 1 point so far).
+        if (!liveOutline.length) return;
         activeCtx.clearRect(0, 0, activeCanvas.width, activeCanvas.height);
         activeCtx.save();
         activeCtx.fillStyle = color;
@@ -307,13 +315,18 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       }
     }, [brushSettings]);
 
+    // Keep ref current so the RAF loop always uses the latest brush settings
+    // without needing to restart the loop on every brushSettings change.
+    renderActiveStrokeRef.current = renderActiveStroke;
+
     const renderLoop = useCallback(() => {
       if (strokeDirtyRef.current) {
         strokeDirtyRef.current = false;
-        renderActiveStroke();
+        renderActiveStrokeRef.current?.();
       }
       rafIdRef.current = requestAnimationFrame(renderLoop);
-    }, [renderActiveStroke]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // ── Preload asset images ──────────────────────────────────────────────────
     useEffect(() => {
@@ -1003,9 +1016,13 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       [],
     );
 
-    // ── Cleanup ImageBitmap on unmount ────────────────────────────────────────
+    // ── Cleanup on unmount ────────────────────────────────────────────────────
     useEffect(() => {
       return () => {
+        if (rafIdRef.current !== null) {
+          cancelAnimationFrame(rafIdRef.current);
+          rafIdRef.current = null;
+        }
         sessionBaseRef.current?.close();
         sessionBaseRef.current = null;
       };
