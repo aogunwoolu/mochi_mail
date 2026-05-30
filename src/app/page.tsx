@@ -284,52 +284,62 @@ export default function Home() {
   const [staticFormat, setStaticFormat] = useState<StaticFormat>("png");
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
-  const [layerCount, setLayerCount] = useState(1);
+  // layerOrder maps display position (0=back, last=front) → stable layer id.
+  // Items/strokes carry the stable id in `layerIndex`; reordering only mutates this array.
+  const [layerOrder, setLayerOrder] = useState<number[]>([0]);
+  const [hiddenLayerIds, setHiddenLayerIds] = useState<number[]>([]);
   const [activeLayer, setActiveLayer] = useState(0);
+  const layerCount = layerOrder.length;
 
-  // When loaded data arrives (DB strokes or placed items), auto-expand layerCount
-  // so all layers that have content become visible without requiring a manual "add layer".
+  // When loaded data arrives (DB strokes or placed items), ensure every referenced
+  // layer id is present in layerOrder so its content is visible.
   useEffect(() => {
-    const maxStroke = dbStrokes.reduce((m, s) => Math.max(m, s.layerIndex ?? 0), 0);
-    const maxItem = placedItems.reduce((m, i) => Math.max(m, i.layerIndex ?? 0), 0);
-    const needed = Math.min(5, Math.max(maxStroke, maxItem) + 1);
-    setLayerCount((prev) => Math.max(prev, needed));
+    const referenced = new Set<number>();
+    for (const s of dbStrokes) referenced.add(s.layerIndex ?? 0);
+    for (const i of placedItems) referenced.add(i.layerIndex ?? 0);
+    setLayerOrder((prev) => {
+      const present = new Set(prev);
+      const missing = [...referenced].filter((id) => !present.has(id) && id >= 0 && id < 5).sort((a, b) => a - b);
+      if (!missing.length) return prev;
+      return [...prev, ...missing];
+    });
   }, [dbStrokes, placedItems]);
 
+  const handleAddLayer = useCallback(() => {
+    setLayerOrder((prev) => {
+      if (prev.length >= 5) return prev;
+      for (let id = 0; id < 5; id++) {
+        if (!prev.includes(id)) return [...prev, id];
+      }
+      return prev;
+    });
+  }, []);
 
-  const handleMoveLayerUp = useCallback((layerIdx: number) => {
-    if (layerIdx >= layerCount - 1) return;
-    const target = layerIdx + 1;
-    // Swap items
-    placedItems
-      .filter((i) => (i.layerIndex ?? 0) === target)
-      .forEach((item) => updatePlacedItem(item.id, { layerIndex: layerIdx }));
-    placedItems
-      .filter((i) => (i.layerIndex ?? 0) === layerIdx)
-      .forEach((item) => updatePlacedItem(item.id, { layerIndex: target }));
-    // Swap strokes inside the canvas
-    canvasRef.current?.swapStrokeLayers(layerIdx, target);
-    // Keep active layer tracking in sync
-    if (activeLayer === layerIdx) setActiveLayer(target);
-    else if (activeLayer === target) setActiveLayer(layerIdx);
-  }, [layerCount, placedItems, updatePlacedItem, activeLayer]);
+  const handleMoveLayerUp = useCallback((layerId: number) => {
+    setLayerOrder((prev) => {
+      const i = prev.indexOf(layerId);
+      if (i < 0 || i >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[i], next[i + 1]] = [next[i + 1]!, next[i]!];
+      return next;
+    });
+  }, []);
 
-  const handleMoveLayerDown = useCallback((layerIdx: number) => {
-    if (layerIdx <= 0) return;
-    const target = layerIdx - 1;
-    // Swap items
-    placedItems
-      .filter((i) => (i.layerIndex ?? 0) === layerIdx)
-      .forEach((item) => updatePlacedItem(item.id, { layerIndex: target }));
-    placedItems
-      .filter((i) => (i.layerIndex ?? 0) === target)
-      .forEach((item) => updatePlacedItem(item.id, { layerIndex: layerIdx }));
-    // Swap strokes inside the canvas
-    canvasRef.current?.swapStrokeLayers(layerIdx, target);
-    // Keep active layer tracking in sync
-    if (activeLayer === layerIdx) setActiveLayer(target);
-    else if (activeLayer === target) setActiveLayer(layerIdx);
-  }, [placedItems, updatePlacedItem, activeLayer]);
+  const handleMoveLayerDown = useCallback((layerId: number) => {
+    setLayerOrder((prev) => {
+      const i = prev.indexOf(layerId);
+      if (i <= 0) return prev;
+      const next = [...prev];
+      [next[i], next[i - 1]] = [next[i - 1]!, next[i]!];
+      return next;
+    });
+  }, []);
+
+  const handleToggleLayerVisibility = useCallback((layerId: number) => {
+    setHiddenLayerIds((prev) =>
+      prev.includes(layerId) ? prev.filter((x) => x !== layerId) : [...prev, layerId],
+    );
+  }, []);
 
 
   const runExport = useCallback((cropRegion?: CropRegion) => {
@@ -1015,7 +1025,7 @@ export default function Home() {
                   item.textColor ?? brushSettings.color,
                   item.textSize ?? 32,
                   item.textFont ?? '"Space Mono", monospace',
-                  item.layerIndex ?? layerCount - 1,
+                  item.layerIndex ?? layerOrder[layerOrder.length - 1] ?? 0,
                 );
                 if (placed) broadcastPlacedItemAdd(placed);
                 return placed ?? undefined;
@@ -1031,6 +1041,8 @@ export default function Home() {
               currentDrawingLayer={activeLayer}
               defaultLayerIndex={activeLayer}
               maxLayerIndex={layerCount - 1}
+              layerOrder={layerOrder}
+              hiddenLayerIds={hiddenLayerIds}
               remoteStrokes={remoteCompletedStrokes}
               dbStrokes={dbStrokes}
             />
@@ -1229,8 +1241,10 @@ export default function Home() {
             onDeleteItem={handleRemovePlacedItem}
             onHide={() => setShowLayerPanel(false)}
             align="right"
-            layerCount={layerCount}
-            onLayerCountChange={setLayerCount}
+            layerOrder={layerOrder}
+            hiddenLayerIds={hiddenLayerIds}
+            onAddLayer={handleAddLayer}
+            onToggleLayerVisibility={handleToggleLayerVisibility}
             activeLayer={activeLayer}
             onActiveLayerChange={setActiveLayer}
             onMoveLayerUp={handleMoveLayerUp}

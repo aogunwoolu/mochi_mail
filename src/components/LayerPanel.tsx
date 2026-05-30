@@ -17,22 +17,22 @@ interface LayerPanelProps {
   layerUsers?: Record<number, LayerUser[]>;
   onHide?: () => void;
   align?: "left" | "right";
-  /** Current number of active layers (1–5). */
-  layerCount?: number;
+  /** Display order of stable layer ids — index 0 is back, last is front. */
+  layerOrder?: number[];
+  /** Stable ids of layers currently hidden from rendering. */
+  hiddenLayerIds?: number[];
   /** Called when user adds a new layer. */
-  onLayerCountChange?: (n: number) => void;
-  /** @deprecated Drawing layer isolation removed - drawings now use the same layer system as items */
-  drawingLayerIndex?: number;
-  /** @deprecated Drawing layer isolation removed - drawings now use the same layer system as items */
-  onDrawingLayerChange?: (n: number) => void;
-  /** Currently active layer for drawing and item placement */
+  onAddLayer?: () => void;
+  /** Toggle visibility of a layer by its stable id. */
+  onToggleLayerVisibility?: (layerId: number) => void;
+  /** Currently active layer id for drawing and item placement */
   activeLayer?: number;
   /** Called when user clicks to activate a layer */
   onActiveLayerChange?: (n: number) => void;
-  /** Called when user moves a layer up (increases index) */
-  onMoveLayerUp?: (layerIdx: number) => void;
-  /** Called when user moves a layer down (decreases index) */
-  onMoveLayerDown?: (layerIdx: number) => void;
+  /** Move the given layer id one position toward the front. */
+  onMoveLayerUp?: (layerId: number) => void;
+  /** Move the given layer id one position toward the back. */
+  onMoveLayerDown?: (layerId: number) => void;
 }
 
 const MAX_LAYERS = 5;
@@ -117,15 +117,19 @@ export default function LayerPanel({
   layerUsers = {},
   onHide,
   align = "left",
-  layerCount = 1,
-  onLayerCountChange,
-  drawingLayerIndex = 0,
-  onDrawingLayerChange,
+  layerOrder = [0],
+  hiddenLayerIds = [],
+  onAddLayer,
+  onToggleLayerVisibility,
   activeLayer = 0,
   onActiveLayerChange,
   onMoveLayerUp,
   onMoveLayerDown,
 }: LayerPanelProps) {
+  const layerCount = layerOrder.length;
+  const hiddenSet = new Set(hiddenLayerIds);
+  const topLayerId = layerOrder[layerOrder.length - 1];
+  const backLayerId = layerOrder[0];
   const [collapsed, setCollapsed] = useState(false);
   const [dragOverLayer, setDragOverLayer] = useState<number | null>(null);
   const dragItemIdRef = useRef<string | null>(null);
@@ -143,12 +147,12 @@ export default function LayerPanel({
       ? { position: "absolute", top: 114, right: 10, zIndex: 30 }
       : { position: "absolute", bottom: 12, left: 12, zIndex: 30 };
 
-  // Build the ordered list of rows (top = front).
-  // Layers are rendered high-to-low.
-  type Row = { kind: "layer"; idx: number };
+  // Build the ordered list of rows (top of panel = front of canvas).
+  // Iterate layerOrder from end (front) → start (back) so the visual top is the front layer.
+  type Row = { kind: "layer"; idx: number; pos: number };
   const rows: Row[] = [];
-  for (let visual = layerCount - 1; visual >= 0; visual--) {
-    rows.push({ kind: "layer", idx: visual });
+  for (let pos = layerOrder.length - 1; pos >= 0; pos--) {
+    rows.push({ kind: "layer", idx: layerOrder[pos]!, pos });
   }
 
   const handleItemDragStart = (e: React.DragEvent, itemId: string) => {
@@ -279,6 +283,9 @@ export default function LayerPanel({
               const isCurrentlyActive = activeLayer === layerIdx;
               const users = layerUsers[layerIdx] ?? [];
               const isDropTarget = dragOverLayer === layerIdx;
+              const isHidden = hiddenSet.has(layerIdx);
+              const canMoveUp = row.pos < layerCount - 1;
+              const canMoveDown = row.pos > 0;
 
               return (
                 <div
@@ -305,14 +312,14 @@ export default function LayerPanel({
                       color: isCurrentlyActive ? "#374151" : hasSelectedItem ? "#4b5563" : "#6b7280",
                       fontFamily: '"Space Mono", monospace', flex: 1, minWidth: 0,
                     }}>
-                      {name}
+                      <span style={{ opacity: isHidden ? 0.45 : 1, textDecoration: isHidden ? "line-through" : "none" }}>{name}</span>
                       {isCurrentlyActive && (
                         <span style={{ fontSize: 7, color: color, marginLeft: 3, fontWeight: 700 }}>●</span>
                       )}
-                      {layerIdx === layerCount - 1 && (
+                      {layerIdx === topLayerId && (
                         <span style={{ fontSize: 8, color: "#a78bfa", marginLeft: 4, fontWeight: 400 }}>top</span>
                       )}
-                      {layerIdx === 0 && (
+                      {layerIdx === backLayerId && layerIdx !== topLayerId && (
                         <span style={{ fontSize: 8, color: "#9ca3af", marginLeft: 4, fontWeight: 400 }}>back</span>
                       )}
                     </span>
@@ -326,27 +333,42 @@ export default function LayerPanel({
                       </span>
                     )}
                     <UserDots users={users} />
-                    {/* Layer move controls */}
+                    {/* Layer controls */}
                     <div style={{ display: "flex", gap: 2, marginLeft: 4 }}>
+                      {onToggleLayerVisibility && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleLayerVisibility(layerIdx);
+                          }}
+                          style={{
+                            width: 18, height: 18,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            background: isHidden ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.05)",
+                            border: "none", borderRadius: 4,
+                            cursor: "pointer",
+                            fontSize: 10,
+                            color: isHidden ? "#9ca3af" : "#6b7280",
+                          }}
+                          title={isHidden ? "Show layer" : "Hide layer"}
+                        >
+                          {isHidden ? "◌" : "◉"}
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           onMoveLayerUp?.(layerIdx);
                         }}
-                        disabled={layerIdx >= layerCount - 1}
+                        disabled={!canMoveUp}
                         style={{
-                          width: 18,
-                          height: 18,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          background: layerIdx >= layerCount - 1 ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.08)",
-                          border: "none",
-                          borderRadius: 4,
-                          cursor: layerIdx >= layerCount - 1 ? "not-allowed" : "pointer",
-                          opacity: layerIdx >= layerCount - 1 ? 0.3 : 1,
-                          fontSize: 10,
-                          color: "#6b7280",
+                          width: 18, height: 18,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          background: !canMoveUp ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.08)",
+                          border: "none", borderRadius: 4,
+                          cursor: !canMoveUp ? "not-allowed" : "pointer",
+                          opacity: !canMoveUp ? 0.3 : 1,
+                          fontSize: 10, color: "#6b7280",
                         }}
                         title="Move layer up"
                       >
@@ -357,20 +379,15 @@ export default function LayerPanel({
                           e.stopPropagation();
                           onMoveLayerDown?.(layerIdx);
                         }}
-                        disabled={layerIdx <= 0}
+                        disabled={!canMoveDown}
                         style={{
-                          width: 18,
-                          height: 18,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          background: layerIdx <= 0 ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.08)",
-                          border: "none",
-                          borderRadius: 4,
-                          cursor: layerIdx <= 0 ? "not-allowed" : "pointer",
-                          opacity: layerIdx <= 0 ? 0.3 : 1,
-                          fontSize: 10,
-                          color: "#6b7280",
+                          width: 18, height: 18,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          background: !canMoveDown ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.08)",
+                          border: "none", borderRadius: 4,
+                          cursor: !canMoveDown ? "not-allowed" : "pointer",
+                          opacity: !canMoveDown ? 0.3 : 1,
+                          fontSize: 10, color: "#6b7280",
                         }}
                         title="Move layer down"
                       >
@@ -417,9 +434,9 @@ export default function LayerPanel({
             })}
 
             {/* Add layer button */}
-            {onLayerCountChange && layerCount < MAX_LAYERS && (
+            {onAddLayer && layerCount < MAX_LAYERS && (
               <button
-                onClick={() => onLayerCountChange(layerCount + 1)}
+                onClick={() => onAddLayer()}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   gap: 5, width: "100%", padding: "6px 10px",
@@ -455,7 +472,7 @@ export default function LayerPanel({
                 Move selected to layer:
               </div>
               <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-                {Array.from({ length: layerCount }, (_, i) => i).map((targetIdx) => {
+                {layerOrder.map((targetIdx) => {
                   const isCurrentLayer = selectedLayerIndex === targetIdx;
                   const col = LAYER_COLORS[targetIdx]!;
                   return (
