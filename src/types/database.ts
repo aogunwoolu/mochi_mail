@@ -55,7 +55,7 @@ export interface Database {
         Row: {
           id: string;
           space_id: string;
-          type: "note" | "about" | "image" | "drawing";
+          type: "note" | "about" | "image" | "drawing" | "link" | "header" | "divider" | "music";
           title: string;
           content: string;
           x: number;
@@ -65,13 +65,14 @@ export interface Database {
           color: string;
           rotation: number;
           image_url: string | null;
+          style: Json;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
           space_id: string;
-          type: "note" | "about" | "image" | "drawing";
+          type: "note" | "about" | "image" | "drawing" | "link" | "header" | "divider" | "music";
           title?: string;
           content?: string;
           x?: number;
@@ -81,6 +82,7 @@ export interface Database {
           color?: string;
           rotation?: number;
           image_url?: string | null;
+          style?: Json;
           created_at?: string;
           updated_at?: string;
         };

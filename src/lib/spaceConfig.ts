@@ -1,5 +1,7 @@
 export type BgType = "solid" | "gradient" | "image" | "css";
 
+export type BgFit = "cover" | "contain" | "tile";
+
 export interface BgConfig {
   type: BgType;
   color?: string;
@@ -8,6 +10,10 @@ export interface BgConfig {
   angle?: number;
   url?: string;
   value?: string;
+  /** Image-only: how the photo fills the page. */
+  fit?: BgFit;
+  /** Image-only: white scrim opacity 0–100, for text legibility over busy photos. */
+  scrim?: number;
 }
 
 export interface FontConfig {
@@ -67,6 +73,73 @@ export const SOLID_PRESETS = [
   "#f3e5f5", "#fff8e1", "#e8f5e9", "#e3f2fd", "#fbe9e7",
 ];
 
+export interface ThemePreset {
+  label: string;
+  emoji: string;
+  bg: BgConfig;
+  font: FontConfig;
+  lineColor: string;
+}
+
+export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
+  {
+    label: "Mochi",
+    emoji: "🌸",
+    bg: { type: "css", value: DEFAULT_SPACE_CONFIG.bg.value },
+    font: { family: "Nunito", color: "#5b4769", size: 14 },
+    lineColor: "#ff6b9d",
+  },
+  {
+    label: "Cottagecore",
+    emoji: "🍄",
+    bg: { type: "gradient", c1: "#fef3c7", c2: "#d9f99d", angle: 160 },
+    font: { family: "Playfair", color: "#4d3b2a", size: 15 },
+    lineColor: "#a3a847",
+  },
+  {
+    label: "Y2K",
+    emoji: "💿",
+    bg: { type: "gradient", c1: "#a8edea", c2: "#fed6e3", angle: 135 },
+    font: { family: "Space Mono", color: "#1f2a44", size: 13 },
+    lineColor: "#67d4f1",
+  },
+  {
+    label: "Minimal",
+    emoji: "🤍",
+    bg: { type: "solid", color: "#fafafa" },
+    font: { family: "Lato", color: "#2b2b2b", size: 14 },
+    lineColor: "#9ca3af",
+  },
+  {
+    label: "Dark Academia",
+    emoji: "📚",
+    bg: { type: "gradient", c1: "#3b322c", c2: "#5c4a3a", angle: 160 },
+    font: { family: "Playfair", color: "#f3ead9", size: 15 },
+    lineColor: "#c9a36b",
+  },
+  {
+    label: "Bubblegum",
+    emoji: "🍬",
+    bg: { type: "gradient", c1: "#ffd6ec", c2: "#e4dcff", angle: 120 },
+    font: { family: "Dancing Script", color: "#7a3b69", size: 16 },
+    lineColor: "#ff6b9d",
+  },
+  {
+    label: "Matcha",
+    emoji: "🍵",
+    bg: { type: "gradient", c1: "#d4f7dd", c2: "#fffde7", angle: 160 },
+    font: { family: "Nunito", color: "#2f4a39", size: 14 },
+    lineColor: "#6ee7b7",
+  },
+  {
+    label: "Midnight",
+    emoji: "🌙",
+    bg: { type: "gradient", c1: "#1e1b4b", c2: "#3b2f63", angle: 160 },
+    font: { family: "Space Mono", color: "#e6e1ff", size: 13 },
+    lineColor: "#a78bfa",
+  },
+];
+
 export function parseSpaceConfig(wallpaper: string | null | undefined): SpaceConfig {
   const d = DEFAULT_SPACE_CONFIG;
   if (!wallpaper) return d;
@@ -90,8 +163,14 @@ export function bgToCss(bg: BgConfig): string {
   if (bg.type === "solid") return bg.color ?? "#ffffff";
   if (bg.type === "gradient")
     return `linear-gradient(${bg.angle ?? 135}deg, ${bg.c1 ?? "#ff6b9d"}, ${bg.c2 ?? "#ffffff"})`;
-  if (bg.type === "image" && bg.url)
-    return `url('${bg.url}') center/cover no-repeat fixed`;
+  if (bg.type === "image" && bg.url) {
+    const size = bg.fit === "contain" ? "contain" : bg.fit === "tile" ? "auto" : "cover";
+    const repeat = bg.fit === "tile" ? "repeat" : "no-repeat";
+    const scrim = bg.scrim
+      ? `linear-gradient(rgba(255,255,255,${bg.scrim / 100}), rgba(255,255,255,${bg.scrim / 100})), `
+      : "";
+    return `${scrim}url('${bg.url}') center/${size} ${repeat} fixed`;
+  }
   return bg.value ?? DEFAULT_SPACE_CONFIG.bg.value!;
 }
 

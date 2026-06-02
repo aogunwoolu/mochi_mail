@@ -66,6 +66,7 @@ export function SpaceView({ requestedUser }: { requestedUser: string }) {
         <SpaceStudio
           viewer={account.viewer}
           isAuthenticated={account.isAuthenticated}
+          loading={spaces.loading}
           requestedUsername={requestedUser || undefined}
           spaces={spaces.spaces}
           ownSpace={spaces.ownSpace}

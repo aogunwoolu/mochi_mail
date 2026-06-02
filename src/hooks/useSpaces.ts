@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { generateId } from "@/lib/id";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { SpaceItem, SpaceItemType, UserSpace } from "@/types";
+import { SpaceItem, SpaceItemStyle, SpaceItemType, UserSpace } from "@/types";
 import type { Database } from "@/types/database";
 
 type SpaceRow = Database["public"]["Tables"]["spaces"]["Row"];
@@ -13,6 +13,9 @@ type SpaceItemUpdate = Database["public"]["Tables"]["space_items"]["Update"];
 
 
 function rowToSpaceItem(row: SpaceItemRow): SpaceItem {
+  const style = row.style && typeof row.style === "object" && !Array.isArray(row.style)
+    ? (row.style as SpaceItemStyle)
+    : undefined;
   return {
     id: row.id,
     type: row.type,
@@ -25,6 +28,7 @@ function rowToSpaceItem(row: SpaceItemRow): SpaceItem {
     color: row.color,
     rotation: row.rotation,
     imageUrl: row.image_url ?? undefined,
+    ...(style && Object.keys(style).length > 0 ? { style } : {}),
   };
 }
 
@@ -41,10 +45,35 @@ function makeItem(type: SpaceItemType, overrides: Partial<SpaceItem> = {}): Spac
     title = "Photo";
   } else if (type === "drawing") {
     title = "Doodle";
+  } else if (type === "link") {
+    title = "My link";
+    content = "https://";
+    color = "rgba(255,255,255,0.92)";
+  } else if (type === "music") {
+    title = "Now spinning";
+    content = "https://open.spotify.com/";
+    color = "rgba(255,255,255,0.92)";
+  } else if (type === "header") {
+    title = "Section title";
+    content = "";
+    color = "transparent";
+  } else if (type === "divider") {
+    title = "";
+    content = "";
+    color = "transparent";
   } else {
     content = "Leave a tiny thought here.";
     color = "#ffe08a";
   }
+
+  const big = type === "image" || type === "drawing";
+  const wide = type === "header" || type === "divider" || type === "music";
+  const height =
+    type === "divider" ? 40 :
+    type === "header" ? 72 :
+    type === "music" ? 130 :
+    type === "link" ? 96 :
+    big ? 200 : 170;
 
   return {
     id: generateId(),
@@ -53,10 +82,10 @@ function makeItem(type: SpaceItemType, overrides: Partial<SpaceItem> = {}): Spac
     content,
     x: 80 + Math.floor(Math.random() * 320),
     y: 80 + Math.floor(Math.random() * 180),
-    width: type === "image" || type === "drawing" ? 240 : 220,
-    height: type === "image" || type === "drawing" ? 200 : 170,
+    width: wide ? 340 : big ? 240 : 220,
+    height,
     color,
-    rotation: Math.round((Math.random() * 8 - 4) * 10) / 10,
+    rotation: type === "header" || type === "divider" ? 0 : Math.round((Math.random() * 8 - 4) * 10) / 10,
     ...overrides,
   };
 }
@@ -104,6 +133,7 @@ function toSpaceItemUpdate(patch: Partial<SpaceItem>): SpaceItemUpdate {
     ...(patch.color !== undefined && { color: patch.color }),
     ...(patch.rotation !== undefined && { rotation: patch.rotation }),
     ...(patch.imageUrl !== undefined && { image_url: patch.imageUrl }),
+    ...(patch.style !== undefined && { style: patch.style as unknown as Database["public"]["Tables"]["space_items"]["Insert"]["style"] }),
   };
 }
 
@@ -113,10 +143,12 @@ export function useSpaces(
   requestedUsername?: string
 ) {
   const [spaces, setSpaces] = useState<UserSpace[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
     let cancelled = false;
+    setLoading(true);
 
     async function ensureOwnSpace() {
       if (!currentAccount) return null;
@@ -180,7 +212,7 @@ export function useSpaces(
 
       let spaceRows: SpaceRow[] | null = null;
 
-      if (!currentAccount && requestedUsername) {
+      if (requestedUsername) {
         const { data: targetProfile } = await supabase
           .from("profiles")
           .select("id")
@@ -192,20 +224,26 @@ export function useSpaces(
           return;
         }
 
-        const { data: rows } = await supabase
-          .from("spaces")
-          .select("*")
-          .eq("owner_id", targetProfile.id)
-          .limit(1);
+        // Owner viewing their own space sees all their spaces (for the switcher);
+        // a visitor only needs the one space they navigated to.
+        const isSelf = currentAccount?.id === targetProfile.id;
+        const query = supabase.from("spaces").select("*").eq("owner_id", targetProfile.id);
+        const { data: rows } = isSelf
+          ? await query.order("updated_at", { ascending: false })
+          : await query.limit(1);
 
         spaceRows = rows;
-      } else {
+      } else if (currentAccount) {
         const { data: rows } = await supabase
           .from("spaces")
           .select("*")
+          .eq("owner_id", currentAccount.id)
           .order("updated_at", { ascending: false });
 
         spaceRows = rows;
+      } else {
+        if (!cancelled) setSpaces([]);
+        return;
       }
 
       if (!spaceRows || spaceRows.length === 0) {
@@ -242,12 +280,18 @@ export function useSpaces(
       setSpaces(mapped);
     }
 
-    void load();
+    void load().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [currentAccount?.id, currentAccount?.displayName, currentAccount?.username, currentAccount?.bio, currentAccount?.avatarUrl, currentAccount?.youtubeUrl, currentAccount?.accentColor, currentAccount?.wallpaper, currentAccount?.homeTitle, requestedUsername]);
+    // Only re-fetch when identity/target changes — live config edits (wallpaper,
+    // accent, audio) update local state optimistically and must not trigger a
+    // refetch that would overwrite in-progress changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentAccount?.id, currentAccount?.bio, currentAccount?.homeTitle, requestedUsername]);
 
   const ownSpace = useMemo(
     () => (currentAccount ? spaces.find((s) => s.ownerId === currentAccount.id) ?? null : null),
@@ -311,6 +355,7 @@ export function useSpaces(
       color: item.color,
       rotation: item.rotation,
       image_url: item.imageUrl ?? null,
+      style: (item.style ?? {}) as unknown as SpaceItemUpdate["style"],
     });
 
     return item;
@@ -384,6 +429,7 @@ export function useSpaces(
 
   return {
     spaces,
+    loading,
     ownSpace,
     updateOwnSpace,
     addItemToOwnSpace,

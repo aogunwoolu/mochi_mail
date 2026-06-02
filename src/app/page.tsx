@@ -841,7 +841,8 @@ export default function Home() {
           onUploadAvatar={account.uploadAvatar}
           onOpenSpaces={() => {
             setAccountOpen(false);
-            router.push("/space");
+            const uname = account.currentAccount?.username;
+            router.push(uname ? `/space/${uname}` : "/space");
           }}
         />
       ) : null}

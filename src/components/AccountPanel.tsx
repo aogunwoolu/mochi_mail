@@ -3,31 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ViewerIdentity } from "@/types";
 import { getTrackingEnabled, setTrackingEnabled } from "@/lib/posthog";
 import { toast } from "@/lib/toast";
-
-const ACCENT_PRESETS = ["#ff6b9d", "#67d4f1", "#6ee7b7", "#a78bfa", "#fb923c", "#fbbf24"] as const;
-
-const WALLPAPER_PRESETS = [
-  {
-    id: "petal-blush",
-    name: "Petal Blush",
-    value: "radial-gradient(circle at top left, rgba(255,255,255,0.95), rgba(255,214,236,0.92) 42%, rgba(255,246,251,0.92) 100%)",
-  },
-  {
-    id: "mint-airmail",
-    name: "Mint Airmail",
-    value: "linear-gradient(135deg, rgba(237,247,255,0.95), rgba(203,244,255,0.92), rgba(244,255,252,0.96))",
-  },
-  {
-    id: "apricot-note",
-    name: "Apricot Note",
-    value: "linear-gradient(145deg, rgba(255,248,228,0.96), rgba(255,224,208,0.92), rgba(255,245,236,0.96))",
-  },
-  {
-    id: "lilac-dream",
-    name: "Lilac Dream",
-    value: "linear-gradient(145deg, rgba(246,241,255,0.96), rgba(226,223,255,0.92), rgba(255,245,252,0.96))",
-  },
-] as const;
+import { bgToCss, parseSpaceConfig } from "@/lib/spaceConfig";
 
 function buildDicebearUrl(seed: string): string {
   return `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(seed || "mochimail")}`;
@@ -40,26 +16,6 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
     reader.readAsDataURL(file);
   });
-}
-
-function SwatchButton({
-  color,
-  active,
-  onClick,
-}: Readonly<{ color: string; active: boolean; onClick: () => void }>) {
-  return (
-    <button
-      onClick={onClick}
-      className="btn-smooth h-9 w-9 rounded-full border-2"
-      style={{
-        background: color,
-        borderColor: active ? "rgba(53,39,66,0.85)" : "rgba(53,39,66,0.12)",
-        boxShadow: active ? "0 0 0 3px rgba(255,255,255,0.92), 0 0 0 5px rgba(53,39,66,0.12)" : "none",
-      }}
-      aria-label={`Choose ${color}`}
-      title={color}
-    />
-  );
 }
 
 function SectionCard({ title, note, children }: Readonly<{ title: string; note?: string; children: React.ReactNode }>) {
@@ -244,45 +200,19 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
         <input id="avatar-url" value={props.avatarUrl} onChange={(e) => props.setAvatarUrl(e.target.value)} placeholder="🔗 Or paste a custom avatar URL" className="input-soft mt-2 w-full px-3 py-2 text-sm outline-none" />
       </SectionCard>
 
-      <SectionCard title="Style" note="Choose a vibe instead of typing CSS.">
-        <div>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Accent</p>
-          <div className="flex flex-wrap gap-2">
-            {ACCENT_PRESETS.map((color) => (
-              <SwatchButton key={color} color={color} active={props.accentColor === color} onClick={() => props.setAccentColor(color)} />
-            ))}
-          </div>
-        </div>
-        <div className="mt-3">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Wallpaper</p>
-          <div className="grid grid-cols-2 gap-2">
-            {WALLPAPER_PRESETS.map((preset) => {
-              const active = props.selectedWallpaper === preset.value;
-              return (
-                <button
-                  key={preset.id}
-                  onClick={() => props.setWallpaper(preset.value)}
-                  className="btn-smooth overflow-hidden rounded-2xl border text-left"
-                  style={{ borderColor: active ? props.accent : "var(--border)", background: "rgba(255,255,255,0.88)" }}
-                >
-                  <div className="h-14" style={{ background: preset.value }} />
-                  <div className="px-3 py-2 text-xs font-semibold">{preset.name}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+      <SectionCard title="Space look" note="Wallpaper, soundtrack, fonts & themes now live in your Space — customize them there.">
+        <button
+          onClick={props.onOpenSpaces}
+          className="btn-smooth flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold"
+          style={{ background: "var(--surface)", color: "var(--foreground-soft)", border: "1px solid var(--border)" }}
+        >
+          🎨 Customize my Space →
+        </button>
       </SectionCard>
 
-      <SectionCard title="Extras" note="Nice-to-have profile details.">
-        <div className="grid gap-2">
-          <div>
-            <label htmlFor="youtube-url" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Space soundtrack</label>
-            <input id="youtube-url" value={props.youtubeUrl} onChange={(e) => props.setYoutubeUrl(e.target.value)} placeholder="🎵 YouTube link for your space soundtrack" className="input-soft w-full px-3 py-2 text-sm outline-none" />
-          </div>
-          <div className="rounded-2xl px-3 py-2 text-xs" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
-            Username is fixed as @{props.currentAccount.username}
-          </div>
+      <SectionCard title="Account">
+        <div className="rounded-2xl px-3 py-2 text-xs" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
+          Username is fixed as @{props.currentAccount.username}
         </div>
       </SectionCard>
 
@@ -492,14 +422,13 @@ export default function AccountPanel({
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const f = latestFieldsRef.current;
+      // Space look (wallpaper / accent / soundtrack) is owned by SpaceStudio and
+      // stored in the same profile fields — do NOT write them here or we'd clobber it.
       onUpdateAccount({
         displayName: f.profileName.trim() || currentAccount.displayName,
         avatarUrl: f.avatarUrl.trim(),
         bio: f.bio.trim(),
         homeTitle: f.homeTitle.trim(),
-        youtubeUrl: f.youtubeUrl.trim(),
-        accentColor: f.accentColor,
-        wallpaper: f.wallpaper.trim(),
       });
       setSaveStatus("saved");
       toast("Profile saved!", { icon: "save" });
@@ -509,7 +438,7 @@ export default function AccountPanel({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileName, avatarUrl, bio, homeTitle, youtubeUrl, accentColor, wallpaper]);
+  }, [profileName, avatarUrl, bio, homeTitle]);
 
   const handleGuestSave = () => {
     onRenameGuest(guestName);
@@ -560,34 +489,11 @@ export default function AccountPanel({
     }
   };
 
-  const handleProfileSave = () => {
-    onUpdateAccount({
-      displayName: profileName.trim() || currentAccount?.displayName,
-      avatarUrl: avatarUrl.trim(),
-      bio: bio.trim(),
-      homeTitle: homeTitle.trim(),
-      youtubeUrl: youtubeUrl.trim(),
-      accentColor,
-      wallpaper: wallpaper.trim(),
-    });
-  };
-
   const accent = accentColor || "#ff6b9d";
-  const selectedWallpaper = wallpaper || WALLPAPER_PRESETS[0].value;
+  const selectedWallpaper = bgToCss(parseSpaceConfig(wallpaper).bg);
   const previewName = profileName.trim() || currentAccount?.displayName || viewer.name;
   const previewAvatar = avatarUrl.trim() || buildDicebearUrl(previewName);
   const spaceNamePreview = homeTitle.trim() || `${previewName}'s Space`;
-  const hasProfileChanges = Boolean(
-    currentAccount && (
-      profileName !== currentAccount.displayName ||
-      avatarUrl !== currentAccount.avatarUrl ||
-      bio !== currentAccount.bio ||
-      homeTitle !== currentAccount.homeTitle ||
-      youtubeUrl !== currentAccount.youtubeUrl ||
-      accentColor !== currentAccount.accentColor ||
-      wallpaper !== currentAccount.wallpaper
-    )
-  );
   const avatarChoices = useMemo(
     () => [previewName, currentAccount?.username ?? viewer.name, `${previewName}-mail`].filter(Boolean),
     [currentAccount?.username, previewName, viewer.name]

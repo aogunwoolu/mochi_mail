@@ -1,7 +1,31 @@
 export type Tool = "pen" | "eraser" | "sticker" | "washi" | "text" | "select";
 export type AppTab = "studio" | "mail" | "store";
 export type DeliverySpeed = "express" | "standard" | "slow";
-export type SpaceItemType = "note" | "about" | "image" | "drawing";
+export type SpaceItemType =
+  | "note"
+  | "about"
+  | "image"
+  | "drawing"
+  | "link"
+  | "header"
+  | "divider"
+  | "music";
+
+export type CardTexture = "paper" | "card" | "polaroid" | "plain";
+
+export interface SpaceItemStyle {
+  /** corner radius in px */
+  radius?: number;
+  shadow?: "none" | "soft" | "strong";
+  borderColor?: string;
+  /** font family label from FONT_OPTIONS */
+  fontFamily?: string;
+  textColor?: string;
+  /** override the default material for the item */
+  texture?: CardTexture;
+  /** 0–100 */
+  opacity?: number;
+}
 export type RoomVisibility = "public" | "private";
 
 export interface LetterSendPayload {
@@ -157,6 +181,7 @@ export interface SpaceItem {
   color: string;
   rotation: number;
   imageUrl?: string;
+  style?: SpaceItemStyle;
 }
 
 export interface UserSpace {
