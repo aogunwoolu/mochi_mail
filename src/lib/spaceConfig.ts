@@ -114,7 +114,7 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
     label: "Dark Academia",
     emoji: "📚",
     bg: { type: "gradient", c1: "#3b322c", c2: "#5c4a3a", angle: 160 },
-    font: { family: "Playfair", color: "#f3ead9", size: 15 },
+    font: { family: "Playfair", color: "#CDA760", size: 15 },
     lineColor: "#c9a36b",
   },
   {

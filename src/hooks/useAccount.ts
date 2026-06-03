@@ -238,7 +238,13 @@ export function useAccount() {
     return () => {
       cancelled = true;
     };
-  }, [authUser]);
+    // Key on the user *identity*, not the authUser object reference. Supabase's
+    // onAuthStateChange hands back a fresh user object on every event (initial
+    // session, token refresh, tab refocus); depending on the object reference
+    // re-ran this fetch each time, flipping profileLoading→hydrated false and
+    // briefly unmounting the whole space (items "disappeared" after a few seconds).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser?.id]);
 
   const viewer = useMemo<ViewerIdentity>(() => {
     if (authUser && profile) {
