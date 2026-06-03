@@ -173,6 +173,7 @@ export function useAccount() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = session?.user ?? null;
+      console.log("[DBG auth]", _event, "user:", nextUser?.id ?? null, "anon:", nextUser ? isAnonymousUser(nextUser) : null);
       if (nextUser) {
         if (isAnonymousUser(nextUser) && session) saveAnonTokens(session);
         else if (!isAnonymousUser(nextUser)) clearAnonTokens();

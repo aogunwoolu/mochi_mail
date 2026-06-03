@@ -220,6 +220,7 @@ export function useSpaces(
           .maybeSingle();
 
         if (!targetProfile) {
+          console.log("[DBG spaces] EMPTY: no profile for username", requestedUsername);
           if (!cancelled) setSpaces([]);
           return;
         }
@@ -247,6 +248,7 @@ export function useSpaces(
       }
 
       if (!spaceRows || spaceRows.length === 0) {
+        console.log("[DBG spaces] EMPTY: no space rows", { currentAccount: currentAccount?.id ?? null, requestedUsername: requestedUsername ?? null });
         if (!cancelled) setSpaces([]);
         return;
       }
@@ -275,6 +277,15 @@ export function useSpaces(
 
       const mapped = spaceRows.map((space) =>
         buildSpace(space, itemsBySpace.get(space.id) ?? [], profilesByOwner.get(space.owner_id), currentAccount)
+      );
+
+      console.log(
+        "[DBG spaces] load() ->",
+        "currentAccount:", currentAccount?.id ?? null,
+        "requestedUsername:", requestedUsername ?? null,
+        "spaces:", mapped.length,
+        "items/space:", mapped.map((s) => `${s.slug}:${s.items.length}`).join(", "),
+        "rawItemRows:", itemRows?.length ?? 0
       );
 
       setSpaces(mapped);

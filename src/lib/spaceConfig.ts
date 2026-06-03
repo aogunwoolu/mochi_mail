@@ -81,13 +81,83 @@ export interface ThemePreset {
   lineColor: string;
 }
 
+// NOTE ON READABILITY: a theme's `font.color` is rendered on the profile-card
+// overlay, which sits on a near-white translucent surface (rgba(255,255,255,0.84))
+// regardless of how dark the page background is. So every `font.color` below is a
+// deep, theme-tinted tone chosen to stay legible on that light card — even for the
+// "night" themes whose backgrounds are dark. Keep new themes to dark font colors.
 export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
+  // ── Soft pinks & florals ──────────────────────────────────────────────────
   {
     label: "Mochi",
     emoji: "🌸",
     bg: { type: "css", value: DEFAULT_SPACE_CONFIG.bg.value },
     font: { family: "Nunito", color: "#5b4769", size: 14 },
     lineColor: "#ff6b9d",
+  },
+  {
+    label: "Cherry Blossom",
+    emoji: "🌸",
+    bg: { type: "css", value: "radial-gradient(circle at 30% 18%, #fff5f8 0%, #ffe0ec 45%, #ffd0e0 100%)" },
+    font: { family: "Dancing Script", color: "#6b3a52", size: 16 },
+    lineColor: "#ff8fab",
+  },
+  {
+    label: "Peachy",
+    emoji: "🍑",
+    bg: { type: "css", value: "linear-gradient(160deg, #fff1e6 0%, #ffd9c0 55%, #ffc4d6 100%)" },
+    font: { family: "Nunito", color: "#7a4332", size: 14 },
+    lineColor: "#ff9a76",
+  },
+  {
+    label: "Strawberry Milk",
+    emoji: "🍓",
+    bg: { type: "css", value: "linear-gradient(160deg, #fff0f4 0%, #ffd6e2 55%, #ffe9f0 100%)" },
+    font: { family: "Nunito", color: "#7a3548", size: 14 },
+    lineColor: "#ff7a9c",
+  },
+  {
+    label: "Blush",
+    emoji: "🌷",
+    bg: { type: "css", value: "radial-gradient(circle at 70% 25%, #fff4f7 0%, #ffe2ec 50%, #f7d0de 100%)" },
+    font: { family: "Dancing Script", color: "#6e3a4f", size: 16 },
+    lineColor: "#f08eaf",
+  },
+  {
+    label: "Bubblegum",
+    emoji: "🍬",
+    bg: { type: "gradient", c1: "#ffd6ec", c2: "#e4dcff", angle: 120 },
+    font: { family: "Dancing Script", color: "#7a3b69", size: 16 },
+    lineColor: "#ff6b9d",
+  },
+  // ── Warm & golden ─────────────────────────────────────────────────────────
+  {
+    label: "Rose Gold",
+    emoji: "🌹",
+    bg: { type: "css", value: "linear-gradient(160deg, #fcefe8 0%, #f3d4c8 55%, #f9dfe4 100%)" },
+    font: { family: "Playfair", color: "#5e3636", size: 15 },
+    lineColor: "#d99a86",
+  },
+  {
+    label: "Sunset",
+    emoji: "🌅",
+    bg: { type: "css", value: "linear-gradient(160deg, #fff0e0 0%, #ffc9a3 45%, #ffb0c4 100%)" },
+    font: { family: "Playfair", color: "#6b3a3a", size: 15 },
+    lineColor: "#ff7e5f",
+  },
+  {
+    label: "Honey",
+    emoji: "🍯",
+    bg: { type: "css", value: "linear-gradient(160deg, #fff6e0 0%, #ffe6ad 55%, #ffeccf 100%)" },
+    font: { family: "Playfair", color: "#5c4422", size: 15 },
+    lineColor: "#e0a92e",
+  },
+  {
+    label: "Vanilla",
+    emoji: "🍦",
+    bg: { type: "css", value: "linear-gradient(160deg, #fdf8ee 0%, #f3e7cf 60%, #faf2e2 100%)" },
+    font: { family: "Playfair", color: "#5a4b38", size: 15 },
+    lineColor: "#c9a87a",
   },
   {
     label: "Cottagecore",
@@ -97,33 +167,20 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
     lineColor: "#a3a847",
   },
   {
-    label: "Y2K",
-    emoji: "💿",
-    bg: { type: "gradient", c1: "#a8edea", c2: "#fed6e3", angle: 135 },
-    font: { family: "Space Mono", color: "#1f2a44", size: 13 },
-    lineColor: "#67d4f1",
+    label: "Terracotta",
+    emoji: "🏺",
+    bg: { type: "css", value: "linear-gradient(160deg, #fbeee4 0%, #f0cdb4 55%, #f5d8c4 100%)" },
+    font: { family: "Playfair", color: "#5c3424", size: 15 },
+    lineColor: "#c2724a",
   },
   {
-    label: "Minimal",
-    emoji: "🤍",
-    bg: { type: "solid", color: "#fafafa" },
-    font: { family: "Lato", color: "#2b2b2b", size: 14 },
-    lineColor: "#9ca3af",
+    label: "Citrus",
+    emoji: "🍋",
+    bg: { type: "css", value: "linear-gradient(160deg, #fbfbe0 0%, #eef0a8 55%, #e2f0c4 100%)" },
+    font: { family: "Space Mono", color: "#4d4a1f", size: 13 },
+    lineColor: "#bcae2c",
   },
-  {
-    label: "Dark Academia",
-    emoji: "📚",
-    bg: { type: "gradient", c1: "#3b322c", c2: "#5c4a3a", angle: 160 },
-    font: { family: "Playfair", color: "#CDA760", size: 15 },
-    lineColor: "#c9a36b",
-  },
-  {
-    label: "Bubblegum",
-    emoji: "🍬",
-    bg: { type: "gradient", c1: "#ffd6ec", c2: "#e4dcff", angle: 120 },
-    font: { family: "Dancing Script", color: "#7a3b69", size: 16 },
-    lineColor: "#ff6b9d",
-  },
+  // ── Greens ────────────────────────────────────────────────────────────────
   {
     label: "Matcha",
     emoji: "🍵",
@@ -132,10 +189,104 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
     lineColor: "#6ee7b7",
   },
   {
+    label: "Sage",
+    emoji: "🌿",
+    bg: { type: "css", value: "linear-gradient(155deg, #eef3e8 0%, #dbe7cf 60%, #eef0e0 100%)" },
+    font: { family: "Lato", color: "#38463a", size: 14 },
+    lineColor: "#8aa687",
+  },
+  {
+    label: "Forest",
+    emoji: "🌲",
+    bg: { type: "css", value: "linear-gradient(165deg, #cfe6cf 0%, #9dc8a0 55%, #bfe0b8 100%)" },
+    font: { family: "Lato", color: "#233a28", size: 14 },
+    lineColor: "#4f9d69",
+  },
+  {
+    label: "Seafoam",
+    emoji: "🫧",
+    bg: { type: "css", value: "linear-gradient(160deg, #e6f7f2 0%, #c2ece0 55%, #ddf3ec 100%)" },
+    font: { family: "Nunito", color: "#244a44", size: 14 },
+    lineColor: "#4cc4a8",
+  },
+  // ── Blues ─────────────────────────────────────────────────────────────────
+  {
+    label: "Coastal",
+    emoji: "🌊",
+    bg: { type: "css", value: "linear-gradient(165deg, #e3f4fb 0%, #c4e6f2 55%, #dff3ef 100%)" },
+    font: { family: "Lato", color: "#1f3a4d", size: 14 },
+    lineColor: "#4fa8c9",
+  },
+  {
+    label: "Cloud 9",
+    emoji: "☁️",
+    bg: { type: "css", value: "linear-gradient(180deg, #f0f7ff 0%, #d6e9fb 60%, #eef5ff 100%)" },
+    font: { family: "Nunito", color: "#3a4a5c", size: 14 },
+    lineColor: "#7fb2e0",
+  },
+  {
+    label: "Y2K",
+    emoji: "💿",
+    bg: { type: "gradient", c1: "#a8edea", c2: "#fed6e3", angle: 135 },
+    font: { family: "Space Mono", color: "#1f2a44", size: 13 },
+    lineColor: "#67d4f1",
+  },
+  // ── Purples ───────────────────────────────────────────────────────────────
+  {
+    label: "Periwinkle",
+    emoji: "🪻",
+    bg: { type: "css", value: "linear-gradient(165deg, #eef0ff 0%, #d6ddff 55%, #e8e4ff 100%)" },
+    font: { family: "Nunito", color: "#3a3a6b", size: 14 },
+    lineColor: "#8b9eff",
+  },
+  {
+    label: "Lavender Haze",
+    emoji: "💜",
+    bg: { type: "css", value: "linear-gradient(160deg, #f3eefe 0%, #e4dcff 50%, #f8e8ff 100%)" },
+    font: { family: "Nunito", color: "#4a3b6b", size: 14 },
+    lineColor: "#a78bfa",
+  },
+  {
+    label: "Ube",
+    emoji: "🍠",
+    bg: { type: "css", value: "linear-gradient(160deg, #f3e9fb 0%, #ddc4ef 55%, #ece0f7 100%)" },
+    font: { family: "Nunito", color: "#4a2d5c", size: 14 },
+    lineColor: "#b07dd6",
+  },
+  // ── Neutral & night ───────────────────────────────────────────────────────
+  {
+    label: "Minimal",
+    emoji: "🤍",
+    bg: { type: "solid", color: "#fafafa" },
+    font: { family: "Lato", color: "#2b2b2b", size: 14 },
+    lineColor: "#9ca3af",
+  },
+  {
+    label: "Moonstone",
+    emoji: "🌑",
+    bg: { type: "css", value: "linear-gradient(160deg, #232a36 0%, #313b4d 55%, #3c4659 100%)" },
+    font: { family: "Space Mono", color: "#2a3340", size: 13 },
+    lineColor: "#8aa0b8",
+  },
+  {
+    label: "Dark Academia",
+    emoji: "📚",
+    bg: { type: "gradient", c1: "#3b322c", c2: "#5c4a3a", angle: 160 },
+    font: { family: "Playfair", color: "#4a3520", size: 15 },
+    lineColor: "#c9a36b",
+  },
+  {
+    label: "Cosmic",
+    emoji: "🌌",
+    bg: { type: "css", value: "linear-gradient(160deg, #1b1640 0%, #2d2363 55%, #3a2a6b 100%)" },
+    font: { family: "Space Mono", color: "#2e2856", size: 13 },
+    lineColor: "#9d7aff",
+  },
+  {
     label: "Midnight",
     emoji: "🌙",
     bg: { type: "gradient", c1: "#1e1b4b", c2: "#3b2f63", angle: 160 },
-    font: { family: "Space Mono", color: "#e6e1ff", size: 13 },
+    font: { family: "Space Mono", color: "#2e2a55", size: 13 },
     lineColor: "#a78bfa",
   },
 ];

@@ -435,6 +435,7 @@ function ShapeSyncer({
     suppressRef.current = true
 
     const toDelete = [...existingIds].filter((id) => !currentIds.has(id))
+    console.log("[DBG board] sync: items=", items.length, "existingShapes=", existingIds.size, "toDelete=", toDelete.length)
     if (toDelete.length) editor.deleteShapes(toDelete.map((id) => createShapeId(id)))
 
     const toAdd = items.filter((i) => !existingIds.has(i.id))

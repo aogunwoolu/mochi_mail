@@ -220,7 +220,10 @@ export function useStrokeSync({
   // ── Initial load: replay stroke history + board metadata ───────────────────
 
   useEffect(() => {
-    if (!hasSession || !collabScope) return;
+    if (!hasSession || !collabScope) {
+      console.log("[DBG strokes] init skipped — hasSession:", hasSession, "collabScope:", collabScope);
+      return;
+    }
 
     // Reset guards on scope change
     isSessionReadyRef.current = false;
@@ -253,6 +256,7 @@ export function useStrokeSync({
         .order("seq", { ascending: true })
         .limit(10000);
 
+      console.log("[DBG strokes] load room:", collabScope, "rows:", rows?.length ?? 0, "error:", error?.message ?? null);
       if (error) {
         const msg = String(error.message ?? "").toLowerCase();
         if (
