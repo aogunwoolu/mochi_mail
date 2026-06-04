@@ -267,6 +267,9 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
           <div className="flex-1 rounded-2xl px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.8)" }}>Save your look</div>
           <div className="flex-1 rounded-2xl px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.8)" }}>Get a profile space</div>
         </div>
+        <p className="mt-3 rounded-2xl px-3 py-2 text-[11px] leading-relaxed" style={{ background: "rgba(255,107,157,0.10)", color: "var(--muted-strong)" }}>
+          ⏳ Heads up: guest sessions and anything you make as a guest are automatically deleted 30 days after you start. Create an account to keep your stuff for good.
+        </p>
       </div>
 
       <SectionCard title="Guest Name" note="Set how you appear while browsing before you sign up.">

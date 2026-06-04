@@ -1464,7 +1464,7 @@ export default function Home() {
             userFonts={customFonts}
             onPublish={handleStorePublish}
             currentUserId={account.viewer.accountId ?? account.viewer.id}
-            isGuest={!account.isAuthenticated}
+            isGuest={account.viewer.accountId == null}
             onUpdateStoreItem={store.updateStoreItem}
             onRemoveFromStore={store.removeFromStore}
           />

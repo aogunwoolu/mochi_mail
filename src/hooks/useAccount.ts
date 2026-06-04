@@ -266,6 +266,10 @@ export function useAccount() {
     // but treat them as a guest (no space, no public profile).
     return {
       id: authUser?.id ?? guestId,
+      // Anonymous Supabase users have a real, stable auth.uid() that RLS accepts,
+      // so expose it as accountId to let mail/shop/assets sync. True local-only
+      // guests (no authUser) get undefined and stay on localStorage.
+      accountId: authUser?.id,
       name: guestName,
       avatarUrl: anonymousAvatarUrl ?? undefined,
       isGuest: true,

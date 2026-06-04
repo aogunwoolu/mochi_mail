@@ -313,7 +313,7 @@ export function useStore(user: ViewerIdentity) {
   const [filterType, setFilterType] = useState<"all" | "sticker" | "washi" | "background" | "font" | "stamp" | "envelope" | "kit">("all");
   const [sortBy, setSortBy] = useState<StoreSortBy>("newest");
   const [hydratedRemote, setHydratedRemote] = useState(false);
-  const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
+  const ownerId = user.accountId ?? null;
   const storeKey = storeKeyFor(user);
   const collectionKey = collectionKeyFor(user);
 

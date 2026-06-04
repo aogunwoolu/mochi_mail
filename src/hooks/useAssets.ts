@@ -190,7 +190,7 @@ export function useAssets(user: ViewerIdentity) {
   const [kitLibrary, setKitLibrary] = useState<ScrapbookKit[]>([]);
   const [hydratedRemote, setHydratedRemote] = useState(false);
   const boardPersistenceDisabledRef = useRef(false);
-  const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
+  const ownerId = user.accountId ?? null;
   const storageKey = useMemo(() => assetStorageKey(user), [user]);
 
   useEffect(() => {
