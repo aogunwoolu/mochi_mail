@@ -36,6 +36,7 @@ import {
   StoreItem,
 } from "@/types";
 import { useIdentify, useStudioAnalytics, useMailAnalytics, useStoreAnalytics } from "@/hooks/useAnalytics";
+import { LAYER_CEILING } from "@/lib/plus";
 
 const CANVAS_W = 6000;
 const CANVAS_H = 4800;
@@ -78,7 +79,25 @@ export default function Home() {
     textFont: '"Space Mono", monospace',
   });
 
-  const { account, assets, mail, store } = useMochi();
+  const { account, assets, mail, store, supporter } = useMochi();
+  // Mochi Plus raises the studio layer ceiling; free stays at its current value.
+  const maxLayers = supporter.perks.maxLayers;
+
+  // Gentle thank-you when returning from Stripe Checkout (?support=thanks).
+  const refreshSupporter = supporter.refresh;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const support = params.get("support");
+    if (!support) return;
+    if (support === "thanks") {
+      toast("Thank you for supporting Mochi! 💛", { icon: "star" });
+      void refreshSupporter();
+    }
+    params.delete("support");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }, [refreshSupporter]);
 
   // ── Analytics ─────────────────────────────────────────────────────────────
   useIdentify(account.viewer.accountId ?? account.viewer.id, {
@@ -299,7 +318,10 @@ export default function Home() {
     for (const i of placedItems) referenced.add(i.layerIndex ?? 0);
     setLayerOrder((prev) => {
       const present = new Set(prev);
-      const missing = [...referenced].filter((id) => !present.has(id) && id >= 0 && id < 5).sort((a, b) => a - b);
+      // Restore any layer that has content up to the absolute ceiling, so a
+      // lapsed member's extra layers are always shown (never destroyed) even if
+      // their current entitlement is lower.
+      const missing = [...referenced].filter((id) => !present.has(id) && id >= 0 && id < LAYER_CEILING).sort((a, b) => a - b);
       if (!missing.length) return prev;
       return [...prev, ...missing];
     });
@@ -307,13 +329,13 @@ export default function Home() {
 
   const handleAddLayer = useCallback(() => {
     setLayerOrder((prev) => {
-      if (prev.length >= 5) return prev;
-      for (let id = 0; id < 5; id++) {
+      if (prev.length >= maxLayers) return prev;
+      for (let id = 0; id < maxLayers; id++) {
         if (!prev.includes(id)) return [...prev, id];
       }
       return prev;
     });
-  }, []);
+  }, [maxLayers]);
 
   const handleMoveLayerUp = useCallback((layerId: number) => {
     setLayerOrder((prev) => {
@@ -1244,6 +1266,7 @@ export default function Home() {
             align="right"
             layerOrder={layerOrder}
             hiddenLayerIds={hiddenLayerIds}
+            maxLayers={maxLayers}
             onAddLayer={handleAddLayer}
             onToggleLayerVisibility={handleToggleLayerVisibility}
             activeLayer={activeLayer}

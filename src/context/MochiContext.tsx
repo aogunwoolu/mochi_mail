@@ -4,6 +4,7 @@ import { useAccount } from "@/hooks/useAccount";
 import { useAssets } from "@/hooks/useAssets";
 import { useMail } from "@/hooks/useMail";
 import { useStore } from "@/hooks/useStore";
+import { useSupporter } from "@/hooks/useSupporter";
 import type {
   ViewerIdentity,
   Sticker,
@@ -118,6 +119,7 @@ interface MochiAccountMethods {
   identityMode: string;
   identityHelp: string | null;
   signUp: (username: string, password: string, displayName: string) => Promise<{ ok: boolean; error?: string }>;
+  saveAccount: (input: { email: string; password: string; displayName?: string }) => Promise<{ ok: boolean; error?: string }>;
   logIn: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logOut: () => Promise<void>;
   renameGuest: (name: string) => void;
@@ -133,11 +135,14 @@ interface MochiAccountMethods {
   uploadAvatar: (file: File) => Promise<string | null>;
 }
 
+type MochiSupporter = ReturnType<typeof useSupporter>;
+
 interface MochiContextValue {
   account: MochiAccountMethods;
   assets: MochiAssets;
   mail: MochiMail;
   store: MochiStore;
+  supporter: MochiSupporter;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -157,6 +162,7 @@ export function MochiProvider({ children }: { children: ReactNode }) {
   const assets = useAssets(account.viewer);
   const mail = useMail(account.viewer);
   const store = useStore(account.viewer);
+  const supporter = useSupporter(account.viewer);
 
   const equipFromStore = (item: StoreItem) => {
     if (item.type === "sticker") {
@@ -191,6 +197,7 @@ export function MochiProvider({ children }: { children: ReactNode }) {
       identityMode: account.identityMode,
       identityHelp: account.identityHelp,
       signUp: account.signUp,
+      saveAccount: account.saveAccount,
       logIn: account.logIn,
       logOut: account.logOut,
       renameGuest: account.renameGuest,
@@ -205,6 +212,7 @@ export function MochiProvider({ children }: { children: ReactNode }) {
     store: {
       ...store,
     },
+    supporter,
   };
 
   return <MochiContext.Provider value={value}>{children}</MochiContext.Provider>;

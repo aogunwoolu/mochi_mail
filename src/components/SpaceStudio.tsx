@@ -21,6 +21,8 @@ import {
   spaceConfigToWallpaper,
 } from "@/lib/spaceConfig";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { useMochi } from "@/context/MochiContext";
+import { toast } from "@/lib/toast";
 
 const SpaceBoard = dynamic(() => import("./SpaceBoard"), { ssr: false });
 
@@ -690,6 +692,7 @@ export default function SpaceStudio({
   onLeaveVisitorNote,
   onNavigateBack,
 }: Readonly<SpaceStudioProps>) {
+  const { supporter } = useMochi();
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
@@ -798,9 +801,13 @@ export default function SpaceStudio({
   }, [ownSpace]);
 
   const applyTheme = useCallback((t: (typeof THEME_PRESETS)[number]) => {
+    if (t.plusOnly && !supporter.isPlus) {
+      toast("That's a Mochi Plus theme ♡ — become a member to unlock it!", { icon: "star" });
+      return;
+    }
     loadGoogleFont(FONT_OPTIONS.find((f) => f.label === t.font.family)?.gfont ?? null);
     updateConfig({ bg: t.bg, font: t.font, lineColor: t.lineColor });
-  }, [updateConfig]);
+  }, [updateConfig, supporter.isPlus]);
 
   const togglePanel = (p: ActivePanel) => setActivePanel((prev) => (prev === p ? null : p));
 
@@ -1010,7 +1017,12 @@ export default function SpaceStudio({
               <p className="truncate font-bold" style={{ ...fontStyle, fontSize: Math.min((spaceConfig.font.size) + 2, 22) }}>
                 {selectedSpace.title || selectedSpace.ownerName}
               </p>
-              <p className="mt-0.5 truncate text-[11px]" style={{ color: "var(--muted)" }}>@{selectedSpace.slug}</p>
+              <p className="mt-0.5 flex items-center gap-1 truncate text-[11px]" style={{ color: "var(--muted)" }}>
+                <span className="truncate">@{selectedSpace.slug}</span>
+                {selectedSpace.ownerIsSupporter ? (
+                  <span title="Mochi Plus supporter" aria-label="Mochi Plus supporter" style={{ color: "var(--pink)" }}>♡</span>
+                ) : null}
+              </p>
               {selectedSpace.tagline ? (
                 <p className="mt-1 text-xs leading-snug" style={{ color: "var(--foreground-soft)" }}>{selectedSpace.tagline}</p>
               ) : null}
@@ -1080,12 +1092,23 @@ export default function SpaceStudio({
                   bgToCss(t.bg) === bgCssValue &&
                   t.font.family === spaceConfig.font.family &&
                   t.lineColor === accent;
+                const locked = Boolean(t.plusOnly && !supporter.isPlus);
                 return (
                   <button key={t.label} onClick={() => applyTheme(t)}
-                    className="btn-smooth overflow-hidden rounded-2xl border text-left"
+                    className="btn-smooth relative overflow-hidden rounded-2xl border text-left"
                     style={{ borderColor: active ? t.lineColor : "var(--border)", borderWidth: active ? 2 : 1 }}>
-                    <div className="h-12 w-full" style={{ background: bgToCss(t.bg) }} />
-                    <div className="flex items-center gap-1.5 px-2.5 py-2">
+                    <div className="relative h-12 w-full" style={{ background: bgToCss(t.bg) }}>
+                      {t.plusOnly ? (
+                        <span
+                          className="absolute right-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-[8px] font-bold"
+                          style={{ background: "rgba(255,255,255,0.85)", color: "var(--pink)" }}
+                          title={locked ? "Mochi Plus theme" : "Mochi Plus theme (yours ♡)"}
+                        >
+                          ♡ PLUS
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2.5 py-2" style={{ opacity: locked ? 0.6 : 1 }}>
                       <span>{t.emoji}</span>
                       <span className="text-xs font-semibold" style={{ fontFamily: fontCss(t.font.family), color: "var(--foreground-soft)" }}>{t.label}</span>
                     </div>

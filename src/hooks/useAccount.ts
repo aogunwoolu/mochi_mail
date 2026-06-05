@@ -325,6 +325,47 @@ export function useAccount() {
     return { ok: true };
   }, []);
 
+  // Gentle save at checkout: convert the *existing* anonymous user into a saved
+  // account in place (same auth.uid()), so all their assets/mail/space carry
+  // over and any Mochi Plus perks bind to a durable, recoverable identity.
+  //
+  // NOTE: this uses a REAL email (unlike `signUp`, which uses a fake
+  // username@mochimail.app address). If Supabase "Confirm email" is enabled the
+  // address won't be active until verified — for the smoothest flow, enable
+  // auto-confirm / disable secure email change for this project.
+  const saveAccount = useCallback(async (input: {
+    email: string;
+    password: string;
+    displayName?: string;
+  }): Promise<{ ok: boolean; error?: string }> => {
+    const email = input.email.trim().toLowerCase();
+    const password = input.password.trim();
+    if (!email || !password) return { ok: false, error: "Email and password are required." };
+    if (!authUser) return { ok: false, error: "Still getting you set up — try again in a moment." };
+
+    const supabase = createSupabaseBrowserClient();
+    const displayName = (input.displayName ?? "").trim();
+    const { data, error } = await supabase.auth.updateUser({
+      email,
+      password,
+      data: displayName ? { display_name: displayName } : undefined,
+    });
+    if (error) return { ok: false, error: error.message };
+
+    const updatedUser = data.user ?? authUser;
+    // The user id is unchanged, so the profile-loading effect won't re-fire;
+    // create the profile row here so the saved account is immediately usable.
+    const { data: createdProfile } = await supabase
+      .from("profiles")
+      .upsert(buildProfileInsert(updatedUser), { onConflict: "id" })
+      .select()
+      .single();
+    if (createdProfile) setProfile(createdProfile);
+    setAuthUser(updatedUser);
+    clearAnonTokens();
+    return { ok: true };
+  }, [authUser]);
+
   const logIn = useCallback(async (
     username: string,
     password: string
@@ -427,6 +468,7 @@ export function useAccount() {
         ? `Local-only guest mode${anonymousAuthWarning ? `: ${anonymousAuthWarning}` : ". Enable Supabase anonymous sign-ins for shared cross-device users."}`
         : null,
     signUp,
+    saveAccount,
     logIn,
     logOut,
     renameGuest,

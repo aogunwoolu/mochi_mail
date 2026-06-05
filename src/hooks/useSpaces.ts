@@ -116,6 +116,7 @@ function buildSpace(
     youtubeUrl: isCurrentUser ? currentAccount!.youtubeUrl : (profile?.youtube_url ?? ""),
     accentColor: isCurrentUser ? currentAccount!.accentColor : (profile?.accent_color ?? "#ff6b9d"),
     wallpaper: isCurrentUser ? currentAccount!.wallpaper : (profile?.wallpaper ?? ""),
+    ownerIsSupporter: profile?.is_supporter ?? false,
     items: items.map(rowToSpaceItem),
     updatedAt: new Date(space.updated_at).getTime(),
   };

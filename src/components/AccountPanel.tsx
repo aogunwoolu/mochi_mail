@@ -1,6 +1,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ViewerIdentity } from "@/types";
+import SupportMochiPanel from "@/components/SupportMochiPanel";
 import { getTrackingEnabled, setTrackingEnabled } from "@/lib/posthog";
 import { toast } from "@/lib/toast";
 import { bgToCss, parseSpaceConfig } from "@/lib/spaceConfig";
@@ -550,7 +551,7 @@ export default function AccountPanel({
 
   return (
     <div
-      className="fixed right-4 top-16 z-[400] w-[min(28rem,calc(100vw-2rem))] animate-fade-in overflow-hidden rounded-3xl"
+      className="fixed right-4 top-16 z-[400] flex max-h-[calc(100dvh-5rem)] w-[min(28rem,calc(100vw-2rem))] flex-col animate-fade-in overflow-hidden rounded-3xl"
       style={{
         background: "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(250,245,255,0.96))",
         border: "1px solid var(--border-strong)",
@@ -559,7 +560,7 @@ export default function AccountPanel({
     >
       {/* Banner */}
       <div
-        className="relative flex items-end px-5 pb-4 pt-5"
+        className="relative flex shrink-0 items-end px-5 pb-4 pt-5"
         style={{ background: `linear-gradient(135deg, ${accent}22 0%, var(--lavender)22 100%)`, borderBottom: "1px solid var(--border)" }}
       >
         {isAuthenticated && currentAccount ? (
@@ -601,11 +602,14 @@ export default function AccountPanel({
         </button>
       </div>
 
-      <div className="max-h-[min(80vh,46rem)] overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {panelBody}
+        <div className="mt-3">
+          <SupportMochiPanel />
+        </div>
       </div>
 
-      <div className="border-t px-4 py-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.6)" }}>
+      <div className="shrink-0 border-t px-4 py-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.6)" }}>
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold" style={{ color: "var(--foreground-soft)" }}>

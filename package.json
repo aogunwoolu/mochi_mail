@@ -11,7 +11,8 @@
     "lint:fix": "next lint --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "test": "vitest",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "stripe:setup": "node --env-file=.env.local scripts/setup-stripe.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.7",
@@ -36,6 +37,7 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-icons": "^5.4.0",
+    "stripe": "^22.2.0",
     "tailwind-merge": "^3.3.1",
     "tldraw": "^5.0.1",
     "unique-names-generator": "^4.7.1",

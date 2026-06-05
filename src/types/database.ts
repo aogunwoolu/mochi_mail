@@ -13,6 +13,7 @@ export interface Database {
           accent_color: string | null;
           wallpaper: string | null;
           youtube_url: string | null;
+          is_supporter: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -25,6 +26,7 @@ export interface Database {
           accent_color?: string | null;
           wallpaper?: string | null;
           youtube_url?: string | null;
+          is_supporter?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -287,6 +289,54 @@ export interface Database {
           seq: number;
         };
         Update: Partial<Database["public"]["Tables"]["board_strokes"]["Insert"]>;
+        Relationships: [];
+      };
+      supporters: {
+        Row: {
+          user_id: string;
+          stripe_customer_id: string | null;
+          stripe_subscription_id: string | null;
+          status: "none" | "active" | "trialing" | "past_due" | "canceled";
+          plan: "monthly" | "yearly" | null;
+          current_period_end: string | null;
+          cancel_at_period_end: boolean;
+          show_badge: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          stripe_customer_id?: string | null;
+          stripe_subscription_id?: string | null;
+          status?: "none" | "active" | "trialing" | "past_due" | "canceled";
+          plan?: "monthly" | "yearly" | null;
+          current_period_end?: string | null;
+          cancel_at_period_end?: boolean;
+          show_badge?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["supporters"]["Insert"]>;
+        Relationships: [];
+      };
+      tips: {
+        Row: {
+          id: string;
+          user_id: string | null;
+          display_name: string | null;
+          amount_cents: number;
+          currency: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string | null;
+          display_name?: string | null;
+          amount_cents: number;
+          currency?: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["tips"]["Insert"]>;
         Relationships: [];
       };
     };

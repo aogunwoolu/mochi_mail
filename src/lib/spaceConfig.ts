@@ -79,6 +79,9 @@ export interface ThemePreset {
   bg: BgConfig;
   font: FontConfig;
   lineColor: string;
+  /** Mochi Plus exclusive. NEVER set this on a theme that already shipped free —
+   *  Plus only ADDS new themes, it never paywalls existing ones. */
+  plusOnly?: boolean;
 }
 
 // NOTE ON READABILITY: a theme's `font.color` is rendered on the profile-card
@@ -288,6 +291,39 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
     bg: { type: "gradient", c1: "#1e1b4b", c2: "#3b2f63", angle: 160 },
     font: { family: "Space Mono", color: "#2e2a55", size: 13 },
     lineColor: "#a78bfa",
+  },
+  // ── ♡ Mochi Plus exclusives (NEW — additive, never replace free themes) ──────
+  {
+    label: "Aurora",
+    emoji: "🌌",
+    bg: { type: "css", value: "linear-gradient(160deg, #e0fff4 0%, #c4e0ff 40%, #e8d6ff 75%, #ffe0f4 100%)" },
+    font: { family: "Playfair", color: "#3a4a6b", size: 15 },
+    lineColor: "#7ad6c4",
+    plusOnly: true,
+  },
+  {
+    label: "Starlight",
+    emoji: "✨",
+    bg: { type: "css", value: "radial-gradient(circle at 25% 15%, #fff6e8 0%, #f3e0c4 40%, #e8d0e8 100%)" },
+    font: { family: "Dancing Script", color: "#5c4432", size: 16 },
+    lineColor: "#e0b86b",
+    plusOnly: true,
+  },
+  {
+    label: "Sakura Night",
+    emoji: "🌸",
+    bg: { type: "css", value: "linear-gradient(160deg, #2a2440 0%, #4a3358 50%, #6b3a5c 100%)" },
+    font: { family: "Playfair", color: "#5c3a52", size: 15 },
+    lineColor: "#ff9ec4",
+    plusOnly: true,
+  },
+  {
+    label: "Opaline",
+    emoji: "🐚",
+    bg: { type: "css", value: "linear-gradient(160deg, #fdf0ff 0%, #e0f4ff 35%, #e8fff0 70%, #fff4e8 100%)" },
+    font: { family: "Nunito", color: "#4a3b6b", size: 14 },
+    lineColor: "#c4a8e8",
+    plusOnly: true,
   },
 ];
 

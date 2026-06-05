@@ -196,6 +196,8 @@ export interface UserSpace {
   youtubeUrl: string;
   accentColor: string;
   wallpaper: string;
+  /** Owner is an active Mochi Plus member with their ♡ badge shown. */
+  ownerIsSupporter: boolean;
   items: SpaceItem[];
   updatedAt: number;
 }

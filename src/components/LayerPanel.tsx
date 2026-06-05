@@ -1,6 +1,7 @@
 
 import React, { useState, useRef } from "react";
 import { PlacedSticker } from "@/types";
+import { FREE, LAYER_CEILING } from "@/lib/plus";
 
 export interface LayerUser {
   id: string;
@@ -23,6 +24,8 @@ interface LayerPanelProps {
   hiddenLayerIds?: number[];
   /** Called when user adds a new layer. */
   onAddLayer?: () => void;
+  /** Max number of layers the user may create (raised by Mochi Plus). */
+  maxLayers?: number;
   /** Toggle visibility of a layer by its stable id. */
   onToggleLayerVisibility?: (layerId: number) => void;
   /** Currently active layer id for drawing and item placement */
@@ -35,7 +38,10 @@ interface LayerPanelProps {
   onMoveLayerDown?: (layerId: number) => void;
 }
 
-const MAX_LAYERS = 5;
+// Size per-layer buckets to the absolute ceiling so existing content on higher
+// layers always renders; the add-layer button is gated separately by the
+// caller's entitlement (`maxLayers` prop).
+const MAX_LAYERS = LAYER_CEILING;
 
 const LAYER_COLORS = [
   "#f87171",
@@ -43,9 +49,12 @@ const LAYER_COLORS = [
   "#4ade80",
   "#60a5fa",
   "#a78bfa",
+  "#f472b6",
+  "#2dd4bf",
+  "#facc15",
 ];
 
-const LAYER_NAMES = ["Layer 1", "Layer 2", "Layer 3", "Layer 4", "Layer 5"];
+const LAYER_NAMES = Array.from({ length: MAX_LAYERS }, (_, i) => `Layer ${i + 1}`);
 
 function UserDots({ users }: { users: LayerUser[] }) {
   if (!users.length) return null;
@@ -120,6 +129,7 @@ export default function LayerPanel({
   layerOrder = [0],
   hiddenLayerIds = [],
   onAddLayer,
+  maxLayers = FREE.maxLayers,
   onToggleLayerVisibility,
   activeLayer = 0,
   onActiveLayerChange,
@@ -434,7 +444,7 @@ export default function LayerPanel({
             })}
 
             {/* Add layer button */}
-            {onAddLayer && layerCount < MAX_LAYERS && (
+            {onAddLayer && layerCount < maxLayers && (
               <button
                 onClick={() => onAddLayer()}
                 style={{
