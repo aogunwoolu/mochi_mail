@@ -988,7 +988,7 @@ export default function SpaceStudio({
         {/* Ambient accent wash */}
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
 
-        {/* tldraw infinite canvas — remounts on space change */}
+        {/* Infinite pan/zoom canvas — remounts on space change */}
         <SpaceBoard
           key={selectedSpace.id}
           items={selectedSpace.items}
@@ -997,6 +997,11 @@ export default function SpaceStudio({
           onItemChange={handleItemChange}
           onSelectItem={setSelectedItemId}
           onEditItem={setEditingItemId}
+          onDeleteItem={(itemId) => {
+            onRemoveSpaceItem(selectedSpace.id, itemId);
+            setSelectedItemId(null);
+            setEditingItemId(null);
+          }}
           selectedItemId={selectedItemId}
         />
 
