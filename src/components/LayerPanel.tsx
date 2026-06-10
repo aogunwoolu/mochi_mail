@@ -1,5 +1,6 @@
 
 import React, { useState, useRef } from "react";
+import { FiEye, FiEyeOff } from "react-icons/fi";
 import { PlacedSticker } from "@/types";
 import { FREE, LAYER_CEILING } from "@/lib/plus";
 
@@ -362,7 +363,7 @@ export default function LayerPanel({
                           }}
                           title={isHidden ? "Show layer" : "Hide layer"}
                         >
-                          {isHidden ? "◌" : "◉"}
+                          {isHidden ? <FiEyeOff /> : <FiEye />}
                         </button>
                       )}
                       <button
