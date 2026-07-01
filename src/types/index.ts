@@ -20,6 +20,8 @@ export interface SpaceItemStyle {
   borderColor?: string;
   /** font family label from FONT_OPTIONS */
   fontFamily?: string;
+  /** id of the board section this item lives on; unset = the top-most board */
+  sectionId?: string;
   textColor?: string;
   /** override the default material for the item */
   texture?: CardTexture;

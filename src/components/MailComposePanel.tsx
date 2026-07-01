@@ -596,7 +596,7 @@ export default function MailComposePanel({
                         setShowSuggestions(false);
                       }}
                       className="btn-smooth flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm"
-                      style={{ color: "var(--text)" }}
+                      style={{ color: "var(--foreground)" }}
                     >
                       <span className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
                         {username[0]?.toUpperCase()}

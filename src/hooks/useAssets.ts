@@ -502,7 +502,10 @@ export function useAssets(user: ViewerIdentity) {
 
   const saveBoardState = useCallback(async (drawingData: string | null, currentPlacedItems: PlacedSticker[], currentSelectedPaper: PaperBackground | null, roomId?: string | null) => {
     const isSharedRoomWrite = !!roomId;
-    if (!user?.id || (user.isGuest && !isSharedRoomWrite) || boardPersistenceDisabledRef.current) return;
+    // Gate on accountId, not isGuest: anonymous Supabase users are "guests" but
+    // have a real auth.uid() that RLS accepts, so their personal board must sync.
+    // Only true local-only guests (no accountId) skip persistence.
+    if (!user?.id || (!user.accountId && !isSharedRoomWrite) || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
     const { error } = await supabase
       .from("studio_boards")
@@ -523,11 +526,12 @@ export function useAssets(user: ViewerIdentity) {
       }
       console.warn("Failed to save board state:", error);
     }
-  }, [user?.id, user.isGuest]);
+  }, [user?.id, user.accountId]);
 
   const loadBoardState = useCallback(async (roomId?: string | null) => {
     const isSharedRoomRead = !!roomId;
-    if (!user?.id || (user.isGuest && !isSharedRoomRead) || boardPersistenceDisabledRef.current) return;
+    // Same accountId gate as saveBoardState — anonymous users sync their board.
+    if (!user?.id || (!user.accountId && !isSharedRoomRead) || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
     // For shared rooms load the most recently updated board from any participant;
     // for personal boards restrict to the owner.
@@ -561,7 +565,7 @@ export function useAssets(user: ViewerIdentity) {
       };
     }
     return null;
-  }, [user?.id, user.isGuest]);
+  }, [user?.id, user.accountId]);
 
   return {
     stickers,

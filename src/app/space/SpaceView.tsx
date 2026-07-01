@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useAccount } from "@/hooks/useAccount";
+import { useMochi } from "@/context/MochiContext";
 import { useSpaces } from "@/hooks/useSpaces";
 import SpaceStudio from "@/components/SpaceStudio";
 import { useState, useEffect } from "react";
@@ -9,8 +9,11 @@ import { parseSpaceConfig, bgToCss } from "@/lib/spaceConfig";
 
 export function SpaceView({ requestedUser }: { requestedUser: string }) {
   const router = useRouter();
-  const account = useAccount();
-  const spaces = useSpaces(account.accounts, account.currentAccount, requestedUser || undefined);
+  // Use the app-wide account instance from MochiProvider. Calling useAccount()
+  // here would spin up a second, parallel auth state — on a fresh visit both
+  // instances raced signInAnonymously(), creating duplicate anonymous users.
+  const { account } = useMochi();
+  const spaces = useSpaces([], account.currentAccount, requestedUser || undefined);
   const [selectedSpaceId, setSelectedSpaceId] = useState("");
   const isPreparingSpace = account.hydrated && account.isAuthenticated && !account.currentAccount;
 
@@ -38,12 +41,15 @@ export function SpaceView({ requestedUser }: { requestedUser: string }) {
 
   if (!account.hydrated || isPreparingSpace) {
     return (
-      <div className="flex h-svh items-center justify-center" style={{ background: "var(--bg)" }}>
-        <div className="panel rounded-3xl px-6 py-5 text-center">
-          <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+      <div className="flex h-svh items-center justify-center" style={{ background: "var(--background)" }}>
+        <div className="panel animate-fade-in flex flex-col items-center rounded-3xl px-8 py-6 text-center">
+          <svg className="animate-spin" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <circle cx="12" cy="12" r="9" stroke="var(--pink)" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
+          </svg>
+          <p className="mt-3 text-sm font-semibold" style={{ color: "var(--foreground)" }}>
             Opening your space...
           </p>
-          <p className="mt-2 text-xs" style={{ color: "var(--muted)" }}>
+          <p className="mt-1 text-xs" style={{ color: "var(--muted)" }}>
             We&apos;re loading your profile and arranging your page.
           </p>
         </div>

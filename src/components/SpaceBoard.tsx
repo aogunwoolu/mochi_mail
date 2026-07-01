@@ -454,8 +454,8 @@ export default function SpaceBoard({ items, isOwner, accent, onItemChange, onSel
                 height: item.height ?? 160,
                 transform: itemTransform(item.x, item.y, item.rotation ?? 0),
                 transformOrigin: 'center center',
-                pointerEvents: isOwner ? 'auto' : 'none',
-                cursor: isOwner ? 'pointer' : 'default',
+                pointerEvents: 'auto',
+                cursor: 'pointer',
               }}
               onPointerDown={(e) => {
                 if (!isOwner) return
@@ -464,6 +464,9 @@ export default function SpaceBoard({ items, isOwner, accent, onItemChange, onSel
                 e.stopPropagation()
                 if (selectedItemId !== item.id) onSelectItem(item.id)
               }}
+              // Visitors can't select/drag, but tapping an item opens the
+              // read-only sheet (notes read in full, link/music cards openable).
+              onClick={() => { if (!isOwner) onEditItem(item.id) }}
             >
               <SpaceItemContent item={item} />
             </div>

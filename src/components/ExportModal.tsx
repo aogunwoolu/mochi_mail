@@ -80,7 +80,7 @@ export default function ExportModal({
                 className="flex-1 rounded-lg py-1 text-[12px] font-semibold transition-all"
                 style={{
                   background: staticFormat === fmt ? "white" : "transparent",
-                  color: staticFormat === fmt ? "#1e1e2e" : "#9ca3af",
+                  color: staticFormat === fmt ? "var(--foreground)" : "var(--muted)",
                   boxShadow: staticFormat === fmt ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
                 }}
               >
@@ -121,7 +121,7 @@ export default function ExportModal({
             )}
           </span>
           <div>
-            <div className="text-[13px] font-semibold" style={{ color: "#1e1e2e" }}>
+            <div className="text-[13px] font-semibold" style={{ color: "var(--foreground)" }}>
               {isExporting ? "Saving…" : "Whole canvas"}
             </div>
             <div className="text-[11px]" style={{ color: "var(--muted, #9ca3af)" }}>
@@ -154,7 +154,7 @@ export default function ExportModal({
             </svg>
           </span>
           <div>
-            <div className="text-[13px] font-semibold" style={{ color: "#1e1e2e" }}>
+            <div className="text-[13px] font-semibold" style={{ color: "var(--foreground)" }}>
               Select region
             </div>
             <div className="text-[11px]" style={{ color: "var(--muted, #9ca3af)" }}>

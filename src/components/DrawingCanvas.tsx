@@ -1166,6 +1166,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       // Reset local undo history — clearing is not undoable
       localStrokesRef.current = [];
       undoneStrokesRef.current = [];
+      // Also drop completed remote strokes, otherwise the next re-render
+      // (e.g. dbStrokes → []) paints them right back onto the layer canvases
+      remoteStrokesRef.current = [];
+      setRemoteStrokesVersion((v) => v + 1);
       // Update the session base to reflect the cleared state
       const canvas0 = layerCanvasRefs.current[0];
       if (canvas0) {

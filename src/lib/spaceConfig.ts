@@ -20,13 +20,96 @@ export interface FontConfig {
   family: string;
   color: string;
   size: number;
+  /** CSS font-weight; undefined = 400 */
+  weight?: number;
 }
+
+/** Per-section typography overrides — anything unset falls back to the page font. */
+export interface SectionFont {
+  family?: string;
+  weight?: number;
+  size?: number;
+  color?: string;
+  align?: "left" | "center" | "right";
+}
+
+// ─── Page sections (MySpace-style layout) ────────────────────────────────────
+// The space page is a vertical column of sections the owner can add, remove and
+// reorder. Stored inside the SpaceConfig JSON (profiles.wallpaper) so a
+// visitor loads the owner's saved layout with the rest of the theme.
+
+export type SpaceSectionType =
+  | "profile"    // hero card: avatar, name, tagline, about
+  | "board"      // the freeform tldraw board with all its items
+  | "text"       // heading + free text
+  | "links"      // list of labelled links
+  | "gallery"    // grid of photos (URLs)
+  | "guestbook"  // visitor notes + sign button
+  | "friends"    // "Top 8" — usernames linking to their spaces
+  | "marquee"    // scrolling text banner
+  | "music";     // visible embedded player (YouTube / Spotify)
+
+export interface SpaceLink {
+  label: string;
+  url: string;
+}
+
+/** How much of the page row a section occupies (stacks to full width on mobile). */
+export type SectionWidth = "full" | "twothirds" | "half" | "third";
+
+export interface SpaceSection {
+  id: string;
+  type: SpaceSectionType;
+  title?: string;
+  /** text / marquee body */
+  text?: string;
+  /** links section */
+  links?: SpaceLink[];
+  /** gallery image URLs */
+  images?: string[];
+  /** friends section — usernames */
+  friends?: string[];
+  /** music section — YouTube or Spotify URL */
+  url?: string;
+  /** board section — embed height preset */
+  size?: "s" | "m" | "l";
+  /** row width — sections flow side by side when they fit */
+  width?: SectionWidth;
+  /** typography overrides for this section's text */
+  font?: SectionFont;
+}
+
+/** Layout used when a space has never customised its sections — mirrors the
+ *  pre-sections page (profile card + board + visitor notes). */
+export function defaultSections(): SpaceSection[] {
+  return [
+    { id: "sec-profile", type: "profile" },
+    { id: "sec-board", type: "board", title: "✨ My board", size: "m" },
+    { id: "sec-guestbook", type: "guestbook", title: "💌 Guestbook" },
+  ];
+}
+
+export const SECTION_TYPE_META: ReadonlyArray<{ type: SpaceSectionType; emoji: string; label: string; blurb: string }> = [
+  { type: "profile", emoji: "🪞", label: "Profile card", blurb: "Avatar, name, tagline & about" },
+  { type: "board", emoji: "🎨", label: "Doodle board", blurb: "Your freeform pinboard canvas" },
+  { type: "text", emoji: "📝", label: "Text block", blurb: "A heading and anything you want to say" },
+  { type: "links", emoji: "🔗", label: "Links", blurb: "Your favourite corners of the web" },
+  { type: "gallery", emoji: "📷", label: "Photo gallery", blurb: "A little grid of pictures" },
+  { type: "guestbook", emoji: "💌", label: "Guestbook", blurb: "Notes visitors leave for you" },
+  { type: "friends", emoji: "👯", label: "Top friends", blurb: "Shout out your favourite spaces" },
+  { type: "marquee", emoji: "🎏", label: "Marquee", blurb: "A scrolling ticker, very 2004" },
+  { type: "music", emoji: "🎶", label: "Music player", blurb: "A visible player for a song or playlist" },
+];
 
 export interface SpaceConfig {
   bg: BgConfig;
   font: FontConfig;
   audioLoop: boolean;
   lineColor: string;
+  /** undefined = never customised → defaultSections() */
+  sections?: SpaceSection[];
+  /** "sections" = arranged page (default) · "canvas" = classic full-page board */
+  layout?: "sections" | "canvas";
 }
 
 export const DEFAULT_SPACE_CONFIG: SpaceConfig = {
@@ -40,14 +123,127 @@ export const DEFAULT_SPACE_CONFIG: SpaceConfig = {
   lineColor: "#ff6b9d",
 };
 
-export const FONT_OPTIONS: ReadonlyArray<{ label: string; css: string; gfont: string | null }> = [
-  { label: "System", css: "system-ui, -apple-system, sans-serif", gfont: null },
-  { label: "Lato", css: "'Lato', sans-serif", gfont: "Lato:wght@400;600;700" },
-  { label: "Playfair", css: "'Playfair Display', serif", gfont: "Playfair+Display:wght@400;600;700" },
-  { label: "Dancing Script", css: "'Dancing Script', cursive", gfont: "Dancing+Script:wght@400;600;700" },
-  { label: "Space Mono", css: "'Space Mono', monospace", gfont: "Space+Mono:wght@400;700" },
-  { label: "Nunito", css: "'Nunito', sans-serif", gfont: "Nunito:wght@400;600;700" },
+export type FontCategory = "clean" | "cute" | "handwritten" | "serif" | "display" | "retro";
+
+export const FONT_CATEGORY_LABELS: Record<FontCategory, string> = {
+  clean: "✨ Clean & modern",
+  cute: "🍡 Cute & round",
+  handwritten: "✍️ Handwritten",
+  serif: "📖 Serif & fancy",
+  display: "🎪 Display & fun",
+  retro: "👾 Retro & pixel",
+};
+
+export interface FontOption {
+  label: string;
+  css: string;
+  gfont: string | null;
+  category: FontCategory;
+  /** Weights available on Google Fonts for this family */
+  weights: ReadonlyArray<number>;
+}
+
+function gf(
+  label: string,
+  category: FontCategory,
+  weights: number[],
+  opts: { name?: string; fallback?: string } = {},
+): FontOption {
+  const name = opts.name ?? label;
+  const spec = weights.length === 1 && weights[0] === 400
+    ? name.replace(/ /g, "+")
+    : `${name.replace(/ /g, "+")}:wght@${weights.join(";")}`;
+  return {
+    label,
+    css: `'${name}', ${opts.fallback ?? "sans-serif"}`,
+    gfont: spec,
+    category,
+    weights,
+  };
+}
+
+export const FONT_OPTIONS: ReadonlyArray<FontOption> = [
+  { label: "System", css: "system-ui, -apple-system, sans-serif", gfont: null, category: "clean", weights: [300, 400, 500, 600, 700, 800] },
+  // ── Clean & modern ─────────────────────────────────────────────────────────
+  gf("Lato", "clean", [300, 400, 700, 900]),
+  gf("Nunito", "clean", [300, 400, 500, 600, 700, 800]),
+  gf("Poppins", "clean", [300, 400, 500, 600, 700, 800]),
+  gf("Montserrat", "clean", [300, 400, 500, 600, 700, 800]),
+  gf("Raleway", "clean", [300, 400, 500, 600, 700, 800]),
+  gf("Rubik", "clean", [300, 400, 500, 600, 700, 800]),
+  gf("Karla", "clean", [300, 400, 500, 600, 700, 800]),
+  gf("Josefin Sans", "clean", [300, 400, 500, 600, 700]),
+  gf("Jost", "clean", [300, 400, 500, 600, 700, 800]),
+  // ── Cute & round ───────────────────────────────────────────────────────────
+  gf("Quicksand", "cute", [300, 400, 500, 600, 700]),
+  gf("Comfortaa", "cute", [300, 400, 500, 600, 700]),
+  gf("Fredoka", "cute", [300, 400, 500, 600, 700]),
+  gf("Baloo 2", "cute", [400, 500, 600, 700, 800]),
+  gf("Varela Round", "cute", [400]),
+  gf("Chewy", "cute", [400], { fallback: "cursive" }),
+  gf("Titan One", "cute", [400], { fallback: "cursive" }),
+  gf("Luckiest Guy", "cute", [400], { fallback: "cursive" }),
+  // ── Handwritten ────────────────────────────────────────────────────────────
+  gf("Dancing Script", "handwritten", [400, 500, 600, 700], { fallback: "cursive" }),
+  gf("Caveat", "handwritten", [400, 500, 600, 700], { fallback: "cursive" }),
+  gf("Pacifico", "handwritten", [400], { fallback: "cursive" }),
+  gf("Satisfy", "handwritten", [400], { fallback: "cursive" }),
+  gf("Great Vibes", "handwritten", [400], { fallback: "cursive" }),
+  gf("Sacramento", "handwritten", [400], { fallback: "cursive" }),
+  gf("Shadows Into Light", "handwritten", [400], { fallback: "cursive" }),
+  gf("Indie Flower", "handwritten", [400], { fallback: "cursive" }),
+  gf("Patrick Hand", "handwritten", [400], { fallback: "cursive" }),
+  gf("Gochi Hand", "handwritten", [400], { fallback: "cursive" }),
+  gf("Kalam", "handwritten", [300, 400, 700], { fallback: "cursive" }),
+  gf("Handlee", "handwritten", [400], { fallback: "cursive" }),
+  gf("Gloria Hallelujah", "handwritten", [400], { fallback: "cursive" }),
+  gf("Amatic SC", "handwritten", [400, 700], { fallback: "cursive" }),
+  gf("Homemade Apple", "handwritten", [400], { fallback: "cursive" }),
+  // ── Serif & fancy ──────────────────────────────────────────────────────────
+  gf("Playfair", "serif", [400, 500, 600, 700, 800], { name: "Playfair Display", fallback: "serif" }),
+  gf("Lora", "serif", [400, 500, 600, 700], { fallback: "serif" }),
+  gf("Cormorant Garamond", "serif", [300, 400, 500, 600, 700], { fallback: "serif" }),
+  gf("EB Garamond", "serif", [400, 500, 600, 700, 800], { fallback: "serif" }),
+  gf("Libre Baskerville", "serif", [400, 700], { fallback: "serif" }),
+  gf("Crimson Text", "serif", [400, 600, 700], { fallback: "serif" }),
+  gf("DM Serif Display", "serif", [400], { fallback: "serif" }),
+  gf("Abril Fatface", "serif", [400], { fallback: "serif" }),
+  // ── Display & fun ──────────────────────────────────────────────────────────
+  gf("Lobster", "display", [400], { fallback: "cursive" }),
+  gf("Righteous", "display", [400], { fallback: "cursive" }),
+  gf("Bungee", "display", [400], { fallback: "cursive" }),
+  gf("Bangers", "display", [400], { fallback: "cursive" }),
+  gf("Monoton", "display", [400], { fallback: "cursive" }),
+  gf("Special Elite", "display", [400], { fallback: "cursive" }),
+  gf("Fredericka the Great", "display", [400], { fallback: "cursive" }),
+  gf("Creepster", "display", [400], { fallback: "cursive" }),
+  // ── Retro & pixel ──────────────────────────────────────────────────────────
+  gf("Space Mono", "retro", [400, 700], { fallback: "monospace" }),
+  gf("IBM Plex Mono", "retro", [300, 400, 500, 600, 700], { fallback: "monospace" }),
+  gf("Courier Prime", "retro", [400, 700], { fallback: "monospace" }),
+  gf("VT323", "retro", [400], { fallback: "monospace" }),
+  gf("Press Start 2P", "retro", [400], { fallback: "monospace" }),
+  gf("Silkscreen", "retro", [400, 700], { fallback: "monospace" }),
+  gf("Pixelify Sans", "retro", [400, 500, 600, 700], { fallback: "monospace" }),
 ];
+
+export function fontOption(family: string | undefined): FontOption | undefined {
+  return FONT_OPTIONS.find((f) => f.label === family);
+}
+
+/** Load a font by its FONT_OPTIONS label (no-op for System / unknown). */
+export function loadFontByLabel(family: string | undefined) {
+  const opt = fontOption(family);
+  if (opt?.gfont) loadGoogleFont(opt.gfont);
+}
+
+/** Nearest weight this family actually ships (Google Fonts won't render missing ones). */
+export function clampWeight(family: string | undefined, weight: number | undefined): number {
+  if (!weight) return 400;
+  const weights = fontOption(family)?.weights;
+  if (!weights?.length) return weight;
+  return weights.reduce((best, w) => (Math.abs(w - weight) < Math.abs(best - weight) ? w : best), weights[0]);
+}
 
 export const EMOJI_ROWS: ReadonlyArray<ReadonlyArray<string>> = [
   ["🌸", "🌻", "🍀", "🦋", "🌈", "⭐", "💕", "🎀"],
@@ -333,11 +529,19 @@ export function parseSpaceConfig(wallpaper: string | null | undefined): SpaceCon
   if (wallpaper.startsWith("{")) {
     try {
       const parsed = JSON.parse(wallpaper) as Partial<SpaceConfig>;
+      const sections = Array.isArray(parsed.sections)
+        ? parsed.sections.filter(
+            (s): s is SpaceSection =>
+              Boolean(s) && typeof s === "object" && typeof s.id === "string" && typeof s.type === "string",
+          )
+        : undefined;
       return {
         bg: { ...d.bg, ...(parsed.bg ?? {}) },
         font: { ...d.font, ...(parsed.font ?? {}) },
         audioLoop: parsed.audioLoop ?? d.audioLoop,
         lineColor: parsed.lineColor ?? d.lineColor,
+        ...(sections ? { sections } : {}),
+        ...(parsed.layout === "canvas" || parsed.layout === "sections" ? { layout: parsed.layout } : {}),
       };
     } catch {
       return d;

@@ -119,6 +119,7 @@ interface MochiAccountMethods {
   identityMode: string;
   identityHelp: string | null;
   signUp: (username: string, password: string, displayName: string) => Promise<{ ok: boolean; error?: string }>;
+  signInWithProvider: (provider: "google" | "discord") => Promise<{ ok: boolean; error?: string }>;
   saveAccount: (input: { email: string; password: string; displayName?: string }) => Promise<{ ok: boolean; error?: string }>;
   logIn: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logOut: () => Promise<void>;
@@ -197,6 +198,7 @@ export function MochiProvider({ children }: { children: ReactNode }) {
       identityMode: account.identityMode,
       identityHelp: account.identityHelp,
       signUp: account.signUp,
+      signInWithProvider: account.signInWithProvider,
       saveAccount: account.saveAccount,
       logIn: account.logIn,
       logOut: account.logOut,

@@ -5,13 +5,20 @@ import { SpaceItem, SpaceItemStyle, SpaceItemType, UserSpace, ViewerIdentity } f
 import {
   BgConfig,
   EMOJI_ROWS,
+  FONT_CATEGORY_LABELS,
   FONT_OPTIONS,
+  FontCategory,
   GRADIENT_PRESETS,
   SOLID_PRESETS,
   THEME_PRESETS,
   SpaceConfig,
+  SpaceSection,
   bgToCss,
+  clampWeight,
+  defaultSections,
   displayTitle,
+  fontOption,
+  loadFontByLabel,
   fontCss,
   isSticker,
   isPinnedItem,
@@ -25,6 +32,8 @@ import { useMochi } from "@/context/MochiContext";
 import { toast } from "@/lib/toast";
 
 const SpaceBoard = dynamic(() => import("./SpaceBoard"), { ssr: false });
+
+import SpaceSections, { LayoutPanelBody } from "./SpaceSections";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
@@ -46,7 +55,7 @@ interface SpaceStudioProps {
   onNavigateBack: () => void;
 }
 
-type ActivePanel = "themes" | "background" | "audio" | "font" | "add" | "settings" | null;
+type ActivePanel = "themes" | "background" | "audio" | "font" | "add" | "layout" | "settings" | null;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -182,13 +191,15 @@ function BackgroundPicker({
             {uploading ? "Uploading…" : "⬆️ Upload from device"}
             <input type="file" accept="image/*" className="hidden" disabled={uploading}
               onChange={async (e) => {
-                const file = e.target.files?.[0];
+                // React nulls e.currentTarget once the handler yields — grab it now.
+                const input = e.currentTarget;
+                const file = input.files?.[0];
                 if (!file) return;
                 setUploading(true);
                 const url = await onUploadImage(file);
                 setUploading(false);
                 if (url) onChange({ ...bg, type: "image", url, fit: bg.fit ?? "cover" });
-                e.currentTarget.value = "";
+                input.value = "";
               }} />
           </label>
           <input
@@ -237,24 +248,55 @@ function FontPanel({
   font,
   onChange,
 }: Readonly<{ font: SpaceConfig["font"]; onChange: (font: SpaceConfig["font"]) => void }>) {
+  const categories = [...new Set(FONT_OPTIONS.map((f) => f.category))] as FontCategory[];
+  const weights = fontOption(font.family)?.weights ?? [400, 700];
+
   return (
     <div className="space-y-4">
       <div>
         <label className="block text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--muted)" }}>Family</label>
-        <div className="grid grid-cols-2 gap-2">
-          {FONT_OPTIONS.map((opt) => (
-            <button
-              key={opt.label}
-              onClick={() => { loadGoogleFont(opt.gfont); onChange({ ...font, family: opt.label }); }}
-              className="btn-smooth rounded-xl border px-3 py-2 text-sm text-left"
+        <div className="space-y-3">
+          {categories.map((cat) => (
+            <div key={cat}>
+              <p className="mb-1.5 text-[10px] font-semibold" style={{ color: "var(--muted)" }}>{FONT_CATEGORY_LABELS[cat]}</p>
+              <div className="grid grid-cols-2 gap-2">
+                {FONT_OPTIONS.filter((o) => o.category === cat).map((opt) => (
+                  <button
+                    key={opt.label}
+                    onClick={() => {
+                      loadGoogleFont(opt.gfont);
+                      onChange({ ...font, family: opt.label, weight: clampWeight(opt.label, font.weight) });
+                    }}
+                    className="btn-smooth rounded-xl border px-3 py-2 text-sm text-left"
+                    style={{
+                      fontFamily: opt.css,
+                      borderColor: font.family === opt.label ? "var(--pink)" : "var(--border)",
+                      background: font.family === opt.label ? "rgba(255,107,157,0.08)" : "var(--surface)",
+                      color: "var(--foreground-soft)",
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--muted)" }}>Weight</label>
+        <div className="flex flex-wrap gap-1">
+          {weights.map((w) => (
+            <button key={w} onClick={() => onChange({ ...font, weight: w })}
+              className="btn-smooth rounded-lg px-2.5 py-1 text-xs"
               style={{
-                fontFamily: opt.css,
-                borderColor: font.family === opt.label ? "var(--pink)" : "var(--border)",
-                background: font.family === opt.label ? "rgba(255,107,157,0.08)" : "var(--surface)",
-                color: "var(--foreground-soft)",
-              }}
-            >
-              {opt.label}
+                fontWeight: w,
+                background: (font.weight ?? 400) === w ? "rgba(255,107,157,0.12)" : "var(--surface)",
+                color: (font.weight ?? 400) === w ? "var(--pink)" : "var(--foreground-soft)",
+                border: `1px solid ${(font.weight ?? 400) === w ? "var(--pink)" : "var(--border)"}`,
+              }}>
+              {w}
             </button>
           ))}
         </div>
@@ -279,7 +321,7 @@ function FontPanel({
         </label>
         <input type="range" min={11} max={22} value={font.size}
           onChange={(e) => onChange({ ...font, size: Number(e.target.value) })} className="w-full" />
-        <div className="mt-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)", fontFamily: fontCss(font.family), fontSize: font.size, color: font.color, background: "rgba(255,255,255,0.7)" }}>
+        <div className="mt-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)", fontFamily: fontCss(font.family), fontWeight: clampWeight(font.family, font.weight), fontSize: font.size, color: font.color, background: "rgba(255,255,255,0.7)" }}>
           The quick brown fox jumps ✨
         </div>
       </div>
@@ -429,7 +471,10 @@ function StyleSection({ item, onUpdate }: Readonly<{ item: SpaceItem; onUpdate: 
     <div className="space-y-2.5 rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
       <div className="flex items-center justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>✨ Style</p>
-        <button onClick={() => onUpdate({ style: {} })} className="btn-smooth rounded-lg px-2 py-0.5 text-[10px]" style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}>Reset</button>
+        <button
+          // Keep sectionId — resetting looks shouldn't move the item to another board
+          onClick={() => onUpdate({ style: item.style?.sectionId ? { sectionId: item.style.sectionId } : {} })}
+          className="btn-smooth rounded-lg px-2 py-0.5 text-[10px]" style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}>Reset</button>
       </div>
       {showTexture && (
         <div>
@@ -451,6 +496,28 @@ function StyleSection({ item, onUpdate }: Readonly<{ item: SpaceItem; onUpdate: 
           </div>
         </div>
       )}
+      <div>
+        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Font</p>
+        <select
+          value={style.fontFamily ?? ""}
+          onChange={(e) => {
+            const fontFamily = e.target.value || undefined;
+            if (fontFamily) loadFontByLabel(fontFamily);
+            set({ fontFamily });
+          }}
+          className="input-soft w-full px-2.5 py-1.5 text-xs outline-none"
+          style={{ fontFamily: style.fontFamily ? fontCss(style.fontFamily) : undefined }}
+        >
+          <option value="">Default</option>
+          {([...new Set(FONT_OPTIONS.map((f) => f.category))] as FontCategory[]).map((cat) => (
+            <optgroup key={cat} label={FONT_CATEGORY_LABELS[cat]}>
+              {FONT_OPTIONS.filter((f) => f.category === cat).map((f) => (
+                <option key={f.label} value={f.label}>{f.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
       <div>
         <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Corners — {style.radius ?? "auto"}</p>
         <input type="range" min={0} max={40} value={style.radius ?? 16} onChange={(e) => set({ radius: Number(e.target.value) })} className="w-full" />
@@ -700,6 +767,8 @@ export default function SpaceStudio({
   const [showSpacePicker, setShowSpacePicker] = useState(false);
   const [newImageUrl, setNewImageUrl] = useState("");
   const [audioMuted, setAudioMuted] = useState(true);
+  // Which board section new items get added to — the last one the owner touched
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const audioFrameRef = useRef<HTMLIFrameElement>(null);
 
   const selectedSpace = useMemo(
@@ -720,6 +789,7 @@ export default function SpaceStudio({
     fontFamily: fontCss(spaceConfig.font.family),
     fontSize: spaceConfig.font.size,
     color: spaceConfig.font.color,
+    fontWeight: clampWeight(spaceConfig.font.family, spaceConfig.font.weight),
   };
 
   // Load Google Font
@@ -727,6 +797,11 @@ export default function SpaceStudio({
     const opt = FONT_OPTIONS.find((f) => f.label === spaceConfig.font.family);
     loadGoogleFont(opt?.gfont ?? null);
   }, [spaceConfig.font.family]);
+
+  // Board items can carry their own font — make sure those load for visitors too
+  useEffect(() => {
+    for (const item of selectedSpace?.items ?? []) loadFontByLabel(item.style?.fontFamily);
+  }, [selectedSpace?.items]);
 
   // Close the edit sheet whenever the selection changes (incl. deselect).
   useEffect(() => {
@@ -739,6 +814,7 @@ export default function SpaceStudio({
     setEditingItemId(null);
     setActivePanel(null);
     setAudioMuted(true);
+    setActiveBoardId(null);
   }, [selectedSpace?.id]);
 
   // Audio starts muted (browsers block unmuted autoplay). Unmute on a real
@@ -790,6 +866,47 @@ export default function SpaceStudio({
     [onUpdateOwnSpace, spaceConfig]
   );
 
+  // Page layout — a column of sections the owner can add / remove / reorder.
+  // Undefined means "never customised", which maps to the classic layout.
+  const sections = useMemo(() => spaceConfig.sections ?? defaultSections(), [spaceConfig.sections]);
+  const handleUpdateSections = useCallback(
+    (next: SpaceSection[]) => updateConfig({ sections: next }),
+    [updateConfig]
+  );
+
+  // ── Per-board item scoping ──────────────────────────────────────────────────
+  // Each board section owns its items via style.sectionId; items with no tag
+  // (everything created before boards were scoped) belong to the TOP board.
+  const boardSectionIds = useMemo(
+    () => sections.filter((s) => s.type === "board").map((s) => s.id),
+    [sections]
+  );
+  const primaryBoardId = boardSectionIds[0] ?? null;
+  const targetBoardId = activeBoardId && boardSectionIds.includes(activeBoardId)
+    ? activeBoardId
+    : primaryBoardId;
+
+  const itemsForBoard = useCallback(
+    (boardId: string | null) =>
+      (selectedSpace?.items ?? []).filter((item) => {
+        const sid = item.style?.sectionId;
+        return sid ? sid === boardId : boardId === primaryBoardId || boardId === null;
+      }),
+    [selectedSpace?.items, primaryBoardId]
+  );
+
+  // New items land on the last board the owner touched (default: the top board)
+  const addItemToBoard = useCallback(
+    (type: SpaceItemType, seed?: Partial<SpaceItem>) =>
+      onAddItemToOwnSpace(
+        type,
+        targetBoardId
+          ? { ...seed, style: { ...(seed?.style ?? {}), sectionId: targetBoardId } }
+          : seed
+      ),
+    [onAddItemToOwnSpace, targetBoardId]
+  );
+
   const uploadBgImage = useCallback(async (file: File): Promise<string | null> => {
     if (!ownSpace) return null;
     const supabase = createSupabaseBrowserClient();
@@ -812,7 +929,7 @@ export default function SpaceStudio({
   const togglePanel = (p: ActivePanel) => setActivePanel((prev) => (prev === p ? null : p));
 
   const addSticker = (emoji: string) => {
-    onAddItemToOwnSpace("note", {
+    addItemToBoard("note", {
       color: "sticker", title: emoji, content: emoji,
       width: 90, height: 90,
       rotation: Math.round((Math.random() * 12 - 6) * 10) / 10,
@@ -868,6 +985,28 @@ export default function SpaceStudio({
       </div>
     );
   }
+
+  const layoutMode = spaceConfig.layout ?? "sections";
+
+  // One canvas per board section — full-page in canvas mode (top board only),
+  // embedded per section in sections mode. Remounts on space/board change via key.
+  const renderBoardFor = (boardId: string | null) => (
+    <SpaceBoard
+      key={`${selectedSpace.id}:${boardId ?? "all"}`}
+      items={itemsForBoard(boardId)}
+      isOwner={isOwner}
+      accent={accent}
+      onItemChange={handleItemChange}
+      onSelectItem={setSelectedItemId}
+      onEditItem={setEditingItemId}
+      onDeleteItem={(itemId) => {
+        onRemoveSpaceItem(selectedSpace.id, itemId);
+        setSelectedItemId(null);
+        setEditingItemId(null);
+      }}
+      selectedItemId={selectedItemId}
+    />
+  );
 
   return (
     <div className="relative h-full overflow-hidden" style={{ background: bgCssValue }}>
@@ -954,6 +1093,7 @@ export default function SpaceStudio({
             { id: "audio", label: "🎵 Audio" },
             { id: "font", label: "🔤 Font" },
             { id: "add", label: "➕ Add" },
+            { id: "layout", label: "🧩 Layout" },
             { id: "settings", label: "⚙️ Settings" },
           ] as const).map(({ id, label }) => (
             <button key={id} onClick={() => togglePanel(id)}
@@ -982,98 +1122,111 @@ export default function SpaceStudio({
         </div>
       )}
 
-      {/* ── Board ── */}
-      <div className="absolute inset-0" style={{ background: bgCssValue }}>
+      {/* ── Page — either the classic full-page canvas or a column of sections ── */}
+      {layoutMode === "canvas" ? (
+        <div className="absolute inset-0" style={{ background: bgCssValue }}>
+          {/* Ambient accent wash */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
 
-        {/* Ambient accent wash */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
+          {/* Canvas mode always shows the TOP board's canvas */}
+          {renderBoardFor(primaryBoardId)}
 
-        {/* Infinite pan/zoom canvas — remounts on space change */}
-        <SpaceBoard
-          key={selectedSpace.id}
-          items={selectedSpace.items}
-          isOwner={isOwner}
-          accent={accent}
-          onItemChange={handleItemChange}
-          onSelectItem={setSelectedItemId}
-          onEditItem={setEditingItemId}
-          onDeleteItem={(itemId) => {
-            onRemoveSpaceItem(selectedSpace.id, itemId);
-            setSelectedItemId(null);
-            setEditingItemId(null);
-          }}
-          selectedItemId={selectedItemId}
-        />
-
-        {/* Profile card overlay */}
-        <div
-          className="absolute left-4 top-[4.75rem] z-20 max-w-[280px] overflow-hidden rounded-[24px] border shadow-[0_12px_32px_rgba(53,39,66,0.12)]"
-          style={{ borderColor: `${accent}44`, background: "rgba(255,255,255,0.84)", backdropFilter: "blur(12px)" }}
-        >
-          <div className="flex items-center gap-3 p-4">
-            {selectedSpace.avatarUrl ? (
-              <img src={selectedSpace.avatarUrl} alt={selectedSpace.ownerName} className="h-14 w-14 rounded-2xl border-2 object-cover shrink-0" style={{ borderColor: accent }} />
-            ) : (
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 text-xl font-bold text-white" style={{ borderColor: accent, background: accent }}>
-                {selectedSpace.ownerName.slice(0, 1).toUpperCase()}
-              </div>
-            )}
-            <div className="min-w-0">
-              <p className="truncate font-bold" style={{ ...fontStyle, fontSize: Math.min((spaceConfig.font.size) + 2, 22) }}>
-                {selectedSpace.title || selectedSpace.ownerName}
-              </p>
-              <p className="mt-0.5 flex items-center gap-1 truncate text-[11px]" style={{ color: "var(--muted)" }}>
-                <span className="truncate">@{selectedSpace.slug}</span>
-                {selectedSpace.ownerIsSupporter ? (
-                  <span title="Mochi Plus supporter" aria-label="Mochi Plus supporter" style={{ color: "var(--pink)" }}>♡</span>
+          {/* Compact floating profile card */}
+          <div
+            className="absolute left-4 top-[4.75rem] z-20 max-w-[280px] overflow-hidden rounded-[24px] border shadow-[0_12px_32px_rgba(53,39,66,0.12)]"
+            style={{ borderColor: `${accent}44`, background: "rgba(255,255,255,0.84)", backdropFilter: "blur(12px)" }}
+          >
+            <div className="flex items-center gap-3 p-4">
+              {selectedSpace.avatarUrl ? (
+                <img src={selectedSpace.avatarUrl} alt={selectedSpace.ownerName} className="h-14 w-14 shrink-0 rounded-2xl border-2 object-cover" style={{ borderColor: accent }} />
+              ) : (
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 text-xl font-bold text-white" style={{ borderColor: accent, background: accent }}>
+                  {selectedSpace.ownerName.slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="truncate font-bold" style={{ ...fontStyle, fontSize: Math.min(spaceConfig.font.size + 2, 22) }}>
+                  {selectedSpace.title || selectedSpace.ownerName}
+                </p>
+                <p className="mt-0.5 flex items-center gap-1 truncate text-[11px]" style={{ color: "var(--muted)" }}>
+                  <span className="truncate">@{selectedSpace.slug}</span>
+                  {selectedSpace.ownerIsSupporter ? (
+                    <span title="Mochi Plus supporter" aria-label="Mochi Plus supporter" style={{ color: "var(--pink)" }}>♡</span>
+                  ) : null}
+                </p>
+                {selectedSpace.tagline ? (
+                  <p className="mt-1 text-xs leading-snug" style={{ color: "var(--foreground-soft)" }}>{selectedSpace.tagline}</p>
                 ) : null}
-              </p>
-              {selectedSpace.tagline ? (
-                <p className="mt-1 text-xs leading-snug" style={{ color: "var(--foreground-soft)" }}>{selectedSpace.tagline}</p>
-              ) : null}
+              </div>
             </div>
+            {selectedSpace.aboutMe ? (
+              <p
+                className="border-t px-4 pb-3 pt-2 text-xs leading-relaxed"
+                style={{ borderColor: `${accent}22`, ...fontStyle, fontSize: Math.max(spaceConfig.font.size - 2, 11) }}
+              >
+                {selectedSpace.aboutMe}
+              </p>
+            ) : null}
           </div>
-          {selectedSpace.aboutMe ? (
-            <p
-              className="border-t px-4 pb-3 pt-2 text-xs leading-relaxed"
-              style={{ borderColor: `${accent}22`, ...fontStyle, fontSize: Math.max(spaceConfig.font.size - 2, 11), color: spaceConfig.font.color }}
-            >
-              {selectedSpace.aboutMe}
-            </p>
-          ) : null}
         </div>
+      ) : (
+        <div className="absolute inset-0 overflow-y-auto" style={{ background: bgCssValue }}>
 
-        {/* YouTube audio iframe + now-playing chip */}
-        {youtubeId ? (
-          <>
-            <iframe
-              ref={audioFrameRef}
-              src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&loop=${spaceConfig.audioLoop ? 1 : 0}&playlist=${youtubeId}&controls=0&mute=1&enablejsapi=1`}
-              title="soundtrack"
-              allow="autoplay"
-              className="pointer-events-none absolute opacity-0"
-              style={{ width: 1, height: 1, left: -9999, top: -9999 }}
+          {/* Ambient accent wash */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
+
+          <div className="relative z-20 mx-auto w-full max-w-4xl px-4 pb-36 pt-24 sm:px-6">
+            <SpaceSections
+              space={selectedSpace}
+              sections={sections}
+              isOwner={isOwner}
+              accent={accent}
+              pageFont={spaceConfig.font}
+              onUpdateSections={handleUpdateSections}
+              onOpenVisitorNote={() => setShowVisitorNote(true)}
+              onUploadImage={uploadBgImage}
+              renderBoard={(_size, sectionId) => (
+                // Track the last-touched board so ➕ Add targets it
+                <div className="absolute inset-0" onPointerDownCapture={() => setActiveBoardId(sectionId)}>
+                  {renderBoardFor(sectionId)}
+                </div>
+              )}
             />
-            <button
-              onClick={toggleAudioMute}
-              className="btn-smooth absolute bottom-6 right-6 z-20 flex items-center gap-2 rounded-full border px-4 py-2"
-              style={{ borderColor: `${accent}55`, background: "rgba(255,255,255,0.90)", backdropFilter: "blur(12px)", boxShadow: "0 8px 20px rgba(53,39,66,0.12)" }}
-            >
-              <span aria-hidden>{audioMuted ? "🔇" : "🎵"}</span>
-              <span className="text-[11px] font-semibold" style={{ color: accent }}>
-                {audioMuted ? "Tap to play music" : "Now playing"}
-              </span>
-              {!audioMuted && isOwner && <span className="text-[10px]" style={{ color: "var(--muted)" }}>{spaceConfig.audioLoop ? "· loop" : "· once"}</span>}
-              <a href={selectedSpace.youtubeUrl} target="_blank" rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                style={{ background: `${accent}22`, color: accent }}>
-                Open
-              </a>
-            </button>
-          </>
-        ) : null}
-      </div>
+          </div>
+        </div>
+      )}
+
+      {/* YouTube ambient audio iframe + now-playing chip (bottom-left so it
+          doesn't collide with the visitor "leave a note" button) */}
+      {youtubeId ? (
+        <>
+          <iframe
+            ref={audioFrameRef}
+            src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&loop=${spaceConfig.audioLoop ? 1 : 0}&playlist=${youtubeId}&controls=0&mute=1&enablejsapi=1`}
+            title="soundtrack"
+            allow="autoplay"
+            className="pointer-events-none absolute opacity-0"
+            style={{ width: 1, height: 1, left: -9999, top: -9999 }}
+          />
+          <button
+            onClick={toggleAudioMute}
+            className="btn-smooth absolute bottom-6 left-6 z-[120] flex items-center gap-2 rounded-full border px-4 py-2"
+            style={{ borderColor: `${accent}55`, background: "rgba(255,255,255,0.90)", backdropFilter: "blur(12px)", boxShadow: "0 8px 20px rgba(53,39,66,0.12)" }}
+          >
+            <span aria-hidden>{audioMuted ? "🔇" : "🎵"}</span>
+            <span className="text-[11px] font-semibold" style={{ color: accent }}>
+              {audioMuted ? "Tap to play music" : "Now playing"}
+            </span>
+            {!audioMuted && isOwner && <span className="text-[10px]" style={{ color: "var(--muted)" }}>{spaceConfig.audioLoop ? "· loop" : "· once"}</span>}
+            <a href={selectedSpace.youtubeUrl} target="_blank" rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{ background: `${accent}22`, color: accent }}>
+              Open
+            </a>
+          </button>
+        </>
+      ) : null}
 
       {/* ── Visitor "Leave a note" button ── */}
       {!isOwner && (
@@ -1189,7 +1342,7 @@ export default function SpaceStudio({
                   { label: "🖼️ Photo card", type: "image" as const, seed: { width: 240, height: 200 } },
                   { label: "✏️ Doodle frame", type: "drawing" as const, seed: { width: 240, height: 200 } },
                 ].map(({ label, type, seed }) => (
-                  <button key={type} onClick={() => { onAddItemToOwnSpace(type, seed); setActivePanel(null); }}
+                  <button key={type} onClick={() => { addItemToBoard(type, seed); setActivePanel(null); }}
                     className="btn-smooth rounded-2xl border px-3 py-2.5 text-xs font-semibold text-left"
                     style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--foreground-soft)" }}>
                     {label}
@@ -1207,7 +1360,7 @@ export default function SpaceStudio({
                   { label: "📰 Heading", type: "header" as const },
                   { label: "➖ Divider", type: "divider" as const },
                 ]).map(({ label, type }) => (
-                  <button key={type} onClick={() => { onAddItemToOwnSpace(type); setActivePanel(null); }}
+                  <button key={type} onClick={() => { addItemToBoard(type); setActivePanel(null); }}
                     className="btn-smooth rounded-2xl border px-3 py-2.5 text-xs font-semibold text-left"
                     style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--foreground-soft)" }}>
                     {label}
@@ -1230,7 +1383,7 @@ export default function SpaceStudio({
                 <button
                   onClick={() => {
                     if (newImageUrl.trim()) {
-                      onAddItemToOwnSpace("image", { imageUrl: newImageUrl.trim(), width: 240, height: 200 });
+                      addItemToBoard("image", { imageUrl: newImageUrl.trim(), width: 240, height: 200 });
                       setNewImageUrl(""); setActivePanel(null);
                     }
                   }}
@@ -1243,7 +1396,7 @@ export default function SpaceStudio({
 
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--muted)" }}>Draw a doodle</p>
-              <DoodlePad onCreate={(url) => { onAddItemToOwnSpace("drawing", { imageUrl: url, title: "Doodle", width: 240, height: 200 }); setActivePanel(null); }} />
+              <DoodlePad onCreate={(url) => { addItemToBoard("drawing", { imageUrl: url, title: "Doodle", width: 240, height: 200 }); setActivePanel(null); }} />
             </div>
 
             <div>
@@ -1253,15 +1406,29 @@ export default function SpaceStudio({
                 Choose image file
                 <input type="file" accept="image/*" className="hidden"
                   onChange={async (e) => {
-                    const file = e.target.files?.[0];
+                    // React nulls e.currentTarget once the handler yields — grab it now.
+                    const input = e.currentTarget;
+                    const file = input.files?.[0];
                     if (!file) return;
                     const url = await readFileAsDataUrl(file);
-                    if (url) { onAddItemToOwnSpace("image", { imageUrl: url, title: file.name.replace(/\.[^.]+$/, ""), width: 240, height: 200 }); setActivePanel(null); }
-                    e.currentTarget.value = "";
+                    if (url) { addItemToBoard("image", { imageUrl: url, title: file.name.replace(/\.[^.]+$/, ""), width: 240, height: 200 }); setActivePanel(null); }
+                    input.value = "";
                   }} />
               </label>
             </div>
           </div>
+        </PanelShell>
+      )}
+
+      {activePanel === "layout" && (
+        <PanelShell title="🧩 Page layout" onClose={() => setActivePanel(null)}>
+          <LayoutPanelBody
+            sections={sections}
+            accent={accent}
+            layout={layoutMode}
+            onChangeLayout={(layout) => updateConfig({ layout })}
+            onUpdateSections={handleUpdateSections}
+          />
         </PanelShell>
       )}
 

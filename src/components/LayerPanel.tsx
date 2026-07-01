@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from "react";
-import { FiEye, FiEyeOff } from "react-icons/fi";
+import { FiEye, FiEyeOff, FiArrowUp, FiArrowDown, FiChevronUp, FiChevronDown, FiX, FiTrash2 } from "react-icons/fi";
 import { PlacedSticker } from "@/types";
 import { FREE, LAYER_CEILING } from "@/lib/plus";
 
@@ -112,7 +112,7 @@ function MiniThumb({ item }: { item: PlacedSticker }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img src={item.imageData} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
-        <span style={{ fontSize: 8, color: "#9ca3af" }}>?</span>
+        <span style={{ fontSize: 8, color: "var(--muted)" }}>?</span>
       )}
     </div>
   );
@@ -199,7 +199,9 @@ export default function LayerPanel({
 
   const handleTouchMove = (e: React.TouchEvent, targetLayerIdx: number) => {
     if (!touchDragItemRef.current) return;
-    e.preventDefault();
+    // NOTE: preventDefault() is useless here — React registers touchmove
+    // passively at the root. Scrolling is suppressed instead via
+    // `touchAction: "none"` on the draggable thumbs below.
     const touch = e.touches[0];
     const dx = touch.clientX - touchDragItemRef.current.startX;
     const dy = touch.clientY - touchDragItemRef.current.startY;
@@ -260,11 +262,11 @@ export default function LayerPanel({
           style={{
             width: 18, height: 18, borderRadius: "50%", border: "none",
             background: "rgba(167,139,250,0.13)", cursor: "pointer",
-            fontSize: 9, color: "#6d28d9", padding: 0,
-            display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800,
+            fontSize: 11, color: "#6d28d9", padding: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
           }}
         >
-          {collapsed ? "▾" : "▴"}
+          {collapsed ? <FiChevronDown /> : <FiChevronUp />}
         </button>
         {onHide && (
           <button
@@ -272,12 +274,12 @@ export default function LayerPanel({
             title="Hide layer panel"
             style={{
               width: 18, height: 18, borderRadius: "50%", border: "none",
-              background: "rgba(0,0,0,0.06)", cursor: "pointer",
-              fontSize: 11, color: "#9ca3af", padding: 0,
+              background: "rgba(167,139,250,0.09)", cursor: "pointer",
+              fontSize: 11, color: "var(--muted)", padding: 0,
               display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
             }}
           >
-            ×
+            <FiX />
           </button>
         )}
       </div>
@@ -320,7 +322,7 @@ export default function LayerPanel({
                     <div style={{ width: 9, height: 9, borderRadius: "50%", background: color, flexShrink: 0 }} />
                     <span style={{
                       fontSize: 10, fontWeight: isCurrentlyActive ? 700 : hasSelectedItem ? 600 : 500,
-                      color: isCurrentlyActive ? "#374151" : hasSelectedItem ? "#4b5563" : "#6b7280",
+                      color: isCurrentlyActive ? "var(--foreground)" : hasSelectedItem ? "var(--foreground-soft)" : "var(--muted-strong)",
                       fontFamily: '"Space Mono", monospace', flex: 1, minWidth: 0,
                     }}>
                       <span style={{ opacity: isHidden ? 0.45 : 1, textDecoration: isHidden ? "line-through" : "none" }}>{name}</span>
@@ -331,7 +333,7 @@ export default function LayerPanel({
                         <span style={{ fontSize: 8, color: "#a78bfa", marginLeft: 4, fontWeight: 400 }}>top</span>
                       )}
                       {layerIdx === backLayerId && layerIdx !== topLayerId && (
-                        <span style={{ fontSize: 8, color: "#9ca3af", marginLeft: 4, fontWeight: 400 }}>back</span>
+                        <span style={{ fontSize: 8, color: "var(--muted)", marginLeft: 4, fontWeight: 400 }}>back</span>
                       )}
                     </span>
                     {layerItems.length > 0 && (
@@ -355,11 +357,11 @@ export default function LayerPanel({
                           style={{
                             width: 18, height: 18,
                             display: "flex", alignItems: "center", justifyContent: "center",
-                            background: isHidden ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.05)",
-                            border: "none", borderRadius: 4,
+                            background: isHidden ? "rgba(167,139,250,0.20)" : "rgba(167,139,250,0.09)",
+                            border: "none", borderRadius: 6,
                             cursor: "pointer",
                             fontSize: 10,
-                            color: isHidden ? "#9ca3af" : "#6b7280",
+                            color: isHidden ? "var(--muted)" : "var(--muted-strong)",
                           }}
                           title={isHidden ? "Show layer" : "Hide layer"}
                         >
@@ -375,15 +377,15 @@ export default function LayerPanel({
                         style={{
                           width: 18, height: 18,
                           display: "flex", alignItems: "center", justifyContent: "center",
-                          background: !canMoveUp ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.08)",
-                          border: "none", borderRadius: 4,
+                          background: "rgba(167,139,250,0.09)",
+                          border: "none", borderRadius: 6,
                           cursor: !canMoveUp ? "not-allowed" : "pointer",
                           opacity: !canMoveUp ? 0.3 : 1,
-                          fontSize: 10, color: "#6b7280",
+                          fontSize: 10, color: "var(--muted-strong)",
                         }}
                         title="Move layer up"
                       >
-                        ↑
+                        <FiArrowUp />
                       </button>
                       <button
                         onClick={(e) => {
@@ -394,15 +396,15 @@ export default function LayerPanel({
                         style={{
                           width: 18, height: 18,
                           display: "flex", alignItems: "center", justifyContent: "center",
-                          background: !canMoveDown ? "rgba(0,0,0,0.05)" : "rgba(0,0,0,0.08)",
-                          border: "none", borderRadius: 4,
+                          background: "rgba(167,139,250,0.09)",
+                          border: "none", borderRadius: 6,
                           cursor: !canMoveDown ? "not-allowed" : "pointer",
                           opacity: !canMoveDown ? 0.3 : 1,
-                          fontSize: 10, color: "#6b7280",
+                          fontSize: 10, color: "var(--muted-strong)",
                         }}
                         title="Move layer down"
                       >
-                        ↓
+                        <FiArrowDown />
                       </button>
                     </div>
                   </div>
@@ -425,6 +427,7 @@ export default function LayerPanel({
                             title={`${item.type === "text" ? (item.text ?? "Text") : item.type} — drag to move layer`}
                             style={{
                               cursor: "grab",
+                              touchAction: "none",
                               outline: isSelected ? `2px solid ${color}` : "2px solid transparent",
                               borderRadius: 6, outlineOffset: 1, transition: "outline 0.1s",
                             }}
@@ -434,7 +437,7 @@ export default function LayerPanel({
                         );
                       })}
                       {layerItems.length > 6 && (
-                        <span style={{ fontSize: 9, color: "#9ca3af", fontFamily: "monospace", padding: "2px 4px" }}>
+                        <span style={{ fontSize: 9, color: "var(--muted)", fontFamily: "monospace", padding: "2px 4px" }}>
                           +{layerItems.length - 6}
                         </span>
                       )}
@@ -476,7 +479,7 @@ export default function LayerPanel({
               display: "flex", flexDirection: "column", gap: 6,
             }}>
               <div style={{
-                fontSize: 9, color: "#9ca3af",
+                fontSize: 9, color: "var(--muted)",
                 fontFamily: '"Space Mono", monospace',
                 letterSpacing: "0.06em", textTransform: "uppercase",
               }}>
@@ -512,13 +515,14 @@ export default function LayerPanel({
                       onClick={() => { onDeleteItem(selectedItem.id); onSelectItem(null); }}
                       title="Delete item"
                       style={{
-                        padding: "3px 7px", fontSize: 12, fontWeight: 700, borderRadius: 8,
-                        border: "1px solid rgba(220,38,38,0.2)",
-                        background: "rgba(220,38,38,0.07)", color: "#dc2626",
-                        cursor: "pointer", lineHeight: 1.2, flexShrink: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        height: 24, width: 26, fontSize: 11, borderRadius: 8,
+                        border: "1px solid rgba(255,107,157,0.28)",
+                        background: "rgba(255,107,157,0.09)", color: "var(--pink)",
+                        cursor: "pointer", flexShrink: 0,
                       }}
                     >
-                      ×
+                      <FiTrash2 />
                     </button>
                   </>
                 )}

@@ -4,6 +4,7 @@ import { generateId } from "@/lib/id";
 import type { User } from "@supabase/supabase-js";
 import { uniqueNamesGenerator } from "unique-names-generator";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { toast } from "@/lib/toast";
 import { ViewerIdentity } from "@/types";
 import type { Database } from "@/types/database";
 
@@ -89,14 +90,21 @@ function getMetadataText(metadata: Record<string, unknown>, key: string): string
 function buildProfileInsert(user: User): ProfileInsert {
   const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
   const emailName = user.email?.split("@")[0] ?? "";
+  // OAuth providers (Google, Discord) put the person's name in full_name/name
+  // and their photo in avatar_url/picture.
+  const oauthName = getMetadataText(metadata, "full_name") || getMetadataText(metadata, "name");
   const username =
     sanitizeUsername(getMetadataText(metadata, "username")) ||
     sanitizeUsername(emailName) ||
+    sanitizeUsername(oauthName) ||
     `mochi_${user.id.slice(0, 8)}`;
-  const displayName = getMetadataText(metadata, "display_name") || username;
+  const displayName = getMetadataText(metadata, "display_name") || oauthName || username;
   const accentColor = getMetadataText(metadata, "accent_color") || seededPickFrom(ACCENT_CHOICES, username);
   const wallpaper = getMetadataText(metadata, "wallpaper") || seededPickFrom(WALLPAPER_CHOICES, username + "w");
-  const avatarUrl = getMetadataText(metadata, "avatar_url") || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(displayName)}`;
+  const avatarUrl =
+    getMetadataText(metadata, "avatar_url") ||
+    getMetadataText(metadata, "picture") ||
+    `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(displayName)}`;
   const bio = getMetadataText(metadata, "bio") || "Artist, collector, and letter sender.";
 
   return {
@@ -134,6 +142,17 @@ export function useAccount() {
     const guest = loadGuestIdentity();
     setGuestId(guest.id);
     setGuestName(guest.name);
+
+    // Surface OAuth redirect failures (e.g. "Identity is already linked to
+    // another user") that come back in the URL instead of via a return value.
+    const redirectParams = new URLSearchParams(
+      window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.search
+    );
+    const oauthError = redirectParams.get("error_description");
+    if (oauthError) {
+      toast(oauthError.replaceAll("+", " "), { variant: "error", icon: "warning" });
+      window.history.replaceState(null, "", window.location.pathname);
+    }
 
     supabase.auth.getSession().then(async ({ data }) => {
       const existingUser = data.session?.user ?? null;
@@ -173,7 +192,6 @@ export function useAccount() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const nextUser = session?.user ?? null;
-      console.log("[DBG auth]", _event, "user:", nextUser?.id ?? null, "anon:", nextUser ? isAnonymousUser(nextUser) : null);
       if (nextUser) {
         if (isAnonymousUser(nextUser) && session) saveAnonTokens(session);
         else if (!isAnonymousUser(nextUser)) clearAnonTokens();
@@ -325,6 +343,25 @@ export function useAccount() {
     return { ok: true };
   }, []);
 
+  // OAuth sign-up/sign-in (Google, Discord). For the anonymous user this links
+  // the provider identity onto the *existing* auth user (same auth.uid()), so
+  // all their assets/mail/space carry over — exactly like saveAccount but with
+  // no password. Requires the provider to be enabled in the Supabase dashboard,
+  // and "Allow manual linking" turned on for the linkIdentity path.
+  // Both calls redirect away to the provider; on return, detectSessionInUrl
+  // picks up the session and onAuthStateChange takes it from there.
+  const signInWithProvider = useCallback(async (
+    provider: "google" | "discord"
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const supabase = createSupabaseBrowserClient();
+    const options = { redirectTo: typeof window === "undefined" ? undefined : window.location.origin };
+    const { error } = authUser && isAnonymousUser(authUser)
+      ? await supabase.auth.linkIdentity({ provider, options })
+      : await supabase.auth.signInWithOAuth({ provider, options });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  }, [authUser]);
+
   // Gentle save at checkout: convert the *existing* anonymous user into a saved
   // account in place (same auth.uid()), so all their assets/mail/space carry
   // over and any Mochi Plus perks bind to a durable, recoverable identity.
@@ -468,6 +505,7 @@ export function useAccount() {
         ? `Local-only guest mode${anonymousAuthWarning ? `: ${anonymousAuthWarning}` : ". Enable Supabase anonymous sign-ins for shared cross-device users."}`
         : null,
     signUp,
+    signInWithProvider,
     saveAccount,
     logIn,
     logOut,

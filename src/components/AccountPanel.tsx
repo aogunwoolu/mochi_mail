@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ViewerIdentity } from "@/types";
 import SupportMochiPanel from "@/components/SupportMochiPanel";
+import HelpRequestPanel from "@/components/HelpRequestPanel";
 import { getTrackingEnabled, setTrackingEnabled } from "@/lib/posthog";
 import { toast } from "@/lib/toast";
 import { bgToCss, parseSpaceConfig } from "@/lib/spaceConfig";
@@ -44,11 +45,14 @@ interface AccountPanelProps {
   onClose: () => void;
   onRenameGuest: (name: string) => void;
   onSignUp: (username: string, password: string, displayName: string) => Promise<{ ok: boolean; error?: string }>;
+  onOAuth: (provider: "google" | "discord") => Promise<{ ok: boolean; error?: string }>;
   onLogIn: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   onLogOut: () => void;
   onUpdateAccount: (patch: { displayName?: string; avatarUrl?: string; bio?: string; accentColor?: string; wallpaper?: string; youtubeUrl?: string; homeTitle?: string; }) => void;
   onUploadAvatar?: (file: File) => Promise<string | null>;
   onOpenSpaces: () => void;
+  /** When true, the help/feedback section starts expanded. */
+  initialHelpOpen?: boolean;
 }
 
 interface AuthenticatedPanelProps {
@@ -91,9 +95,30 @@ interface GuestPanelProps {
   displayName: string;
   setDisplayName: (value: string) => void;
   handleAuth: () => void;
+  handleOAuth: (provider: "google" | "discord") => void;
+  oauthBusy: "google" | "discord" | null;
   authBusy: boolean;
   error: string;
   clearError: () => void;
+}
+
+function GoogleLogo() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden>
+      <path fill="#4285F4" d="M23.5 12.27c0-.85-.08-1.66-.22-2.45H12v4.64h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.09 3.57-5.16 3.57-8.81Z" />
+      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.87-3.01c-1.08.72-2.45 1.15-4.06 1.15-3.13 0-5.78-2.11-6.72-4.96H1.28v3.1A11.99 11.99 0 0 0 12 24Z" />
+      <path fill="#FBBC05" d="M5.28 14.27a7.2 7.2 0 0 1 0-4.53v-3.1H1.28a12 12 0 0 0 0 10.73l4-3.1Z" />
+      <path fill="#EA4335" d="M12 4.77c1.76 0 3.34.61 4.59 1.8l3.44-3.44A11.98 11.98 0 0 0 1.28 6.63l4 3.1C6.22 6.89 8.87 4.77 12 4.77Z" />
+    </svg>
+  );
+}
+
+function DiscordLogo() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+      <path fill="#5865F2" d="M20.32 4.37a19.8 19.8 0 0 0-4.89-1.52.07.07 0 0 0-.08.04c-.21.38-.44.87-.6 1.25a18.27 18.27 0 0 0-5.5 0 12.6 12.6 0 0 0-.61-1.25.08.08 0 0 0-.08-.04 19.74 19.74 0 0 0-4.88 1.52.07.07 0 0 0-.04.03A20.26 20.26 0 0 0 .1 18.06a.08.08 0 0 0 .03.05 19.9 19.9 0 0 0 6 3.03.08.08 0 0 0 .08-.03c.46-.63.87-1.3 1.22-2a.08.08 0 0 0-.04-.1 13.1 13.1 0 0 1-1.87-.9.08.08 0 0 1-.01-.12c.13-.1.25-.2.37-.29a.07.07 0 0 1 .08-.01 14.2 14.2 0 0 0 12.06 0 .07.07 0 0 1 .08 0c.12.11.25.21.38.3a.08.08 0 0 1-.01.13c-.6.35-1.22.64-1.87.89a.08.08 0 0 0-.04.1c.36.7.77 1.37 1.22 2a.08.08 0 0 0 .08.03 19.84 19.84 0 0 0 6.02-3.03.08.08 0 0 0 .03-.05 20.12 20.12 0 0 0-3.57-13.66.06.06 0 0 0-.03-.03ZM8.02 15.33c-1.18 0-2.16-1.08-2.16-2.42 0-1.33.96-2.42 2.16-2.42 1.21 0 2.18 1.1 2.16 2.42 0 1.34-.96 2.42-2.16 2.42Zm7.97 0c-1.18 0-2.15-1.08-2.15-2.42 0-1.33.95-2.42 2.15-2.42 1.22 0 2.18 1.1 2.16 2.42 0 1.34-.94 2.42-2.16 2.42Z" />
+    </svg>
+  );
 }
 
 function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
@@ -145,7 +170,6 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
           {(() => {
             const url = props.avatarUrl.trim();
             if (url && !url.includes("dicebear")) {
-              console.log("[Avatar] Rendering custom avatar:", url);
               return (
                 <button
                   onClick={() => props.setAvatarUrl(url)}
@@ -312,6 +336,39 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
           ))}
         </div>
 
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {([
+            { provider: "google" as const, label: "Google", logo: <GoogleLogo /> },
+            { provider: "discord" as const, label: "Discord", logo: <DiscordLogo /> },
+          ]).map(({ provider, label, logo }) => (
+            <button
+              key={provider}
+              onClick={() => props.handleOAuth(provider)}
+              disabled={props.oauthBusy !== null || props.authBusy}
+              className="btn-smooth inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold"
+              style={{
+                background: "rgba(255,255,255,0.88)",
+                color: "var(--foreground-soft)",
+                border: "1px solid var(--border)",
+                opacity: props.oauthBusy && props.oauthBusy !== provider ? 0.6 : 1,
+              }}
+            >
+              {props.oauthBusy === provider ? (
+                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="var(--muted)" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
+                </svg>
+              ) : logo}
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mb-3 flex items-center gap-2" aria-hidden>
+          <div className="h-px flex-1" style={{ background: "var(--border)" }} />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>or with a username</span>
+          <div className="h-px flex-1" style={{ background: "var(--border)" }} />
+        </div>
+
         <div className="space-y-2 rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.7)" }}>
           {props.mode === "signup" ? (
             <div>
@@ -370,15 +427,18 @@ export default function AccountPanel({
   onClose,
   onRenameGuest,
   onSignUp,
+  onOAuth,
   onLogIn,
   onLogOut,
   onUpdateAccount,
   onUploadAvatar,
   onOpenSpaces,
+  initialHelpOpen,
 }: Readonly<AccountPanelProps>) {
   const [mode, setMode] = useState<"login" | "signup">("signup");
   const [error, setError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState<"google" | "discord" | null>(null);
   const [trackingEnabled, setTrackingEnabledState] = useState(getTrackingEnabled);
 
   const handleTrackingToggle = () => {
@@ -470,6 +530,19 @@ export default function AccountPanel({
     }
   };
 
+  const handleOAuth = async (provider: "google" | "discord") => {
+    setOauthBusy(provider);
+    const result = await onOAuth(provider);
+    // On success the browser navigates away to the provider — keep the spinner
+    // going until then. Only reset on failure.
+    if (!result.ok) {
+      setOauthBusy(null);
+      const msg = result.error ?? "Unable to continue.";
+      setError(msg);
+      toast(msg, { variant: "error", icon: "warning" });
+    }
+  };
+
   const handleAuth = async () => {
     setAuthBusy(true);
     const result = mode === "signup"
@@ -543,6 +616,8 @@ export default function AccountPanel({
       displayName={displayName}
       setDisplayName={setDisplayName}
       handleAuth={handleAuth}
+      handleOAuth={(provider) => { void handleOAuth(provider); }}
+      oauthBusy={oauthBusy}
       authBusy={authBusy}
       error={error}
       clearError={() => setError("")}
@@ -606,6 +681,9 @@ export default function AccountPanel({
         {panelBody}
         <div className="mt-3">
           <SupportMochiPanel />
+        </div>
+        <div className="mt-3">
+          <HelpRequestPanel defaultOpen={initialHelpOpen} />
         </div>
       </div>
 
