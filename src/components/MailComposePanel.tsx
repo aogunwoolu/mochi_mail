@@ -556,16 +556,17 @@ export default function MailComposePanel({
         <p className="section-title mb-3">Address</p>
         <div className="grid gap-3 md:grid-cols-[1fr_auto_1fr] md:items-end">
           <div>
-            <label htmlFor="mail-compose-from" className="mb-1 block text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
+            <label htmlFor="mail-compose-from" className="mb-1 pl-2 block text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
               From
             </label>
-            <div id="mail-compose-from" className="rounded-xl px-3 py-2 text-sm" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
-              {senderName}
+            <div id="mail-compose-from" className="rounded-xl px-3 py-2 text-sm flex items-center" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
+              <p>{senderName}</p>
+              <p className="ml-2 text-xs" style={{ color: "var(--muted)" }}>(me)</p>
             </div>
           </div>
-          <div className="flex h-full items-center justify-center pb-2" style={{ color: "var(--muted)" }}><ArrowRight size={18} /></div>
+          <div className="flex h-full items-center justify-center pb-2 pt-8" style={{ color: "var(--muted)" }}><ArrowRight size={18} /></div>
           <div>
-            <label htmlFor="mail-compose-to" className="mb-1 block text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
+            <label htmlFor="mail-compose-to" className="mb-1 pl-2 block text-[10px] font-semibold uppercase tracking-widest" style={{ color: "var(--muted)" }}>
               To
             </label>
             <div className="relative">
@@ -624,7 +625,7 @@ export default function MailComposePanel({
               <button
                 onClick={() => setShowLayerPanel((v) => !v)}
                 title={showLayerPanel ? "Hide layers" : "Show layers"}
-                className="btn-smooth inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold"
+                className="btn-smooth cursor-pointer inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold"
                 style={{
                   background: showLayerPanel ? "rgba(167,139,250,0.16)" : "var(--surface)",
                   color: showLayerPanel ? "var(--lavender)" : "var(--muted)",
@@ -640,7 +641,7 @@ export default function MailComposePanel({
                     <button
                       key={surface}
                       onClick={() => handleSurfaceChange(surface)}
-                      className="btn-smooth rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em]"
+                      className="btn-smooth cursor-pointer rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em]"
                       style={{
                         background: active ? "rgba(255,107,157,0.14)" : "transparent",
                         color: active ? "var(--pink)" : "var(--muted)",

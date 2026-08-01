@@ -231,7 +231,7 @@ button, input, textarea, select {
 
 input::placeholder,
 textarea::placeholder {
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(253, 26, 94, 0.42);
 }
 
 /* Soft cutesy detail that stays subtle */
