@@ -61,7 +61,7 @@ export function useMail(user: ViewerIdentity) {
   const viewerName = normalizeName(user);
   const normalizedUser = useMemo(() => ({ ...user, name: viewerName }), [user, viewerName]);
   const storageKey = useMemo(() => storageKeyFor(user), [user]);
-  const ownerId = user.isGuest ? null : (user.accountId ?? user.id ?? null);
+  const ownerId = user.accountId ?? null;
 
   const receiverUsername = user.username ?? null;
 

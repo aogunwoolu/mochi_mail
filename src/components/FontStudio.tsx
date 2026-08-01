@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState, useMemo } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Plus, Minus, Undo, Trash2, Download, Upload, Edit3, AlertCircle, Sparkles, ChevronLeft, ChevronRight } from "lucide-react";
-import opentype from "opentype.js";
+import * as opentype from "opentype.js";
 
 // Types
 interface GlyphData {

@@ -12,6 +12,7 @@ import MailboxPanel from "@/components/MailboxPanel";
 import StoreView from "@/components/StoreView";
 import RoomControl from "@/components/RoomControl";
 import { AppHeader } from "@/components/AppHeader";
+import { WipBanner } from "@/components/WipBanner";
 import { FiEdit3, FiLayers, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
 import { Pencil, Eraser, MousePointer, Type, Scissors, Image, Sparkles } from "lucide-react";
 import { exportCanvas, CropRegion, StaticFormat } from "@/components/ExportUtil";
@@ -23,6 +24,7 @@ import type { RoomMember } from "@/hooks/useRoom";
 import { useStrokeSync } from "@/hooks/useStrokeSync";
 import type { SyncStroke } from "@/hooks/useStrokeSync";
 import { useMochi } from "@/context/MochiContext";
+import { justOpenedFilePicker } from "@/lib/filePickerGuard";
 import {
   AppTab,
   BrushSettings,
@@ -36,6 +38,7 @@ import {
   StoreItem,
 } from "@/types";
 import { useIdentify, useStudioAnalytics, useMailAnalytics, useStoreAnalytics } from "@/hooks/useAnalytics";
+import { LAYER_CEILING } from "@/lib/plus";
 
 const CANVAS_W = 6000;
 const CANVAS_H = 4800;
@@ -45,6 +48,13 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<AppTab>("studio");
   const [mailView, setMailView] = useState<"inbox" | "compose">("inbox");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [accountOpensOnHelp, setAccountOpensOnHelp] = useState(false);
+  const [navigatingToSpace, setNavigatingToSpace] = useState(false);
+  useEffect(() => {
+    if (!navigatingToSpace) return;
+    const t = setTimeout(() => setNavigatingToSpace(false), 10000);
+    return () => clearTimeout(t);
+  }, [navigatingToSpace]);
   const mounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -78,7 +88,25 @@ export default function Home() {
     textFont: '"Space Mono", monospace',
   });
 
-  const { account, assets, mail, store } = useMochi();
+  const { account, assets, mail, store, supporter } = useMochi();
+  // Mochi Plus raises the studio layer ceiling; free stays at its current value.
+  const maxLayers = supporter.perks.maxLayers;
+
+  // Gentle thank-you when returning from Stripe Checkout (?support=thanks).
+  const refreshSupporter = supporter.refresh;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const support = params.get("support");
+    if (!support) return;
+    if (support === "thanks") {
+      toast("Thank you for supporting Mochi! 💛", { icon: "star" });
+      void refreshSupporter();
+    }
+    params.delete("support");
+    const query = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+  }, [refreshSupporter]);
 
   // ── Analytics ─────────────────────────────────────────────────────────────
   useIdentify(account.viewer.accountId ?? account.viewer.id, {
@@ -284,52 +312,65 @@ export default function Home() {
   const [staticFormat, setStaticFormat] = useState<StaticFormat>("png");
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [showLayerPanel, setShowLayerPanel] = useState(true);
-  const [layerCount, setLayerCount] = useState(1);
+  // layerOrder maps display position (0=back, last=front) → stable layer id.
+  // Items/strokes carry the stable id in `layerIndex`; reordering only mutates this array.
+  const [layerOrder, setLayerOrder] = useState<number[]>([0]);
+  const [hiddenLayerIds, setHiddenLayerIds] = useState<number[]>([]);
   const [activeLayer, setActiveLayer] = useState(0);
+  const layerCount = layerOrder.length;
 
-  // When loaded data arrives (DB strokes or placed items), auto-expand layerCount
-  // so all layers that have content become visible without requiring a manual "add layer".
+  // When loaded data arrives (DB strokes or placed items), ensure every referenced
+  // layer id is present in layerOrder so its content is visible.
   useEffect(() => {
-    const maxStroke = dbStrokes.reduce((m, s) => Math.max(m, s.layerIndex ?? 0), 0);
-    const maxItem = placedItems.reduce((m, i) => Math.max(m, i.layerIndex ?? 0), 0);
-    const needed = Math.min(5, Math.max(maxStroke, maxItem) + 1);
-    setLayerCount((prev) => Math.max(prev, needed));
+    const referenced = new Set<number>();
+    for (const s of dbStrokes) referenced.add(s.layerIndex ?? 0);
+    for (const i of placedItems) referenced.add(i.layerIndex ?? 0);
+    setLayerOrder((prev) => {
+      const present = new Set(prev);
+      // Restore any layer that has content up to the absolute ceiling, so a
+      // lapsed member's extra layers are always shown (never destroyed) even if
+      // their current entitlement is lower.
+      const missing = [...referenced].filter((id) => !present.has(id) && id >= 0 && id < LAYER_CEILING).sort((a, b) => a - b);
+      if (!missing.length) return prev;
+      return [...prev, ...missing];
+    });
   }, [dbStrokes, placedItems]);
 
+  const handleAddLayer = useCallback(() => {
+    setLayerOrder((prev) => {
+      if (prev.length >= maxLayers) return prev;
+      for (let id = 0; id < maxLayers; id++) {
+        if (!prev.includes(id)) return [...prev, id];
+      }
+      return prev;
+    });
+  }, [maxLayers]);
 
-  const handleMoveLayerUp = useCallback((layerIdx: number) => {
-    if (layerIdx >= layerCount - 1) return;
-    const target = layerIdx + 1;
-    // Swap items
-    placedItems
-      .filter((i) => (i.layerIndex ?? 0) === target)
-      .forEach((item) => updatePlacedItem(item.id, { layerIndex: layerIdx }));
-    placedItems
-      .filter((i) => (i.layerIndex ?? 0) === layerIdx)
-      .forEach((item) => updatePlacedItem(item.id, { layerIndex: target }));
-    // Swap strokes inside the canvas
-    canvasRef.current?.swapStrokeLayers(layerIdx, target);
-    // Keep active layer tracking in sync
-    if (activeLayer === layerIdx) setActiveLayer(target);
-    else if (activeLayer === target) setActiveLayer(layerIdx);
-  }, [layerCount, placedItems, updatePlacedItem, activeLayer]);
+  const handleMoveLayerUp = useCallback((layerId: number) => {
+    setLayerOrder((prev) => {
+      const i = prev.indexOf(layerId);
+      if (i < 0 || i >= prev.length - 1) return prev;
+      const next = [...prev];
+      [next[i], next[i + 1]] = [next[i + 1]!, next[i]!];
+      return next;
+    });
+  }, []);
 
-  const handleMoveLayerDown = useCallback((layerIdx: number) => {
-    if (layerIdx <= 0) return;
-    const target = layerIdx - 1;
-    // Swap items
-    placedItems
-      .filter((i) => (i.layerIndex ?? 0) === layerIdx)
-      .forEach((item) => updatePlacedItem(item.id, { layerIndex: target }));
-    placedItems
-      .filter((i) => (i.layerIndex ?? 0) === target)
-      .forEach((item) => updatePlacedItem(item.id, { layerIndex: layerIdx }));
-    // Swap strokes inside the canvas
-    canvasRef.current?.swapStrokeLayers(layerIdx, target);
-    // Keep active layer tracking in sync
-    if (activeLayer === layerIdx) setActiveLayer(target);
-    else if (activeLayer === target) setActiveLayer(layerIdx);
-  }, [placedItems, updatePlacedItem, activeLayer]);
+  const handleMoveLayerDown = useCallback((layerId: number) => {
+    setLayerOrder((prev) => {
+      const i = prev.indexOf(layerId);
+      if (i <= 0) return prev;
+      const next = [...prev];
+      [next[i], next[i - 1]] = [next[i - 1]!, next[i]!];
+      return next;
+    });
+  }, []);
+
+  const handleToggleLayerVisibility = useCallback((layerId: number) => {
+    setHiddenLayerIds((prev) =>
+      prev.includes(layerId) ? prev.filter((x) => x !== layerId) : [...prev, layerId],
+    );
+  }, []);
 
 
   const runExport = useCallback((cropRegion?: CropRegion) => {
@@ -341,7 +382,7 @@ export default function Home() {
       .catch(() => toast("Export failed — try again", { variant: "error", icon: "warning" }))
       .finally(() => setIsExporting(false));
     trackCanvasExport();
-  }, [placedItems, isExporting, trackCanvasExport]);
+  }, [placedItems, isExporting, staticFormat, trackCanvasExport]);
 
   const handleExport = useCallback(() => {
     if (isExporting) return;
@@ -713,22 +754,28 @@ export default function Home() {
     updateViewSize();
     setScrollPos({ left: el.scrollLeft, top: el.scrollTop });
 
+    const onMouseLeave = () => {
+      lastMouseWorldRef.current = null;
+    };
+
     const ro = new ResizeObserver(updateViewSize);
     ro.observe(el);
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("mousemove", onMouseMove, { passive: true });
     el.addEventListener("touchmove", onTouchMove, { passive: true });
-    el.addEventListener("mouseleave", () => {
-      lastMouseWorldRef.current = null;
-    });
+    el.addEventListener("mouseleave", onMouseLeave);
 
     return () => {
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
       el.removeEventListener("mousemove", onMouseMove);
       el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, [activeTab, trackCursor, shiftPlacedItems, getViewportCenterWorld]);
+    // activeLayer / brushSettings.tool are read inside the listeners; without
+    // them in deps the closures broadcast stale presence (wrong tool/layer)
+    // to collaborators after every tool or layer switch.
+  }, [activeTab, trackCursor, shiftPlacedItems, getViewportCenterWorld, activeLayer, brushSettings.tool]);
 
   // Broadcast tool/layer changes immediately (not just on cursor move)
   useEffect(() => {
@@ -809,7 +856,13 @@ export default function Home() {
           activeTab={activeTab}
           onTabChange={(tab) => { setActiveTab(tab); trackTabChange(tab); }}
           unreadCount={unreadCount}
-          onAccountClick={() => setAccountOpen((p) => !p)}
+          onAccountClick={() => {
+            // Guard against the Windows/Chromium "ghost click" that can land
+            // here right after a file picker (e.g. the Help & Feedback
+            // attachment input) closes — see filePickerGuard.ts.
+            if (justOpenedFilePicker()) return;
+            setAccountOpen((p) => !p);
+          }}
           accountName={account.viewer.name}
           accountAvatarUrl={account.viewer.avatarUrl || `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(account.viewer.name || "mochimail")}`}
           accountAccentColor={account.viewer.accentColor ?? null}
@@ -817,24 +870,55 @@ export default function Home() {
         />
       )}
 
+      {/* Work-in-progress notice — visible on every tab */}
+      <WipBanner
+        onOpenFeedback={() => {
+          setAccountOpensOnHelp(true);
+          setAccountOpen(true);
+        }}
+      />
+
       {accountOpen ? (
         <AccountPanel
           viewer={account.viewer}
           currentAccount={account.currentAccount}
           isAuthenticated={account.isAuthenticated}
-          onClose={() => setAccountOpen(false)}
+          initialHelpOpen={accountOpensOnHelp}
+          onClose={() => {
+            if (justOpenedFilePicker()) return;
+            setAccountOpen(false);
+            setAccountOpensOnHelp(false);
+          }}
           onRenameGuest={account.renameGuest}
           onSignUp={account.signUp}
+          onOAuth={account.signInWithProvider}
           onLogIn={account.logIn}
           onLogOut={account.logOut}
           onUpdateAccount={account.updateAccount}
           onUploadAvatar={account.uploadAvatar}
           onOpenSpaces={() => {
             setAccountOpen(false);
-            router.push("/space");
+            setNavigatingToSpace(true);
+            const uname = account.currentAccount?.username;
+            router.push(uname ? `/space/${uname}` : "/space");
           }}
         />
       ) : null}
+
+      {/* Instant feedback while the space route loads */}
+      {navigatingToSpace && (
+        <div
+          className="fixed inset-0 z-[500] flex items-center justify-center animate-fade-in"
+          style={{ background: "rgba(255,248,255,0.72)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)" }}
+        >
+          <div className="panel flex flex-col items-center rounded-3xl px-8 py-6 text-center">
+            <svg className="animate-spin" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="9" stroke="var(--pink)" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
+            </svg>
+            <p className="mt-3 text-sm font-semibold">Opening your space...</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Studio (full-screen, always mounted) ─────────────────────────── */}
       <div
@@ -1015,7 +1099,7 @@ export default function Home() {
                   item.textColor ?? brushSettings.color,
                   item.textSize ?? 32,
                   item.textFont ?? '"Space Mono", monospace',
-                  item.layerIndex ?? layerCount - 1,
+                  item.layerIndex ?? layerOrder[layerOrder.length - 1] ?? 0,
                 );
                 if (placed) broadcastPlacedItemAdd(placed);
                 return placed ?? undefined;
@@ -1031,6 +1115,8 @@ export default function Home() {
               currentDrawingLayer={activeLayer}
               defaultLayerIndex={activeLayer}
               maxLayerIndex={layerCount - 1}
+              layerOrder={layerOrder}
+              hiddenLayerIds={hiddenLayerIds}
               remoteStrokes={remoteCompletedStrokes}
               dbStrokes={dbStrokes}
             />
@@ -1206,7 +1292,7 @@ export default function Home() {
             background: showLayerPanel
               ? "rgba(167,139,250,0.18)"
               : "rgba(255,255,255,0.92)",
-            color: showLayerPanel ? "#6d28d9" : "#6b7280",
+            color: showLayerPanel ? "#6d28d9" : "var(--muted-strong)",
             border: "1px solid rgba(167,139,250,0.25)",
             boxShadow: "0 2px 10px rgba(0,0,0,0.08)",
             backdropFilter: "blur(8px)",
@@ -1229,8 +1315,11 @@ export default function Home() {
             onDeleteItem={handleRemovePlacedItem}
             onHide={() => setShowLayerPanel(false)}
             align="right"
-            layerCount={layerCount}
-            onLayerCountChange={setLayerCount}
+            layerOrder={layerOrder}
+            hiddenLayerIds={hiddenLayerIds}
+            maxLayers={maxLayers}
+            onAddLayer={handleAddLayer}
+            onToggleLayerVisibility={handleToggleLayerVisibility}
             activeLayer={activeLayer}
             onActiveLayerChange={setActiveLayer}
             onMoveLayerUp={handleMoveLayerUp}
@@ -1325,10 +1414,10 @@ export default function Home() {
             <span className="hidden sm:inline">Mail</span>
             {unreadCount > 0 && (
               <span
-                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
-                style={{ background: "var(--pink)" }}
+                className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
+                style={{ background: "var(--pink)", boxShadow: "0 2px 6px rgba(255,107,157,0.4)" }}
               >
-                {unreadCount}
+                {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             )}
           </button>
@@ -1357,7 +1446,10 @@ export default function Home() {
 
           {/* Account */}
           <button
-            onClick={() => setAccountOpen((p) => !p)}
+            onClick={() => {
+              if (justOpenedFilePicker()) return;
+              setAccountOpen((p) => !p);
+            }}
             className="btn-smooth flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2"
             style={{
               borderColor: account.viewer.accentColor ?? "var(--pink)",
@@ -1449,7 +1541,7 @@ export default function Home() {
             userFonts={customFonts}
             onPublish={handleStorePublish}
             currentUserId={account.viewer.accountId ?? account.viewer.id}
-            isGuest={!account.isAuthenticated}
+            isGuest={account.viewer.accountId == null}
             onUpdateStoreItem={store.updateStoreItem}
             onRemoveFromStore={store.removeFromStore}
           />

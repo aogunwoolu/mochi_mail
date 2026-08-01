@@ -220,7 +220,9 @@ export function useStrokeSync({
   // ── Initial load: replay stroke history + board metadata ───────────────────
 
   useEffect(() => {
-    if (!hasSession || !collabScope) return;
+    if (!hasSession || !collabScope) {
+      return;
+    }
 
     // Reset guards on scope change
     isSessionReadyRef.current = false;
@@ -393,6 +395,16 @@ export function useStrokeSync({
         if (!data?.senderId || data.senderId === selfIdRef.current || !data.itemId) return;
         onRemotePlacedItemRemoveRef.current(data.itemId);
         persistDirtyRef.current = true;
+      })
+      // A collaborator cleared the whole canvas
+      .on("broadcast", { event: "board-clear" }, ({ payload }) => {
+        const data = payload as { senderId?: string };
+        if (!data?.senderId || data.senderId === selfIdRef.current) return;
+        remoteActiveStrokesRef.current.clear();
+        renderedStrokeIdsRef.current.clear();
+        setDbStrokes([]);
+        setRemoteCompletedStrokes([]);
+        canvasRef.current?.clearCanvas();
       });
 
     ch.subscribe();
@@ -577,7 +589,26 @@ export function useStrokeSync({
   const clearDbStrokes = useCallback(() => {
     setDbStrokes([]);
     setRemoteCompletedStrokes([]);
-  }, []);
+    remoteActiveStrokesRef.current.clear();
+    renderedStrokeIdsRef.current.clear();
+    // Delete persisted strokes so they don't reload on refresh
+    if (hasSession && collabScope) {
+      const supabase = createSupabaseBrowserClient();
+      void supabase
+        .from("board_strokes")
+        .delete()
+        .eq("room_id", collabScope)
+        .then(({ error }) => {
+          if (error) console.warn("[useStrokeSync] Failed to clear strokes:", error.message);
+        });
+    }
+    // Tell collaborators to clear their canvases too
+    void channelRef.current?.send({
+      type: "broadcast",
+      event: "board-clear",
+      payload: { senderId: selfIdRef.current },
+    });
+  }, [hasSession, collabScope]);
 
   return {
     broadcastStroke,

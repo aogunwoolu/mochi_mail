@@ -71,7 +71,7 @@ export function AppHeader({
                   className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
                   style={{ background: "var(--pink)" }}
                 >
-                  {unreadCount}
+                  {unreadCount > 99 ? "99+" : unreadCount}
                 </span>
               )}
             </button>

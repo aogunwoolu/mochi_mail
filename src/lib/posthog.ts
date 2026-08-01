@@ -34,11 +34,15 @@ export function initPostHog() {
   posthog.init(KEY, {
     api_host: HOST,
     person_profiles: "identified_only",
-    capture_pageview: false,
+    // Auto-capture SPA navigations (App Router) so pageviews + heatmaps get data.
+    capture_pageview: "history_change",
     capture_pageleave: true,
     autocapture: true,
-    persistence: "memory",
+    // Persist across reloads so users/replays/funnels aren't fragmented.
+    persistence: "localStorage+cookie",
     opt_out_capturing_by_default: !getTrackingEnabled(),
+    // Automatic error tracking: unhandled exceptions + promise rejections.
+    capture_exceptions: true,
     disable_session_recording: isDev,
     disable_surveys: true,
     enable_heatmaps: !isDev,

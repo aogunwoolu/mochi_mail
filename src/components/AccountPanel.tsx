@@ -1,33 +1,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ViewerIdentity } from "@/types";
+import SupportMochiPanel from "@/components/SupportMochiPanel";
+import HelpRequestPanel from "@/components/HelpRequestPanel";
 import { getTrackingEnabled, setTrackingEnabled } from "@/lib/posthog";
 import { toast } from "@/lib/toast";
-
-const ACCENT_PRESETS = ["#ff6b9d", "#67d4f1", "#6ee7b7", "#a78bfa", "#fb923c", "#fbbf24"] as const;
-
-const WALLPAPER_PRESETS = [
-  {
-    id: "petal-blush",
-    name: "Petal Blush",
-    value: "radial-gradient(circle at top left, rgba(255,255,255,0.95), rgba(255,214,236,0.92) 42%, rgba(255,246,251,0.92) 100%)",
-  },
-  {
-    id: "mint-airmail",
-    name: "Mint Airmail",
-    value: "linear-gradient(135deg, rgba(237,247,255,0.95), rgba(203,244,255,0.92), rgba(244,255,252,0.96))",
-  },
-  {
-    id: "apricot-note",
-    name: "Apricot Note",
-    value: "linear-gradient(145deg, rgba(255,248,228,0.96), rgba(255,224,208,0.92), rgba(255,245,236,0.96))",
-  },
-  {
-    id: "lilac-dream",
-    name: "Lilac Dream",
-    value: "linear-gradient(145deg, rgba(246,241,255,0.96), rgba(226,223,255,0.92), rgba(255,245,252,0.96))",
-  },
-] as const;
+import { bgToCss, parseSpaceConfig } from "@/lib/spaceConfig";
 
 function buildDicebearUrl(seed: string): string {
   return `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(seed || "mochimail")}`;
@@ -40,26 +18,6 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Unable to read file."));
     reader.readAsDataURL(file);
   });
-}
-
-function SwatchButton({
-  color,
-  active,
-  onClick,
-}: Readonly<{ color: string; active: boolean; onClick: () => void }>) {
-  return (
-    <button
-      onClick={onClick}
-      className="btn-smooth h-9 w-9 rounded-full border-2"
-      style={{
-        background: color,
-        borderColor: active ? "rgba(53,39,66,0.85)" : "rgba(53,39,66,0.12)",
-        boxShadow: active ? "0 0 0 3px rgba(255,255,255,0.92), 0 0 0 5px rgba(53,39,66,0.12)" : "none",
-      }}
-      aria-label={`Choose ${color}`}
-      title={color}
-    />
-  );
 }
 
 function SectionCard({ title, note, children }: Readonly<{ title: string; note?: string; children: React.ReactNode }>) {
@@ -87,11 +45,14 @@ interface AccountPanelProps {
   onClose: () => void;
   onRenameGuest: (name: string) => void;
   onSignUp: (username: string, password: string, displayName: string) => Promise<{ ok: boolean; error?: string }>;
+  onOAuth: (provider: "google" | "discord") => Promise<{ ok: boolean; error?: string }>;
   onLogIn: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   onLogOut: () => void;
   onUpdateAccount: (patch: { displayName?: string; avatarUrl?: string; bio?: string; accentColor?: string; wallpaper?: string; youtubeUrl?: string; homeTitle?: string; }) => void;
   onUploadAvatar?: (file: File) => Promise<string | null>;
   onOpenSpaces: () => void;
+  /** When true, the help/feedback section starts expanded. */
+  initialHelpOpen?: boolean;
 }
 
 interface AuthenticatedPanelProps {
@@ -134,9 +95,30 @@ interface GuestPanelProps {
   displayName: string;
   setDisplayName: (value: string) => void;
   handleAuth: () => void;
+  handleOAuth: (provider: "google" | "discord") => void;
+  oauthBusy: "google" | "discord" | null;
   authBusy: boolean;
   error: string;
   clearError: () => void;
+}
+
+function GoogleLogo() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" aria-hidden>
+      <path fill="#4285F4" d="M23.5 12.27c0-.85-.08-1.66-.22-2.45H12v4.64h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.09 3.57-5.16 3.57-8.81Z" />
+      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.87-3.01c-1.08.72-2.45 1.15-4.06 1.15-3.13 0-5.78-2.11-6.72-4.96H1.28v3.1A11.99 11.99 0 0 0 12 24Z" />
+      <path fill="#FBBC05" d="M5.28 14.27a7.2 7.2 0 0 1 0-4.53v-3.1H1.28a12 12 0 0 0 0 10.73l4-3.1Z" />
+      <path fill="#EA4335" d="M12 4.77c1.76 0 3.34.61 4.59 1.8l3.44-3.44A11.98 11.98 0 0 0 1.28 6.63l4 3.1C6.22 6.89 8.87 4.77 12 4.77Z" />
+    </svg>
+  );
+}
+
+function DiscordLogo() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+      <path fill="#5865F2" d="M20.32 4.37a19.8 19.8 0 0 0-4.89-1.52.07.07 0 0 0-.08.04c-.21.38-.44.87-.6 1.25a18.27 18.27 0 0 0-5.5 0 12.6 12.6 0 0 0-.61-1.25.08.08 0 0 0-.08-.04 19.74 19.74 0 0 0-4.88 1.52.07.07 0 0 0-.04.03A20.26 20.26 0 0 0 .1 18.06a.08.08 0 0 0 .03.05 19.9 19.9 0 0 0 6 3.03.08.08 0 0 0 .08-.03c.46-.63.87-1.3 1.22-2a.08.08 0 0 0-.04-.1 13.1 13.1 0 0 1-1.87-.9.08.08 0 0 1-.01-.12c.13-.1.25-.2.37-.29a.07.07 0 0 1 .08-.01 14.2 14.2 0 0 0 12.06 0 .07.07 0 0 1 .08 0c.12.11.25.21.38.3a.08.08 0 0 1-.01.13c-.6.35-1.22.64-1.87.89a.08.08 0 0 0-.04.1c.36.7.77 1.37 1.22 2a.08.08 0 0 0 .08.03 19.84 19.84 0 0 0 6.02-3.03.08.08 0 0 0 .03-.05 20.12 20.12 0 0 0-3.57-13.66.06.06 0 0 0-.03-.03ZM8.02 15.33c-1.18 0-2.16-1.08-2.16-2.42 0-1.33.96-2.42 2.16-2.42 1.21 0 2.18 1.1 2.16 2.42 0 1.34-.96 2.42-2.16 2.42Zm7.97 0c-1.18 0-2.15-1.08-2.15-2.42 0-1.33.95-2.42 2.15-2.42 1.22 0 2.18 1.1 2.16 2.42 0 1.34-.94 2.42-2.16 2.42Z" />
+    </svg>
+  );
 }
 
 function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
@@ -188,7 +170,6 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
           {(() => {
             const url = props.avatarUrl.trim();
             if (url && !url.includes("dicebear")) {
-              console.log("[Avatar] Rendering custom avatar:", url);
               return (
                 <button
                   onClick={() => props.setAvatarUrl(url)}
@@ -244,45 +225,19 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
         <input id="avatar-url" value={props.avatarUrl} onChange={(e) => props.setAvatarUrl(e.target.value)} placeholder="🔗 Or paste a custom avatar URL" className="input-soft mt-2 w-full px-3 py-2 text-sm outline-none" />
       </SectionCard>
 
-      <SectionCard title="Style" note="Choose a vibe instead of typing CSS.">
-        <div>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Accent</p>
-          <div className="flex flex-wrap gap-2">
-            {ACCENT_PRESETS.map((color) => (
-              <SwatchButton key={color} color={color} active={props.accentColor === color} onClick={() => props.setAccentColor(color)} />
-            ))}
-          </div>
-        </div>
-        <div className="mt-3">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Wallpaper</p>
-          <div className="grid grid-cols-2 gap-2">
-            {WALLPAPER_PRESETS.map((preset) => {
-              const active = props.selectedWallpaper === preset.value;
-              return (
-                <button
-                  key={preset.id}
-                  onClick={() => props.setWallpaper(preset.value)}
-                  className="btn-smooth overflow-hidden rounded-2xl border text-left"
-                  style={{ borderColor: active ? props.accent : "var(--border)", background: "rgba(255,255,255,0.88)" }}
-                >
-                  <div className="h-14" style={{ background: preset.value }} />
-                  <div className="px-3 py-2 text-xs font-semibold">{preset.name}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+      <SectionCard title="Space look" note="Wallpaper, soundtrack, fonts & themes now live in your Space — customize them there.">
+        <button
+          onClick={props.onOpenSpaces}
+          className="btn-smooth flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold"
+          style={{ background: "var(--surface)", color: "var(--foreground-soft)", border: "1px solid var(--border)" }}
+        >
+          🎨 Customize my Space →
+        </button>
       </SectionCard>
 
-      <SectionCard title="Extras" note="Nice-to-have profile details.">
-        <div className="grid gap-2">
-          <div>
-            <label htmlFor="youtube-url" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Space soundtrack</label>
-            <input id="youtube-url" value={props.youtubeUrl} onChange={(e) => props.setYoutubeUrl(e.target.value)} placeholder="🎵 YouTube link for your space soundtrack" className="input-soft w-full px-3 py-2 text-sm outline-none" />
-          </div>
-          <div className="rounded-2xl px-3 py-2 text-xs" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
-            Username is fixed as @{props.currentAccount.username}
-          </div>
+      <SectionCard title="Account">
+        <div className="rounded-2xl px-3 py-2 text-xs" style={{ background: "var(--surface)", color: "var(--muted-strong)" }}>
+          Username is fixed as @{props.currentAccount.username}
         </div>
       </SectionCard>
 
@@ -337,6 +292,9 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
           <div className="flex-1 rounded-2xl px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.8)" }}>Save your look</div>
           <div className="flex-1 rounded-2xl px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.8)" }}>Get a profile space</div>
         </div>
+        <p className="mt-3 rounded-2xl px-3 py-2 text-[11px] leading-relaxed" style={{ background: "rgba(255,107,157,0.10)", color: "var(--muted-strong)" }}>
+          ⏳ Heads up: guest sessions and anything you make as a guest are automatically deleted 30 days after you start. Create an account to keep your stuff for good.
+        </p>
       </div>
 
       <SectionCard title="Guest Name" note="Set how you appear while browsing before you sign up.">
@@ -376,6 +334,39 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
               {entry === "signup" ? "Create account" : "Log in"}
             </button>
           ))}
+        </div>
+
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          {([
+            { provider: "google" as const, label: "Google", logo: <GoogleLogo /> },
+            { provider: "discord" as const, label: "Discord", logo: <DiscordLogo /> },
+          ]).map(({ provider, label, logo }) => (
+            <button
+              key={provider}
+              onClick={() => props.handleOAuth(provider)}
+              disabled={props.oauthBusy !== null || props.authBusy}
+              className="btn-smooth inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold"
+              style={{
+                background: "rgba(255,255,255,0.88)",
+                color: "var(--foreground-soft)",
+                border: "1px solid var(--border)",
+                opacity: props.oauthBusy && props.oauthBusy !== provider ? 0.6 : 1,
+              }}
+            >
+              {props.oauthBusy === provider ? (
+                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="var(--muted)" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
+                </svg>
+              ) : logo}
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mb-3 flex items-center gap-2" aria-hidden>
+          <div className="h-px flex-1" style={{ background: "var(--border)" }} />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>or with a username</span>
+          <div className="h-px flex-1" style={{ background: "var(--border)" }} />
         </div>
 
         <div className="space-y-2 rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.7)" }}>
@@ -436,15 +427,18 @@ export default function AccountPanel({
   onClose,
   onRenameGuest,
   onSignUp,
+  onOAuth,
   onLogIn,
   onLogOut,
   onUpdateAccount,
   onUploadAvatar,
   onOpenSpaces,
+  initialHelpOpen,
 }: Readonly<AccountPanelProps>) {
   const [mode, setMode] = useState<"login" | "signup">("signup");
   const [error, setError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState<"google" | "discord" | null>(null);
   const [trackingEnabled, setTrackingEnabledState] = useState(getTrackingEnabled);
 
   const handleTrackingToggle = () => {
@@ -492,14 +486,13 @@ export default function AccountPanel({
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       const f = latestFieldsRef.current;
+      // Space look (wallpaper / accent / soundtrack) is owned by SpaceStudio and
+      // stored in the same profile fields — do NOT write them here or we'd clobber it.
       onUpdateAccount({
         displayName: f.profileName.trim() || currentAccount.displayName,
         avatarUrl: f.avatarUrl.trim(),
         bio: f.bio.trim(),
         homeTitle: f.homeTitle.trim(),
-        youtubeUrl: f.youtubeUrl.trim(),
-        accentColor: f.accentColor,
-        wallpaper: f.wallpaper.trim(),
       });
       setSaveStatus("saved");
       toast("Profile saved!", { icon: "save" });
@@ -509,7 +502,7 @@ export default function AccountPanel({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileName, avatarUrl, bio, homeTitle, youtubeUrl, accentColor, wallpaper]);
+  }, [profileName, avatarUrl, bio, homeTitle]);
 
   const handleGuestSave = () => {
     onRenameGuest(guestName);
@@ -537,6 +530,19 @@ export default function AccountPanel({
     }
   };
 
+  const handleOAuth = async (provider: "google" | "discord") => {
+    setOauthBusy(provider);
+    const result = await onOAuth(provider);
+    // On success the browser navigates away to the provider — keep the spinner
+    // going until then. Only reset on failure.
+    if (!result.ok) {
+      setOauthBusy(null);
+      const msg = result.error ?? "Unable to continue.";
+      setError(msg);
+      toast(msg, { variant: "error", icon: "warning" });
+    }
+  };
+
   const handleAuth = async () => {
     setAuthBusy(true);
     const result = mode === "signup"
@@ -560,34 +566,11 @@ export default function AccountPanel({
     }
   };
 
-  const handleProfileSave = () => {
-    onUpdateAccount({
-      displayName: profileName.trim() || currentAccount?.displayName,
-      avatarUrl: avatarUrl.trim(),
-      bio: bio.trim(),
-      homeTitle: homeTitle.trim(),
-      youtubeUrl: youtubeUrl.trim(),
-      accentColor,
-      wallpaper: wallpaper.trim(),
-    });
-  };
-
   const accent = accentColor || "#ff6b9d";
-  const selectedWallpaper = wallpaper || WALLPAPER_PRESETS[0].value;
+  const selectedWallpaper = bgToCss(parseSpaceConfig(wallpaper).bg);
   const previewName = profileName.trim() || currentAccount?.displayName || viewer.name;
   const previewAvatar = avatarUrl.trim() || buildDicebearUrl(previewName);
   const spaceNamePreview = homeTitle.trim() || `${previewName}'s Space`;
-  const hasProfileChanges = Boolean(
-    currentAccount && (
-      profileName !== currentAccount.displayName ||
-      avatarUrl !== currentAccount.avatarUrl ||
-      bio !== currentAccount.bio ||
-      homeTitle !== currentAccount.homeTitle ||
-      youtubeUrl !== currentAccount.youtubeUrl ||
-      accentColor !== currentAccount.accentColor ||
-      wallpaper !== currentAccount.wallpaper
-    )
-  );
   const avatarChoices = useMemo(
     () => [previewName, currentAccount?.username ?? viewer.name, `${previewName}-mail`].filter(Boolean),
     [currentAccount?.username, previewName, viewer.name]
@@ -633,6 +616,8 @@ export default function AccountPanel({
       displayName={displayName}
       setDisplayName={setDisplayName}
       handleAuth={handleAuth}
+      handleOAuth={(provider) => { void handleOAuth(provider); }}
+      oauthBusy={oauthBusy}
       authBusy={authBusy}
       error={error}
       clearError={() => setError("")}
@@ -641,7 +626,7 @@ export default function AccountPanel({
 
   return (
     <div
-      className="fixed right-4 top-16 z-[400] w-[min(28rem,calc(100vw-2rem))] animate-fade-in overflow-hidden rounded-3xl"
+      className="fixed right-4 top-16 z-[400] flex max-h-[calc(100dvh-5rem)] w-[min(28rem,calc(100vw-2rem))] flex-col animate-fade-in overflow-hidden rounded-3xl"
       style={{
         background: "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(250,245,255,0.96))",
         border: "1px solid var(--border-strong)",
@@ -650,7 +635,7 @@ export default function AccountPanel({
     >
       {/* Banner */}
       <div
-        className="relative flex items-end px-5 pb-4 pt-5"
+        className="relative flex shrink-0 items-end px-5 pb-4 pt-5"
         style={{ background: `linear-gradient(135deg, ${accent}22 0%, var(--lavender)22 100%)`, borderBottom: "1px solid var(--border)" }}
       >
         {isAuthenticated && currentAccount ? (
@@ -692,11 +677,17 @@ export default function AccountPanel({
         </button>
       </div>
 
-      <div className="max-h-[min(80vh,46rem)] overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {panelBody}
+        <div className="mt-3">
+          <SupportMochiPanel />
+        </div>
+        <div className="mt-3">
+          <HelpRequestPanel defaultOpen={initialHelpOpen} />
+        </div>
       </div>
 
-      <div className="border-t px-4 py-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.6)" }}>
+      <div className="shrink-0 border-t px-4 py-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.6)" }}>
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold" style={{ color: "var(--foreground-soft)" }}>

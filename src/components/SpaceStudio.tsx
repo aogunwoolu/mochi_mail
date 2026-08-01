@@ -1,16 +1,24 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SpaceItem, SpaceItemType, UserSpace, ViewerIdentity } from "@/types";
+import { SpaceItem, SpaceItemStyle, SpaceItemType, UserSpace, ViewerIdentity } from "@/types";
 import {
   BgConfig,
   EMOJI_ROWS,
+  FONT_CATEGORY_LABELS,
   FONT_OPTIONS,
+  FontCategory,
   GRADIENT_PRESETS,
   SOLID_PRESETS,
+  THEME_PRESETS,
   SpaceConfig,
+  SpaceSection,
   bgToCss,
+  clampWeight,
+  defaultSections,
   displayTitle,
+  fontOption,
+  loadFontByLabel,
   fontCss,
   isSticker,
   isPinnedItem,
@@ -19,14 +27,20 @@ import {
   parseSpaceConfig,
   spaceConfigToWallpaper,
 } from "@/lib/spaceConfig";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { useMochi } from "@/context/MochiContext";
+import { toast } from "@/lib/toast";
 
 const SpaceBoard = dynamic(() => import("./SpaceBoard"), { ssr: false });
+
+import SpaceSections, { LayoutPanelBody } from "./SpaceSections";
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 
 interface SpaceStudioProps {
   viewer: ViewerIdentity;
   isAuthenticated: boolean;
+  loading?: boolean;
   requestedUsername?: string;
   spaces: UserSpace[];
   ownSpace: UserSpace | null;
@@ -41,7 +55,7 @@ interface SpaceStudioProps {
   onNavigateBack: () => void;
 }
 
-type ActivePanel = "background" | "audio" | "font" | "add" | "settings" | null;
+type ActivePanel = "themes" | "background" | "audio" | "font" | "add" | "layout" | "settings" | null;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -76,10 +90,12 @@ const DOODLE_INK = ["#352742", "#ff6b9d", "#7c3aed", "#0f766e", "#ea580c", "#256
 function BackgroundPicker({
   bg,
   onChange,
-}: Readonly<{ bg: BgConfig; onChange: (bg: BgConfig) => void }>) {
+  onUploadImage,
+}: Readonly<{ bg: BgConfig; onChange: (bg: BgConfig) => void; onUploadImage: (file: File) => Promise<string | null> }>) {
   type Tab = "solid" | "gradient" | "image";
   const initTab: Tab = bg.type === "gradient" ? "gradient" : bg.type === "image" ? "image" : "solid";
   const [tab, setTab] = useState<Tab>(initTab);
+  const [uploading, setUploading] = useState(false);
 
   return (
     <div className="space-y-3">
@@ -169,17 +185,54 @@ function BackgroundPicker({
       )}
 
       {tab === "image" && (
-        <div className="space-y-2">
+        <div className="space-y-3">
+          <label className="btn-smooth flex cursor-pointer items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold"
+            style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))", color: "white", opacity: uploading ? 0.6 : 1 }}>
+            {uploading ? "Uploading…" : "⬆️ Upload from device"}
+            <input type="file" accept="image/*" className="hidden" disabled={uploading}
+              onChange={async (e) => {
+                // React nulls e.currentTarget once the handler yields — grab it now.
+                const input = e.currentTarget;
+                const file = input.files?.[0];
+                if (!file) return;
+                setUploading(true);
+                const url = await onUploadImage(file);
+                setUploading(false);
+                if (url) onChange({ ...bg, type: "image", url, fit: bg.fit ?? "cover" });
+                input.value = "";
+              }} />
+          </label>
           <input
             type="url"
             value={bg.type === "image" ? (bg.url ?? "") : ""}
-            onChange={(e) => onChange({ type: "image", url: e.target.value })}
-            placeholder="https://... direct image URL"
+            onChange={(e) => onChange({ ...bg, type: "image", url: e.target.value })}
+            placeholder="…or paste a direct image URL"
             className="input-soft w-full px-3 py-2 text-sm outline-none"
           />
-          <p className="text-[10px]" style={{ color: "var(--muted)" }}>
-            Use a direct image URL. Landscape photos work best.
-          </p>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: "var(--muted)" }}>Fit</label>
+            <div className="flex gap-1 rounded-xl p-1" style={{ background: "var(--surface)" }}>
+              {(["cover", "contain", "tile"] as const).map((f) => (
+                <button key={f} onClick={() => onChange({ ...bg, type: "image", fit: f })}
+                  className="btn-smooth flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize"
+                  style={{
+                    background: (bg.fit ?? "cover") === f ? "white" : "transparent",
+                    color: (bg.fit ?? "cover") === f ? "var(--foreground)" : "var(--muted)",
+                    boxShadow: (bg.fit ?? "cover") === f ? "0 1px 4px rgba(0,0,0,0.10)" : "none",
+                  }}>
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: "var(--muted)" }}>
+              Soften — {bg.scrim ?? 0}%
+            </label>
+            <input type="range" min={0} max={80} value={bg.scrim ?? 0}
+              onChange={(e) => onChange({ ...bg, type: "image", scrim: Number(e.target.value) })} className="w-full" />
+            <p className="mt-1 text-[10px]" style={{ color: "var(--muted)" }}>Adds a light wash so text stays readable.</p>
+          </div>
           {bg.type === "image" && bg.url ? (
             <div className="h-28 overflow-hidden rounded-xl border" style={{ background: bgToCss(bg), borderColor: "var(--border)" }} />
           ) : null}
@@ -195,24 +248,55 @@ function FontPanel({
   font,
   onChange,
 }: Readonly<{ font: SpaceConfig["font"]; onChange: (font: SpaceConfig["font"]) => void }>) {
+  const categories = [...new Set(FONT_OPTIONS.map((f) => f.category))] as FontCategory[];
+  const weights = fontOption(font.family)?.weights ?? [400, 700];
+
   return (
     <div className="space-y-4">
       <div>
         <label className="block text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--muted)" }}>Family</label>
-        <div className="grid grid-cols-2 gap-2">
-          {FONT_OPTIONS.map((opt) => (
-            <button
-              key={opt.label}
-              onClick={() => { loadGoogleFont(opt.gfont); onChange({ ...font, family: opt.label }); }}
-              className="btn-smooth rounded-xl border px-3 py-2 text-sm text-left"
+        <div className="space-y-3">
+          {categories.map((cat) => (
+            <div key={cat}>
+              <p className="mb-1.5 text-[10px] font-semibold" style={{ color: "var(--muted)" }}>{FONT_CATEGORY_LABELS[cat]}</p>
+              <div className="grid grid-cols-2 gap-2">
+                {FONT_OPTIONS.filter((o) => o.category === cat).map((opt) => (
+                  <button
+                    key={opt.label}
+                    onClick={() => {
+                      loadGoogleFont(opt.gfont);
+                      onChange({ ...font, family: opt.label, weight: clampWeight(opt.label, font.weight) });
+                    }}
+                    className="btn-smooth rounded-xl border px-3 py-2 text-sm text-left"
+                    style={{
+                      fontFamily: opt.css,
+                      borderColor: font.family === opt.label ? "var(--pink)" : "var(--border)",
+                      background: font.family === opt.label ? "rgba(255,107,157,0.08)" : "var(--surface)",
+                      color: "var(--foreground-soft)",
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--muted)" }}>Weight</label>
+        <div className="flex flex-wrap gap-1">
+          {weights.map((w) => (
+            <button key={w} onClick={() => onChange({ ...font, weight: w })}
+              className="btn-smooth rounded-lg px-2.5 py-1 text-xs"
               style={{
-                fontFamily: opt.css,
-                borderColor: font.family === opt.label ? "var(--pink)" : "var(--border)",
-                background: font.family === opt.label ? "rgba(255,107,157,0.08)" : "var(--surface)",
-                color: "var(--foreground-soft)",
-              }}
-            >
-              {opt.label}
+                fontWeight: w,
+                background: (font.weight ?? 400) === w ? "rgba(255,107,157,0.12)" : "var(--surface)",
+                color: (font.weight ?? 400) === w ? "var(--pink)" : "var(--foreground-soft)",
+                border: `1px solid ${(font.weight ?? 400) === w ? "var(--pink)" : "var(--border)"}`,
+              }}>
+              {w}
             </button>
           ))}
         </div>
@@ -237,7 +321,7 @@ function FontPanel({
         </label>
         <input type="range" min={11} max={22} value={font.size}
           onChange={(e) => onChange({ ...font, size: Number(e.target.value) })} className="w-full" />
-        <div className="mt-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)", fontFamily: fontCss(font.family), fontSize: font.size, color: font.color, background: "rgba(255,255,255,0.7)" }}>
+        <div className="mt-2 rounded-xl border px-3 py-2" style={{ borderColor: "var(--border)", fontFamily: fontCss(font.family), fontWeight: clampWeight(font.family, font.weight), fontSize: font.size, color: font.color, background: "rgba(255,255,255,0.7)" }}>
           The quick brown fox jumps ✨
         </div>
       </div>
@@ -343,7 +427,7 @@ function PanelShell({ title, onClose, children }: Readonly<{ title: string; onCl
   return (
     <div
       data-panel
-      className="absolute right-4 top-[6.5rem] z-[300] w-80 animate-fade-in overflow-hidden rounded-3xl"
+      className="absolute right-4 top-[4.75rem] z-[300] w-80 animate-fade-in overflow-hidden rounded-3xl"
       style={{
         background: "rgba(255,255,255,0.97)",
         border: "1px solid var(--border-strong)",
@@ -356,6 +440,115 @@ function PanelShell({ title, onClose, children }: Readonly<{ title: string; onCl
         <button onClick={onClose} className="btn-smooth flex h-6 w-6 items-center justify-center rounded-full text-xs" style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}>✕</button>
       </div>
       <div className="max-h-[68vh] overflow-y-auto p-4">{children}</div>
+    </div>
+  );
+}
+
+// ─── Style Section ────────────────────────────────────────────────────────────
+
+function StyleSection({ item, onUpdate }: Readonly<{ item: SpaceItem; onUpdate: (p: Partial<SpaceItem>) => void }>) {
+  const style = item.style ?? {};
+  const set = (patch: Partial<SpaceItemStyle>) => onUpdate({ style: { ...style, ...patch } });
+  const showTexture = item.type === "note" || item.type === "about";
+  const defaultTexture = item.type === "about" ? "card" : "paper";
+  const showFill = ["note", "about", "link", "music", "image", "drawing"].includes(item.type);
+  const fillLabel = item.type === "image" || item.type === "drawing" ? "Frame colour" : "Card colour";
+  const hexInput = (c: string) => (/^#[0-9a-f]{6}$/i.test(c) ? c : "#ffffff");
+
+  const Seg = <T extends string>({ options, value, onPick }: { options: readonly T[]; value: T; onPick: (v: T) => void }) => (
+    <div className="flex gap-1 rounded-xl p-1" style={{ background: "white" }}>
+      {options.map((o) => (
+        <button key={o} onClick={() => onPick(o)}
+          className="btn-smooth flex-1 rounded-lg py-1 text-[11px] font-semibold capitalize"
+          style={{ background: value === o ? "var(--surface-active)" : "transparent", color: "var(--foreground-soft)" }}>
+          {o}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="space-y-2.5 rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>✨ Style</p>
+        <button
+          // Keep sectionId — resetting looks shouldn't move the item to another board
+          onClick={() => onUpdate({ style: item.style?.sectionId ? { sectionId: item.style.sectionId } : {} })}
+          className="btn-smooth rounded-lg px-2 py-0.5 text-[10px]" style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}>Reset</button>
+      </div>
+      {showTexture && (
+        <div>
+          <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Texture</p>
+          <Seg options={["paper", "card", "plain"] as const} value={(style.texture ?? defaultTexture)} onPick={(t) => set({ texture: t })} />
+        </div>
+      )}
+      {showFill && (
+        <div>
+          <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>{fillLabel}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {NOTE_COLORS.map((c) => (
+              <button key={c} onClick={() => onUpdate({ color: c })}
+                className="btn-smooth h-6 w-6 rounded-full border-2"
+                style={{ background: c, borderColor: item.color === c ? "rgba(53,39,66,0.85)" : "var(--border)" }} />
+            ))}
+            <input type="color" value={hexInput(item.color)} onChange={(e) => onUpdate({ color: e.target.value })}
+              className="h-6 w-9 cursor-pointer rounded border-0" title="Custom colour" />
+          </div>
+        </div>
+      )}
+      <div>
+        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Font</p>
+        <select
+          value={style.fontFamily ?? ""}
+          onChange={(e) => {
+            const fontFamily = e.target.value || undefined;
+            if (fontFamily) loadFontByLabel(fontFamily);
+            set({ fontFamily });
+          }}
+          className="input-soft w-full px-2.5 py-1.5 text-xs outline-none"
+          style={{ fontFamily: style.fontFamily ? fontCss(style.fontFamily) : undefined }}
+        >
+          <option value="">Default</option>
+          {([...new Set(FONT_OPTIONS.map((f) => f.category))] as FontCategory[]).map((cat) => (
+            <optgroup key={cat} label={FONT_CATEGORY_LABELS[cat]}>
+              {FONT_OPTIONS.filter((f) => f.category === cat).map((f) => (
+                <option key={f.label} value={f.label}>{f.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+      <div>
+        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Corners — {style.radius ?? "auto"}</p>
+        <input type="range" min={0} max={40} value={style.radius ?? 16} onChange={(e) => set({ radius: Number(e.target.value) })} className="w-full" />
+      </div>
+      <div>
+        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Shadow</p>
+        <Seg options={["none", "soft", "strong"] as const} value={style.shadow ?? "soft"} onPick={(s) => set({ shadow: s })} />
+      </div>
+      <div>
+        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Opacity — {style.opacity ?? 100}%</p>
+        <input type="range" min={20} max={100} value={style.opacity ?? 100} onChange={(e) => set({ opacity: Number(e.target.value) })} className="w-full" />
+      </div>
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-1.5 text-[10px]" style={{ color: "var(--muted)" }}>
+          Text
+          <input type="color" value={style.textColor ?? "#352742"} onChange={(e) => set({ textColor: e.target.value })} className="h-6 w-9 cursor-pointer rounded border-0" />
+        </label>
+        <label className="flex items-center gap-1.5 text-[10px]" style={{ color: "var(--muted)" }}>
+          Border
+          <input type="color" value={style.borderColor ?? "#cbb6e6"} onChange={(e) => set({ borderColor: e.target.value })} className="h-6 w-9 cursor-pointer rounded border-0" />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: Readonly<{ label: string; children: React.ReactNode }>) {
+  return (
+    <div>
+      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>{label}</label>
+      {children}
     </div>
   );
 }
@@ -417,31 +610,71 @@ function ItemSheet({
           </div>
         ) : isOwner && !visitor ? (
           <>
-            <input value={title} onChange={(e) => onUpdate({ title: (pinned ? "📌 " : "") + e.target.value })}
-              placeholder="Title" className="input-soft w-full px-3 py-2 text-sm outline-none" />
-            <textarea value={item.content} onChange={(e) => onUpdate({ content: e.target.value })}
-              rows={4} placeholder="Content" className="input-soft w-full resize-none px-3 py-2 text-sm outline-none" />
-            {(item.type === "note" || item.type === "about") && (
-              <div>
-                <p className="text-[10px] font-semibold mb-2" style={{ color: "var(--muted)" }}>Card color</p>
-                <div className="flex flex-wrap gap-2">
-                  {NOTE_COLORS.map((c) => (
-                    <button key={c} onClick={() => onUpdate({ color: c })}
-                      className="btn-smooth h-7 w-7 rounded-full border-2"
-                      style={{ background: c, borderColor: item.color === c ? "rgba(53,39,66,0.85)" : "var(--border)" }} />
-                  ))}
-                </div>
-              </div>
+            {item.type === "divider" ? (
+              <Field label="Divider label (optional)">
+                <input value={title} onChange={(e) => onUpdate({ title: e.target.value })}
+                  placeholder="e.g. ✦ ✦ ✦" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+              </Field>
+            ) : item.type === "header" ? (
+              <Field label="Heading text">
+                <input value={title} onChange={(e) => onUpdate({ title: (pinned ? "📌 " : "") + e.target.value })}
+                  placeholder="Section title" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+              </Field>
+            ) : item.type === "link" || item.type === "music" ? (
+              <>
+                <Field label={item.type === "music" ? "Track name" : "Link label"}>
+                  <input value={title} onChange={(e) => onUpdate({ title: (pinned ? "📌 " : "") + e.target.value })}
+                    placeholder={item.type === "music" ? "e.g. lofi beats" : "e.g. My portfolio"} className="input-soft w-full px-3 py-2 text-sm outline-none" />
+                </Field>
+                <Field label={item.type === "music" ? "Music link" : "Link URL"}>
+                  <input value={item.content} onChange={(e) => onUpdate({ content: e.target.value })}
+                    placeholder="https://…" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+                </Field>
+                <Field label="Thumbnail image URL (optional)">
+                  <input value={item.imageUrl ?? ""} onChange={(e) => onUpdate({ imageUrl: e.target.value })}
+                    placeholder="https://… image" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+                </Field>
+                {item.content ? (
+                  <a href={item.content} target="_blank" rel="noopener noreferrer"
+                    className="btn-smooth inline-block rounded-xl px-3 py-1.5 text-xs font-semibold"
+                    style={{ background: `${accent}18`, color: accent }}>Open ↗</a>
+                ) : null}
+              </>
+            ) : item.type === "image" || item.type === "drawing" ? (
+              <>
+                <Field label="Caption (optional)">
+                  <input value={title} onChange={(e) => onUpdate({ title: (pinned ? "📌 " : "") + e.target.value })}
+                    placeholder="A little caption" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+                </Field>
+                <Field label="Image URL">
+                  <input value={item.imageUrl ?? ""} onChange={(e) => onUpdate({ imageUrl: e.target.value })}
+                    placeholder="https://… image" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="Title">
+                  <input value={title} onChange={(e) => onUpdate({ title: (pinned ? "📌 " : "") + e.target.value })}
+                    placeholder="Give it a title" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+                </Field>
+                <Field label="Content">
+                  <textarea value={item.content} onChange={(e) => onUpdate({ content: e.target.value })}
+                    rows={4} placeholder="Write something…" className="input-soft w-full resize-none px-3 py-2 text-sm outline-none" />
+                </Field>
+              </>
             )}
-            {(item.type === "image" || item.type === "drawing") && (
-              <input value={item.imageUrl ?? ""} onChange={(e) => onUpdate({ imageUrl: e.target.value })}
-                placeholder="Image URL" className="input-soft w-full px-3 py-2 text-sm outline-none" />
-            )}
+            <StyleSection item={item} onUpdate={onUpdate} />
           </>
         ) : (
-          <div className="rounded-xl p-3" style={{ background: "var(--surface)" }}>
-            <p className="text-xs font-semibold mb-1" style={{ color: "var(--muted)" }}>{item.title}</p>
-            <p className="text-sm leading-relaxed" style={{ color: "var(--foreground-soft)" }}>{item.content}</p>
+          <div className="space-y-2 rounded-xl p-3" style={{ background: "var(--surface)" }}>
+            {item.title ? <p className="text-xs font-semibold" style={{ color: "var(--muted)" }}>{item.title}</p> : null}
+            {(item.type === "link" || item.type === "music") && item.content ? (
+              <a href={item.content} target="_blank" rel="noopener noreferrer"
+                className="btn-smooth inline-block rounded-xl px-3 py-1.5 text-xs font-semibold"
+                style={{ background: `${accent}18`, color: accent }}>Open ↗</a>
+            ) : (
+              <p className="text-sm leading-relaxed" style={{ color: "var(--foreground-soft)" }}>{item.content}</p>
+            )}
           </div>
         )}
       </div>
@@ -512,6 +745,7 @@ function VisitorNoteModal({
 export default function SpaceStudio({
   viewer,
   isAuthenticated,
+  loading = false,
   requestedUsername,
   spaces,
   ownSpace,
@@ -525,11 +759,17 @@ export default function SpaceStudio({
   onLeaveVisitorNote,
   onNavigateBack,
 }: Readonly<SpaceStudioProps>) {
+  const { supporter } = useMochi();
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<ActivePanel>(null);
   const [showVisitorNote, setShowVisitorNote] = useState(false);
   const [showSpacePicker, setShowSpacePicker] = useState(false);
   const [newImageUrl, setNewImageUrl] = useState("");
+  const [audioMuted, setAudioMuted] = useState(true);
+  // Which board section new items get added to — the last one the owner touched
+  const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
+  const audioFrameRef = useRef<HTMLIFrameElement>(null);
 
   const selectedSpace = useMemo(
     () => spaces.find((s) => s.id === selectedSpaceId) ?? ownSpace ?? spaces[0] ?? null,
@@ -537,7 +777,9 @@ export default function SpaceStudio({
   );
 
   const isOwner = Boolean(selectedSpace && ownSpace && selectedSpace.id === ownSpace.id);
-  const selectedItem = selectedSpace?.items.find((i) => i.id === selectedItemId) ?? null;
+  // The edit sheet is only shown when the user taps the floating ✎ button (editingItemId),
+  // not merely on selection — so dragging an item no longer pops the sheet open.
+  const editingItem = selectedSpace?.items.find((i) => i.id === editingItemId) ?? null;
 
   const spaceConfig = useMemo(() => parseSpaceConfig(selectedSpace?.wallpaper), [selectedSpace?.wallpaper]);
   const bgCssValue = useMemo(() => bgToCss(spaceConfig.bg), [spaceConfig.bg]);
@@ -547,6 +789,7 @@ export default function SpaceStudio({
     fontFamily: fontCss(spaceConfig.font.family),
     fontSize: spaceConfig.font.size,
     color: spaceConfig.font.color,
+    fontWeight: clampWeight(spaceConfig.font.family, spaceConfig.font.weight),
   };
 
   // Load Google Font
@@ -555,11 +798,46 @@ export default function SpaceStudio({
     loadGoogleFont(opt?.gfont ?? null);
   }, [spaceConfig.font.family]);
 
+  // Board items can carry their own font — make sure those load for visitors too
+  useEffect(() => {
+    for (const item of selectedSpace?.items ?? []) loadFontByLabel(item.style?.fontFamily);
+  }, [selectedSpace?.items]);
+
+  // Close the edit sheet whenever the selection changes (incl. deselect).
+  useEffect(() => {
+    setEditingItemId(null);
+  }, [selectedItemId]);
+
   // Reset on space change
   useEffect(() => {
     setSelectedItemId(null);
+    setEditingItemId(null);
     setActivePanel(null);
+    setAudioMuted(true);
+    setActiveBoardId(null);
   }, [selectedSpace?.id]);
+
+  // Audio starts muted (browsers block unmuted autoplay). Unmute on a real
+  // user gesture via the YouTube IFrame API.
+  const ytCommand = useCallback((func: string) => {
+    audioFrameRef.current?.contentWindow?.postMessage(
+      JSON.stringify({ event: "command", func, args: [] }),
+      "*"
+    );
+  }, []);
+
+  const toggleAudioMute = useCallback(() => {
+    setAudioMuted((prev) => {
+      const next = !prev;
+      if (next) {
+        ytCommand("mute");
+      } else {
+        ytCommand("unMute");
+        ytCommand("playVideo");
+      }
+      return next;
+    });
+  }, [ytCommand]);
 
   // Close panels on outside click
   useEffect(() => {
@@ -588,10 +866,70 @@ export default function SpaceStudio({
     [onUpdateOwnSpace, spaceConfig]
   );
 
+  // Page layout — a column of sections the owner can add / remove / reorder.
+  // Undefined means "never customised", which maps to the classic layout.
+  const sections = useMemo(() => spaceConfig.sections ?? defaultSections(), [spaceConfig.sections]);
+  const handleUpdateSections = useCallback(
+    (next: SpaceSection[]) => updateConfig({ sections: next }),
+    [updateConfig]
+  );
+
+  // ── Per-board item scoping ──────────────────────────────────────────────────
+  // Each board section owns its items via style.sectionId; items with no tag
+  // (everything created before boards were scoped) belong to the TOP board.
+  const boardSectionIds = useMemo(
+    () => sections.filter((s) => s.type === "board").map((s) => s.id),
+    [sections]
+  );
+  const primaryBoardId = boardSectionIds[0] ?? null;
+  const targetBoardId = activeBoardId && boardSectionIds.includes(activeBoardId)
+    ? activeBoardId
+    : primaryBoardId;
+
+  const itemsForBoard = useCallback(
+    (boardId: string | null) =>
+      (selectedSpace?.items ?? []).filter((item) => {
+        const sid = item.style?.sectionId;
+        return sid ? sid === boardId : boardId === primaryBoardId || boardId === null;
+      }),
+    [selectedSpace?.items, primaryBoardId]
+  );
+
+  // New items land on the last board the owner touched (default: the top board)
+  const addItemToBoard = useCallback(
+    (type: SpaceItemType, seed?: Partial<SpaceItem>) =>
+      onAddItemToOwnSpace(
+        type,
+        targetBoardId
+          ? { ...seed, style: { ...(seed?.style ?? {}), sectionId: targetBoardId } }
+          : seed
+      ),
+    [onAddItemToOwnSpace, targetBoardId]
+  );
+
+  const uploadBgImage = useCallback(async (file: File): Promise<string | null> => {
+    if (!ownSpace) return null;
+    const supabase = createSupabaseBrowserClient();
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${ownSpace.ownerId}/space-bg-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("avatars").upload(path, file, { upsert: true });
+    if (error) { console.error("[space] bg upload failed:", error.message); return null; }
+    return supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl ?? null;
+  }, [ownSpace]);
+
+  const applyTheme = useCallback((t: (typeof THEME_PRESETS)[number]) => {
+    if (t.plusOnly && !supporter.isPlus) {
+      toast("That's a Mochi Plus theme ♡ — become a member to unlock it!", { icon: "star" });
+      return;
+    }
+    loadGoogleFont(FONT_OPTIONS.find((f) => f.label === t.font.family)?.gfont ?? null);
+    updateConfig({ bg: t.bg, font: t.font, lineColor: t.lineColor });
+  }, [updateConfig, supporter.isPlus]);
+
   const togglePanel = (p: ActivePanel) => setActivePanel((prev) => (prev === p ? null : p));
 
   const addSticker = (emoji: string) => {
-    onAddItemToOwnSpace("note", {
+    addItemToBoard("note", {
       color: "sticker", title: emoji, content: emoji,
       width: 90, height: 90,
       rotation: Math.round((Math.random() * 12 - 6) * 10) / 10,
@@ -606,6 +944,16 @@ export default function SpaceStudio({
   }, [onUpdateSpaceItem, selectedSpace]);
 
   if (!selectedSpace) {
+    if (loading) {
+      return (
+        <div className="flex h-full items-center justify-center p-6">
+          <div className="flex items-center gap-3 rounded-3xl border px-6 py-5 shadow-sm" style={{ background: "rgba(255,255,255,0.78)", borderColor: "var(--border)", backdropFilter: "blur(12px)" }}>
+            <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" style={{ color: accent }} aria-hidden />
+            <p className="text-sm font-semibold" style={{ color: "var(--foreground-soft)" }}>Arranging the board…</p>
+          </div>
+        </div>
+      );
+    }
     if (requestedUsername) {
       return (
         <div className="flex h-full items-center justify-center p-6 text-center">
@@ -638,13 +986,35 @@ export default function SpaceStudio({
     );
   }
 
-  return (
-    <div className="relative flex h-full flex-col overflow-hidden" style={{ background: bgCssValue }}>
+  const layoutMode = spaceConfig.layout ?? "sections";
 
-      {/* ── Header ── */}
+  // One canvas per board section — full-page in canvas mode (top board only),
+  // embedded per section in sections mode. Remounts on space/board change via key.
+  const renderBoardFor = (boardId: string | null) => (
+    <SpaceBoard
+      key={`${selectedSpace.id}:${boardId ?? "all"}`}
+      items={itemsForBoard(boardId)}
+      isOwner={isOwner}
+      accent={accent}
+      onItemChange={handleItemChange}
+      onSelectItem={setSelectedItemId}
+      onEditItem={setEditingItemId}
+      onDeleteItem={(itemId) => {
+        onRemoveSpaceItem(selectedSpace.id, itemId);
+        setSelectedItemId(null);
+        setEditingItemId(null);
+      }}
+      selectedItemId={selectedItemId}
+    />
+  );
+
+  return (
+    <div className="relative h-full overflow-hidden" style={{ background: bgCssValue }}>
+
+      {/* ── Floating nav pill ── */}
       <header
-        className="relative z-[100] flex shrink-0 items-center gap-3 px-4 py-2.5"
-        style={{ background: "rgba(255,255,255,0.58)", borderBottom: `1px solid ${accent}33`, backdropFilter: "blur(16px)" }}
+        className="absolute left-4 top-4 z-[110] flex max-w-[calc(100%-2rem)] items-center gap-2 rounded-2xl px-2 py-1.5"
+        style={{ background: "rgba(255,255,255,0.72)", border: `1px solid ${accent}33`, backdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(53,39,66,0.12)" }}
       >
         <button onClick={onNavigateBack}
           className="btn-smooth flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium"
@@ -656,7 +1026,7 @@ export default function SpaceStudio({
         </button>
 
         {/* Space switcher */}
-        <div className="relative min-w-0 flex-1" data-spacepicker>
+        <div className="relative min-w-0" data-spacepicker>
           <button
             onClick={() => setShowSpacePicker((v) => !v)}
             className="btn-smooth flex items-center gap-2 rounded-2xl px-3 py-1.5"
@@ -710,18 +1080,20 @@ export default function SpaceStudio({
         )}
       </header>
 
-      {/* ── Owner toolbar ── */}
+      {/* ── Floating owner toolbar ── */}
       {isOwner && (
         <div
-          className="relative z-[100] flex shrink-0 items-center gap-2 overflow-x-auto px-4 py-2"
-          style={{ background: "rgba(255,255,255,0.48)", borderBottom: "1px solid var(--border)", backdropFilter: "blur(12px)" }}
+          className="absolute right-4 top-4 z-[110] flex max-w-[calc(100%-2rem)] items-center gap-1.5 overflow-x-auto rounded-2xl px-2 py-1.5"
+          style={{ background: "rgba(255,255,255,0.72)", border: "1px solid var(--border)", backdropFilter: "blur(16px)", boxShadow: "0 8px 24px rgba(53,39,66,0.12)" }}
           data-toolbar
         >
           {([
+            { id: "themes", label: "✨ Themes" },
             { id: "background", label: "🎨 Background" },
             { id: "audio", label: "🎵 Audio" },
             { id: "font", label: "🔤 Font" },
             { id: "add", label: "➕ Add" },
+            { id: "layout", label: "🧩 Layout" },
             { id: "settings", label: "⚙️ Settings" },
           ] as const).map(({ id, label }) => (
             <button key={id} onClick={() => togglePanel(id)}
@@ -736,7 +1108,7 @@ export default function SpaceStudio({
           ))}
 
           {/* Accent color quick row */}
-          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5 border-l pl-2" style={{ borderColor: "var(--border)" }}>
             <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>Lines</span>
             {ACCENT_PRESETS.map((c) => (
               <button key={c} onClick={() => updateConfig({ lineColor: c })}
@@ -750,81 +1122,111 @@ export default function SpaceStudio({
         </div>
       )}
 
-      {/* ── Board ── */}
-      <div className="relative flex-1" style={{ background: bgCssValue }}>
+      {/* ── Page — either the classic full-page canvas or a column of sections ── */}
+      {layoutMode === "canvas" ? (
+        <div className="absolute inset-0" style={{ background: bgCssValue }}>
+          {/* Ambient accent wash */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
 
-        {/* Ambient accent wash */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
+          {/* Canvas mode always shows the TOP board's canvas */}
+          {renderBoardFor(primaryBoardId)}
 
-        {/* tldraw infinite canvas — remounts on space change */}
-        <SpaceBoard
-          key={selectedSpace.id}
-          items={selectedSpace.items}
-          isOwner={isOwner}
-          onItemChange={handleItemChange}
-          onSelectItem={setSelectedItemId}
-          selectedItemId={selectedItemId}
-        />
-
-        {/* Profile card overlay */}
-        <div
-          className="absolute left-8 top-8 z-20 max-w-[280px] overflow-hidden rounded-[24px] border shadow-[0_12px_32px_rgba(53,39,66,0.12)]"
-          style={{ borderColor: `${accent}44`, background: "rgba(255,255,255,0.84)", backdropFilter: "blur(12px)" }}
-        >
-          <div className="flex items-center gap-3 p-4">
-            {selectedSpace.avatarUrl ? (
-              <img src={selectedSpace.avatarUrl} alt={selectedSpace.ownerName} className="h-14 w-14 rounded-2xl border-2 object-cover shrink-0" style={{ borderColor: accent }} />
-            ) : (
-              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 text-xl font-bold text-white" style={{ borderColor: accent, background: accent }}>
-                {selectedSpace.ownerName.slice(0, 1).toUpperCase()}
+          {/* Compact floating profile card */}
+          <div
+            className="absolute left-4 top-[4.75rem] z-20 max-w-[280px] overflow-hidden rounded-[24px] border shadow-[0_12px_32px_rgba(53,39,66,0.12)]"
+            style={{ borderColor: `${accent}44`, background: "rgba(255,255,255,0.84)", backdropFilter: "blur(12px)" }}
+          >
+            <div className="flex items-center gap-3 p-4">
+              {selectedSpace.avatarUrl ? (
+                <img src={selectedSpace.avatarUrl} alt={selectedSpace.ownerName} className="h-14 w-14 shrink-0 rounded-2xl border-2 object-cover" style={{ borderColor: accent }} />
+              ) : (
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 text-xl font-bold text-white" style={{ borderColor: accent, background: accent }}>
+                  {selectedSpace.ownerName.slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="truncate font-bold" style={{ ...fontStyle, fontSize: Math.min(spaceConfig.font.size + 2, 22) }}>
+                  {selectedSpace.title || selectedSpace.ownerName}
+                </p>
+                <p className="mt-0.5 flex items-center gap-1 truncate text-[11px]" style={{ color: "var(--muted)" }}>
+                  <span className="truncate">@{selectedSpace.slug}</span>
+                  {selectedSpace.ownerIsSupporter ? (
+                    <span title="Mochi Plus supporter" aria-label="Mochi Plus supporter" style={{ color: "var(--pink)" }}>♡</span>
+                  ) : null}
+                </p>
+                {selectedSpace.tagline ? (
+                  <p className="mt-1 text-xs leading-snug" style={{ color: "var(--foreground-soft)" }}>{selectedSpace.tagline}</p>
+                ) : null}
               </div>
-            )}
-            <div className="min-w-0">
-              <p className="truncate font-bold" style={{ ...fontStyle, fontSize: Math.min((spaceConfig.font.size) + 2, 22) }}>
-                {selectedSpace.title || selectedSpace.ownerName}
+            </div>
+            {selectedSpace.aboutMe ? (
+              <p
+                className="border-t px-4 pb-3 pt-2 text-xs leading-relaxed"
+                style={{ borderColor: `${accent}22`, ...fontStyle, fontSize: Math.max(spaceConfig.font.size - 2, 11) }}
+              >
+                {selectedSpace.aboutMe}
               </p>
-              <p className="mt-0.5 truncate text-[11px]" style={{ color: "var(--muted)" }}>@{selectedSpace.slug}</p>
-              {selectedSpace.tagline ? (
-                <p className="mt-1 text-xs leading-snug" style={{ color: "var(--foreground-soft)" }}>{selectedSpace.tagline}</p>
-              ) : null}
-            </div>
+            ) : null}
           </div>
-          {selectedSpace.aboutMe ? (
-            <p
-              className="border-t px-4 pb-3 pt-2 text-xs leading-relaxed"
-              style={{ borderColor: `${accent}22`, ...fontStyle, fontSize: Math.max(spaceConfig.font.size - 2, 11), color: spaceConfig.font.color }}
-            >
-              {selectedSpace.aboutMe}
-            </p>
-          ) : null}
         </div>
+      ) : (
+        <div className="absolute inset-0 overflow-y-auto" style={{ background: bgCssValue }}>
 
-        {/* YouTube audio iframe + now-playing chip */}
-        {youtubeId ? (
-          <>
-            <iframe
-              src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&loop=${spaceConfig.audioLoop ? 1 : 0}&playlist=${youtubeId}&controls=0&mute=0`}
-              title="soundtrack"
-              allow="autoplay"
-              className="pointer-events-none absolute opacity-0"
-              style={{ width: 1, height: 1, left: -9999, top: -9999 }}
+          {/* Ambient accent wash */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-48" style={{ background: `linear-gradient(180deg, ${accent}1a, transparent)` }} />
+
+          <div className="relative z-20 mx-auto w-full max-w-4xl px-4 pb-36 pt-24 sm:px-6">
+            <SpaceSections
+              space={selectedSpace}
+              sections={sections}
+              isOwner={isOwner}
+              accent={accent}
+              pageFont={spaceConfig.font}
+              onUpdateSections={handleUpdateSections}
+              onOpenVisitorNote={() => setShowVisitorNote(true)}
+              onUploadImage={uploadBgImage}
+              renderBoard={(_size, sectionId) => (
+                // Track the last-touched board so ➕ Add targets it
+                <div className="absolute inset-0" onPointerDownCapture={() => setActiveBoardId(sectionId)}>
+                  {renderBoardFor(sectionId)}
+                </div>
+              )}
             />
-            <div
-              className="absolute bottom-6 right-6 z-20 flex items-center gap-2 rounded-full border px-4 py-2"
-              style={{ borderColor: `${accent}55`, background: "rgba(255,255,255,0.90)", backdropFilter: "blur(12px)", boxShadow: "0 8px 20px rgba(53,39,66,0.12)" }}
-            >
-              <span aria-hidden>🎵</span>
-              <span className="text-[11px] font-semibold" style={{ color: accent }}>Now playing</span>
-              {isOwner && <span className="text-[10px]" style={{ color: "var(--muted)" }}>{spaceConfig.audioLoop ? "· loop" : "· once"}</span>}
-              <a href={selectedSpace.youtubeUrl} target="_blank" rel="noopener noreferrer"
-                className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                style={{ background: `${accent}22`, color: accent }}>
-                Open
-              </a>
-            </div>
-          </>
-        ) : null}
-      </div>
+          </div>
+        </div>
+      )}
+
+      {/* YouTube ambient audio iframe + now-playing chip (bottom-left so it
+          doesn't collide with the visitor "leave a note" button) */}
+      {youtubeId ? (
+        <>
+          <iframe
+            ref={audioFrameRef}
+            src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&loop=${spaceConfig.audioLoop ? 1 : 0}&playlist=${youtubeId}&controls=0&mute=1&enablejsapi=1`}
+            title="soundtrack"
+            allow="autoplay"
+            className="pointer-events-none absolute opacity-0"
+            style={{ width: 1, height: 1, left: -9999, top: -9999 }}
+          />
+          <button
+            onClick={toggleAudioMute}
+            className="btn-smooth absolute bottom-6 left-6 z-[120] flex items-center gap-2 rounded-full border px-4 py-2"
+            style={{ borderColor: `${accent}55`, background: "rgba(255,255,255,0.90)", backdropFilter: "blur(12px)", boxShadow: "0 8px 20px rgba(53,39,66,0.12)" }}
+          >
+            <span aria-hidden>{audioMuted ? "🔇" : "🎵"}</span>
+            <span className="text-[11px] font-semibold" style={{ color: accent }}>
+              {audioMuted ? "Tap to play music" : "Now playing"}
+            </span>
+            {!audioMuted && isOwner && <span className="text-[10px]" style={{ color: "var(--muted)" }}>{spaceConfig.audioLoop ? "· loop" : "· once"}</span>}
+            <a href={selectedSpace.youtubeUrl} target="_blank" rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{ background: `${accent}22`, color: accent }}>
+              Open
+            </a>
+          </button>
+        </>
+      ) : null}
 
       {/* ── Visitor "Leave a note" button ── */}
       {!isOwner && (
@@ -838,9 +1240,47 @@ export default function SpaceStudio({
       )}
 
       {/* ── Owner panels ── */}
+      {activePanel === "themes" && (
+        <PanelShell title="✨ Themes" onClose={() => setActivePanel(null)}>
+          <div className="space-y-2">
+            <p className="text-[10px]" style={{ color: "var(--muted)" }}>Pick a full look, then fine-tune anything below.</p>
+            <div className="grid grid-cols-2 gap-2">
+              {THEME_PRESETS.map((t) => {
+                const active =
+                  bgToCss(t.bg) === bgCssValue &&
+                  t.font.family === spaceConfig.font.family &&
+                  t.lineColor === accent;
+                const locked = Boolean(t.plusOnly && !supporter.isPlus);
+                return (
+                  <button key={t.label} onClick={() => applyTheme(t)}
+                    className="btn-smooth relative overflow-hidden rounded-2xl border text-left"
+                    style={{ borderColor: active ? t.lineColor : "var(--border)", borderWidth: active ? 2 : 1 }}>
+                    <div className="relative h-12 w-full" style={{ background: bgToCss(t.bg) }}>
+                      {t.plusOnly ? (
+                        <span
+                          className="absolute right-1.5 top-1.5 rounded-full px-1.5 py-0.5 text-[8px] font-bold"
+                          style={{ background: "rgba(255,255,255,0.85)", color: "var(--pink)" }}
+                          title={locked ? "Mochi Plus theme" : "Mochi Plus theme (yours ♡)"}
+                        >
+                          ♡ PLUS
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2.5 py-2" style={{ opacity: locked ? 0.6 : 1 }}>
+                      <span>{t.emoji}</span>
+                      <span className="text-xs font-semibold" style={{ fontFamily: fontCss(t.font.family), color: "var(--foreground-soft)" }}>{t.label}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </PanelShell>
+      )}
+
       {activePanel === "background" && (
         <PanelShell title="🎨 Background" onClose={() => setActivePanel(null)}>
-          <BackgroundPicker bg={spaceConfig.bg} onChange={(bg) => updateConfig({ bg })} />
+          <BackgroundPicker bg={spaceConfig.bg} onChange={(bg) => updateConfig({ bg })} onUploadImage={uploadBgImage} />
         </PanelShell>
       )}
 
@@ -902,7 +1342,25 @@ export default function SpaceStudio({
                   { label: "🖼️ Photo card", type: "image" as const, seed: { width: 240, height: 200 } },
                   { label: "✏️ Doodle frame", type: "drawing" as const, seed: { width: 240, height: 200 } },
                 ].map(({ label, type, seed }) => (
-                  <button key={type} onClick={() => { onAddItemToOwnSpace(type, seed); setActivePanel(null); }}
+                  <button key={type} onClick={() => { addItemToBoard(type, seed); setActivePanel(null); }}
+                    className="btn-smooth rounded-2xl border px-3 py-2.5 text-xs font-semibold text-left"
+                    style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--foreground-soft)" }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--muted)" }}>Blocks</p>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { label: "🔗 Link", type: "link" as const },
+                  { label: "🎶 Music", type: "music" as const },
+                  { label: "📰 Heading", type: "header" as const },
+                  { label: "➖ Divider", type: "divider" as const },
+                ]).map(({ label, type }) => (
+                  <button key={type} onClick={() => { addItemToBoard(type); setActivePanel(null); }}
                     className="btn-smooth rounded-2xl border px-3 py-2.5 text-xs font-semibold text-left"
                     style={{ background: "var(--surface)", borderColor: "var(--border)", color: "var(--foreground-soft)" }}>
                     {label}
@@ -925,7 +1383,7 @@ export default function SpaceStudio({
                 <button
                   onClick={() => {
                     if (newImageUrl.trim()) {
-                      onAddItemToOwnSpace("image", { imageUrl: newImageUrl.trim(), width: 240, height: 200 });
+                      addItemToBoard("image", { imageUrl: newImageUrl.trim(), width: 240, height: 200 });
                       setNewImageUrl(""); setActivePanel(null);
                     }
                   }}
@@ -938,7 +1396,7 @@ export default function SpaceStudio({
 
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--muted)" }}>Draw a doodle</p>
-              <DoodlePad onCreate={(url) => { onAddItemToOwnSpace("drawing", { imageUrl: url, title: "Doodle", width: 240, height: 200 }); setActivePanel(null); }} />
+              <DoodlePad onCreate={(url) => { addItemToBoard("drawing", { imageUrl: url, title: "Doodle", width: 240, height: 200 }); setActivePanel(null); }} />
             </div>
 
             <div>
@@ -948,15 +1406,29 @@ export default function SpaceStudio({
                 Choose image file
                 <input type="file" accept="image/*" className="hidden"
                   onChange={async (e) => {
-                    const file = e.target.files?.[0];
+                    // React nulls e.currentTarget once the handler yields — grab it now.
+                    const input = e.currentTarget;
+                    const file = input.files?.[0];
                     if (!file) return;
                     const url = await readFileAsDataUrl(file);
-                    if (url) { onAddItemToOwnSpace("image", { imageUrl: url, title: file.name.replace(/\.[^.]+$/, ""), width: 240, height: 200 }); setActivePanel(null); }
-                    e.currentTarget.value = "";
+                    if (url) { addItemToBoard("image", { imageUrl: url, title: file.name.replace(/\.[^.]+$/, ""), width: 240, height: 200 }); setActivePanel(null); }
+                    input.value = "";
                   }} />
               </label>
             </div>
           </div>
+        </PanelShell>
+      )}
+
+      {activePanel === "layout" && (
+        <PanelShell title="🧩 Page layout" onClose={() => setActivePanel(null)}>
+          <LayoutPanelBody
+            sections={sections}
+            accent={accent}
+            layout={layoutMode}
+            onChangeLayout={(layout) => updateConfig({ layout })}
+            onUpdateSections={handleUpdateSections}
+          />
         </PanelShell>
       )}
 
@@ -990,14 +1462,14 @@ export default function SpaceStudio({
         </PanelShell>
       )}
 
-      {/* ── Item sheet ── */}
-      {selectedItem && selectedSpace ? (
+      {/* ── Item sheet (opens via the floating ✎ button) ── */}
+      {editingItem && selectedSpace ? (
         <ItemSheet
-          item={selectedItem} spaceId={selectedSpace.id} isOwner={isOwner} accent={accent}
-          onUpdate={(p) => onUpdateSpaceItem(selectedSpace.id, selectedItem.id, p)}
-          onRemove={() => { onRemoveSpaceItem(selectedSpace.id, selectedItem.id); setSelectedItemId(null); }}
-          onTogglePin={() => togglePin(selectedItem)}
-          onClose={() => setSelectedItemId(null)}
+          item={editingItem} spaceId={selectedSpace.id} isOwner={isOwner} accent={accent}
+          onUpdate={(p) => onUpdateSpaceItem(selectedSpace.id, editingItem.id, p)}
+          onRemove={() => { onRemoveSpaceItem(selectedSpace.id, editingItem.id); setEditingItemId(null); setSelectedItemId(null); }}
+          onTogglePin={() => togglePin(editingItem)}
+          onClose={() => setEditingItemId(null)}
         />
       ) : null}
 
