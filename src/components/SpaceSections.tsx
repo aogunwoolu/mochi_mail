@@ -157,7 +157,7 @@ function TypographyEditor({
 
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="mb-1 text-[10px]" style={{ color: "var(--muted)" }}>Size — {font.size ?? pageFont.size}px</p>
+          <p className="mb-1 text-[10px]" style={{ color: "var(--muted)" }}>Size - {font.size ?? pageFont.size}px</p>
           <input type="range" min={10} max={32} value={font.size ?? pageFont.size}
             onChange={(e) => set({ size: Number(e.target.value) })} className="w-full" />
         </div>
@@ -393,7 +393,7 @@ interface SpaceSectionsProps {
   onUpdateSections: (next: SpaceSection[]) => void;
   onOpenVisitorNote: () => void;
   onUploadImage: (file: File) => Promise<string | null>;
-  /** Renders the pinboard canvas for one board section — each board section id
+  /** Renders the pinboard canvas for one board section - each board section id
    *  gets its own independent set of items. */
   renderBoard: (size: "s" | "m" | "l", sectionId: string) => React.ReactNode;
 }
@@ -429,7 +429,7 @@ export default function SpaceSections({
     };
   };
 
-  /** Heading style — follows the section font but stays accent-coloured unless overridden. */
+  /** Heading style - follows the section font but stays accent-coloured unless overridden. */
   const headingStyle = (section: SpaceSection): React.CSSProperties => ({
     ...sectionStyle(section),
     color: section.font?.color ?? accent,
@@ -569,7 +569,7 @@ export default function SpaceSections({
             </div>
             {visitorNotes.length === 0 ? (
               <p className="text-xs" style={{ color: "var(--muted)" }}>
-                {isOwner ? "No notes yet — share your space so friends can sign it!" : "Be the first to leave a note 💌"}
+                {isOwner ? "No notes yet - share your space so friends can sign it!" : "Be the first to leave a note 💌"}
               </p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
@@ -666,7 +666,7 @@ export default function SpaceSections({
             )}
           </SectionCard>
 
-          {/* Owner controls — float over the section's top-right corner */}
+          {/* Owner controls - float over the section's top-right corner */}
           {isOwner && (
             <div
               className="absolute -top-2.5 right-3 z-10 flex items-center gap-1 rounded-full border px-1.5 py-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
@@ -725,7 +725,7 @@ export function LayoutPanelBody({
         </div>
         {layout === "canvas" && (
           <p className="mt-2 text-[10px]" style={{ color: "var(--muted)" }}>
-            Your sections are kept safe — switch back to the sections page any time.
+            Your sections are kept safe - switch back to the sections page any time.
           </p>
         )}
       </div>
@@ -765,7 +765,7 @@ export function LayoutPanelBody({
             );
           })}
           {sections.length === 0 && (
-            <p className="text-xs" style={{ color: "var(--muted)" }}>Your page is empty — add a section below!</p>
+            <p className="text-xs" style={{ color: "var(--muted)" }}>Your page is empty - add a section below!</p>
           )}
         </div>
       </div>

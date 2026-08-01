@@ -382,7 +382,7 @@ export default function PublishModal({
                   >
                     Tags
                     <span className="ml-1 normal-case tracking-normal font-normal" style={{ color: "var(--muted)" }}>
-                      — press Enter or comma to add
+                      - press Enter or comma to add
                     </span>
                   </label>
                   <div

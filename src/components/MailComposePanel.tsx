@@ -345,7 +345,7 @@ export default function MailComposePanel({
       const code = error instanceof Error ? error.message : "unknown";
       if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY not set on the server.");
       else if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY not set on the server.");
-      else if (code === "rate_limited") setGifError("Too many requests — please wait a moment and try again.");
+      else if (code === "rate_limited") setGifError("Too many requests - please wait a moment and try again.");
       else setGifError("GIF search failed.");
     } finally {
       setGifLoading(false);
@@ -452,7 +452,7 @@ export default function MailComposePanel({
         letterImageData = letterCanvas.toDataURL("image/png");
         envelopeImageData = envelopeCanvas.toDataURL("image/png");
       } catch {
-        toast("Can't export letter — if you added GIFs from search, remove them and try again.", { variant: "error", icon: "warning" });
+        toast("Can't export letter - if you added GIFs from search, remove them and try again.", { variant: "error", icon: "warning" });
         return;
       }
       const payload: LetterSendPayload = {
@@ -493,13 +493,13 @@ export default function MailComposePanel({
   const handleSelectSticker = useCallback((sticker: Sticker) => {
     setSelectedAsset(sticker);
     setBrushSettings((prev) => ({ ...prev, tool: "sticker" }));
-    toast("Sticker selected — click to place!", { icon: "sticker" });
+    toast("Sticker selected - click to place!", { icon: "sticker" });
   }, []);
 
   const handleSelectWashi = useCallback((washi: WashiTape) => {
     setSelectedAsset(washi);
     setBrushSettings((prev) => ({ ...prev, tool: "washi" }));
-    toast("Washi tape selected — click to place!", { icon: "ribbon" });
+    toast("Washi tape selected - click to place!", { icon: "ribbon" });
   }, []);
 
   const activeFontOptions = useMemo(
@@ -708,7 +708,7 @@ export default function MailComposePanel({
               </div>
             </div>
 
-            {/* Layer panel — overlays the canvas, always rendered so it tracks both surfaces */}
+            {/* Layer panel - overlays the canvas, always rendered so it tracks both surfaces */}
             {showLayerPanel && (
               <LayerPanel
                 items={activeSurface === "letter" ? letterPlacedItems : envelopePlacedItems}

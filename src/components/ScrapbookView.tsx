@@ -77,7 +77,7 @@ function KitCard({ kit, onAddElement, onAddKit, onRemove, actionLabel, onAction,
         </button>
       </div>
 
-      {/* Thumbnail grid — 2×2 or 2×3 */}
+      {/* Thumbnail grid - 2×2 or 2×3 */}
       <div className="grid grid-cols-4 gap-1 p-2">
         {kit.elements.slice(0, 4).map((el) => (
           <button

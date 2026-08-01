@@ -20,7 +20,7 @@ async function encodeGif(frameSrcs: string[], size: number, fps: number): Promis
   const gif = GIFEncoder();
   const delay = Math.round(100 / fps); // centiseconds
 
-  // Sentinel color for transparent pixels — a cyan that won't appear in pastel drawings
+  // Sentinel color for transparent pixels - a cyan that won't appear in pastel drawings
   const TR = 0, TG = 255, TB = 254;
 
   for (const src of frameSrcs) {

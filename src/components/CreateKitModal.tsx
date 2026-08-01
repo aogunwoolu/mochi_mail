@@ -99,7 +99,7 @@ export default function CreateKitModal({ userStickers, viewer, onClose, onSave }
         <div className="flex items-center justify-between px-5 pt-5 pb-4" style={{ borderBottom: "1px solid var(--border)" }}>
           <div>
             <h2 className="text-base font-bold" style={{ color: "var(--foreground)" }}>
-              {step === 1 ? "Create a Kit — Details" : "Create a Kit — Add Elements"}
+              {step === 1 ? "Create a Kit - Details" : "Create a Kit - Add Elements"}
             </h2>
             <p className="text-[11px] mt-0.5" style={{ color: "var(--muted)" }}>
               {step === 1 ? "Give your kit a name and a vibe." : "Pick stickers or upload images."}
@@ -260,7 +260,7 @@ export default function CreateKitModal({ userStickers, viewer, onClose, onSave }
                 </p>
                 {elements.length === 0 ? (
                   <p className="text-xs py-4 text-center rounded-xl" style={{ color: "var(--muted)", background: "var(--surface)" }}>
-                    No elements yet — upload images or pick from stickers above.
+                    No elements yet - upload images or pick from stickers above.
                   </p>
                 ) : (
                   <div className="flex flex-col gap-1.5">

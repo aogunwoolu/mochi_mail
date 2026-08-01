@@ -91,7 +91,7 @@ export default function CanvasRegionSelector({
       if (e.ctrlKey || e.metaKey) {
         onZoom(e.deltaY, e.deltaMode, e.clientX, e.clientY);
       } else {
-        // Pan — forward scroll to the canvas container
+        // Pan - forward scroll to the canvas container
         scrollEl.scrollLeft += e.deltaX;
         scrollEl.scrollTop += e.deltaY;
       }
@@ -111,7 +111,7 @@ export default function CanvasRegionSelector({
 
   const hasSelection = rect && rect.w > 10 && rect.h > 10 && !isDragging;
 
-  // Compute action button position — keep it on-screen
+  // Compute action button position - keep it on-screen
   let btnLeft = rect ? rect.x : 0;
   let btnTop = rect ? rect.y + rect.h + 10 : 0;
 
@@ -151,7 +151,7 @@ export default function CanvasRegionSelector({
         Cancel
       </button>
 
-      {/* Dimmed overlay — 4 strips around selection rect */}
+      {/* Dimmed overlay - 4 strips around selection rect */}
       {rect && rect.w > 0 && rect.h > 0 ? (
         <>
           {/* Top */}
@@ -206,7 +206,7 @@ export default function CanvasRegionSelector({
         <div className="pointer-events-none absolute inset-0" style={{ background: "rgba(0,0,0,0.38)" }} />
       )}
 
-      {/* Action buttons — appear after selection is made */}
+      {/* Action buttons - appear after selection is made */}
       {hasSelection && rect && (
         <div
           className="pointer-events-auto absolute z-20 flex gap-2"

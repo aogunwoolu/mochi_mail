@@ -169,7 +169,7 @@ function BackgroundPicker({
           </div>
           <div>
             <label className="block text-[10px] font-semibold mb-1" style={{ color: "var(--muted)" }}>
-              Angle — {bg.angle ?? 135}°
+              Angle - {bg.angle ?? 135}°
             </label>
             <input
               type="range" min={0} max={360}
@@ -191,7 +191,7 @@ function BackgroundPicker({
             {uploading ? "Uploading…" : "⬆️ Upload from device"}
             <input type="file" accept="image/*" className="hidden" disabled={uploading}
               onChange={async (e) => {
-                // React nulls e.currentTarget once the handler yields — grab it now.
+                // React nulls e.currentTarget once the handler yields - grab it now.
                 const input = e.currentTarget;
                 const file = input.files?.[0];
                 if (!file) return;
@@ -227,7 +227,7 @@ function BackgroundPicker({
           </div>
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: "var(--muted)" }}>
-              Soften — {bg.scrim ?? 0}%
+              Soften - {bg.scrim ?? 0}%
             </label>
             <input type="range" min={0} max={80} value={bg.scrim ?? 0}
               onChange={(e) => onChange({ ...bg, type: "image", scrim: Number(e.target.value) })} className="w-full" />
@@ -317,7 +317,7 @@ function FontPanel({
 
       <div>
         <label className="block text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: "var(--muted)" }}>
-          Size — {font.size}px
+          Size - {font.size}px
         </label>
         <input type="range" min={11} max={22} value={font.size}
           onChange={(e) => onChange({ ...font, size: Number(e.target.value) })} className="w-full" />
@@ -472,7 +472,7 @@ function StyleSection({ item, onUpdate }: Readonly<{ item: SpaceItem; onUpdate: 
       <div className="flex items-center justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--muted)" }}>✨ Style</p>
         <button
-          // Keep sectionId — resetting looks shouldn't move the item to another board
+          // Keep sectionId - resetting looks shouldn't move the item to another board
           onClick={() => onUpdate({ style: item.style?.sectionId ? { sectionId: item.style.sectionId } : {} })}
           className="btn-smooth rounded-lg px-2 py-0.5 text-[10px]" style={{ background: "var(--surface-active)", color: "var(--muted-strong)" }}>Reset</button>
       </div>
@@ -519,7 +519,7 @@ function StyleSection({ item, onUpdate }: Readonly<{ item: SpaceItem; onUpdate: 
         </select>
       </div>
       <div>
-        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Corners — {style.radius ?? "auto"}</p>
+        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Corners - {style.radius ?? "auto"}</p>
         <input type="range" min={0} max={40} value={style.radius ?? 16} onChange={(e) => set({ radius: Number(e.target.value) })} className="w-full" />
       </div>
       <div>
@@ -527,7 +527,7 @@ function StyleSection({ item, onUpdate }: Readonly<{ item: SpaceItem; onUpdate: 
         <Seg options={["none", "soft", "strong"] as const} value={style.shadow ?? "soft"} onPick={(s) => set({ shadow: s })} />
       </div>
       <div>
-        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Opacity — {style.opacity ?? 100}%</p>
+        <p className="text-[10px] mb-1" style={{ color: "var(--muted)" }}>Opacity - {style.opacity ?? 100}%</p>
         <input type="range" min={20} max={100} value={style.opacity ?? 100} onChange={(e) => set({ opacity: Number(e.target.value) })} className="w-full" />
       </div>
       <div className="flex items-center gap-3">
@@ -767,7 +767,7 @@ export default function SpaceStudio({
   const [showSpacePicker, setShowSpacePicker] = useState(false);
   const [newImageUrl, setNewImageUrl] = useState("");
   const [audioMuted, setAudioMuted] = useState(true);
-  // Which board section new items get added to — the last one the owner touched
+  // Which board section new items get added to - the last one the owner touched
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const audioFrameRef = useRef<HTMLIFrameElement>(null);
 
@@ -778,7 +778,7 @@ export default function SpaceStudio({
 
   const isOwner = Boolean(selectedSpace && ownSpace && selectedSpace.id === ownSpace.id);
   // The edit sheet is only shown when the user taps the floating ✎ button (editingItemId),
-  // not merely on selection — so dragging an item no longer pops the sheet open.
+  // not merely on selection - so dragging an item no longer pops the sheet open.
   const editingItem = selectedSpace?.items.find((i) => i.id === editingItemId) ?? null;
 
   const spaceConfig = useMemo(() => parseSpaceConfig(selectedSpace?.wallpaper), [selectedSpace?.wallpaper]);
@@ -798,7 +798,7 @@ export default function SpaceStudio({
     loadGoogleFont(opt?.gfont ?? null);
   }, [spaceConfig.font.family]);
 
-  // Board items can carry their own font — make sure those load for visitors too
+  // Board items can carry their own font - make sure those load for visitors too
   useEffect(() => {
     for (const item of selectedSpace?.items ?? []) loadFontByLabel(item.style?.fontFamily);
   }, [selectedSpace?.items]);
@@ -866,7 +866,7 @@ export default function SpaceStudio({
     [onUpdateOwnSpace, spaceConfig]
   );
 
-  // Page layout — a column of sections the owner can add / remove / reorder.
+  // Page layout - a column of sections the owner can add / remove / reorder.
   // Undefined means "never customised", which maps to the classic layout.
   const sections = useMemo(() => spaceConfig.sections ?? defaultSections(), [spaceConfig.sections]);
   const handleUpdateSections = useCallback(
@@ -919,7 +919,7 @@ export default function SpaceStudio({
 
   const applyTheme = useCallback((t: (typeof THEME_PRESETS)[number]) => {
     if (t.plusOnly && !supporter.isPlus) {
-      toast("That's a Mochi Plus theme ♡ — become a member to unlock it!", { icon: "star" });
+      toast("That's a Mochi Plus theme ♡ - become a member to unlock it!", { icon: "star" });
       return;
     }
     loadGoogleFont(FONT_OPTIONS.find((f) => f.label === t.font.family)?.gfont ?? null);
@@ -988,7 +988,7 @@ export default function SpaceStudio({
 
   const layoutMode = spaceConfig.layout ?? "sections";
 
-  // One canvas per board section — full-page in canvas mode (top board only),
+  // One canvas per board section - full-page in canvas mode (top board only),
   // embedded per section in sections mode. Remounts on space/board change via key.
   const renderBoardFor = (boardId: string | null) => (
     <SpaceBoard
@@ -1122,7 +1122,7 @@ export default function SpaceStudio({
         </div>
       )}
 
-      {/* ── Page — either the classic full-page canvas or a column of sections ── */}
+      {/* ── Page - either the classic full-page canvas or a column of sections ── */}
       {layoutMode === "canvas" ? (
         <div className="absolute inset-0" style={{ background: bgCssValue }}>
           {/* Ambient accent wash */}
@@ -1406,7 +1406,7 @@ export default function SpaceStudio({
                 Choose image file
                 <input type="file" accept="image/*" className="hidden"
                   onChange={async (e) => {
-                    // React nulls e.currentTarget once the handler yields — grab it now.
+                    // React nulls e.currentTarget once the handler yields - grab it now.
                     const input = e.currentTarget;
                     const file = input.files?.[0];
                     if (!file) return;

@@ -13,7 +13,7 @@ import { fontCss } from '@/lib/spaceConfig'
 const ZOOM_RANGE: [number, number] = [0.4, 2.5]
 
 // ─── Per-item content renderer ─────────────────────────────────────────────────
-// Pure presentation — identical markup to the previous tldraw shape, just driven
+// Pure presentation - identical markup to the previous tldraw shape, just driven
 // straight off SpaceItem and sized to fill its positioned wrapper (100% / 100%).
 
 function SpaceItemContent({ item }: { item: SpaceItem }) {
@@ -145,7 +145,7 @@ function SpaceItemContent({ item }: { item: SpaceItem }) {
     )
   }
 
-  // ── Note / about cards — material driven by style.texture ────────────────────
+  // ── Note / about cards - material driven by style.texture ────────────────────
   const texture = style.texture ?? (itemType === 'about' ? 'card' : 'paper')
   const paper = visitorMode ? '#fff7b0' : (color && color !== 'transparent' ? color : (itemType === 'about' ? '#d9f7ff' : '#ffe08a'))
   const labelRow = (
@@ -424,7 +424,7 @@ export default function SpaceBoard({ items, isOwner, accent, onItemChange, onSel
         threshold={0}
         onScroll={onViewerScroll}
         // A press on an item (or its Moveable handles) must NOT start a viewer
-        // pan — gesto sits between the item and React's delegated root, so it
+        // pan - gesto sits between the item and React's delegated root, so it
         // fires before our item handler and stopPropagation can't reach it.
         // Returning false here cancels the pan, so the press only selects (and
         // never triggers the deselect in onDragEnd below).
@@ -476,7 +476,7 @@ export default function SpaceBoard({ items, isOwner, accent, onItemChange, onSel
 
       {/* Moveable lives OUTSIDE the zoomed viewport (screen space). This lets it
           walk up through the viewport's scale transform to the target, so drag /
-          resize deltas are correctly de-scaled by the current zoom — without this
+          resize deltas are correctly de-scaled by the current zoom - without this
           the item lags the cursor ("parallax") at any zoom ≠ 1. */}
       {isOwner && targetEl && (
         <Moveable

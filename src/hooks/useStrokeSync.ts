@@ -41,7 +41,7 @@ type PlacedItemRemovePayload = { senderId: string; itemId: string };
 
 export type UseStrokeSyncOptions = {
   hasSession: boolean;
-  /** null while the room is still being created/joined — gates all DB + channel work */
+  /** null while the room is still being created/joined - gates all DB + channel work */
   collabScope: string | null;
   activeRoomId: string | null;
   selfIdRef: React.RefObject<string>;
@@ -153,7 +153,7 @@ export function useStrokeSync({
   type Channel = ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]>;
   const channelRef = useRef<Channel | null>(null);
 
-  // Each artist's live (in-progress) stroke — accumulated from delta broadcasts
+  // Each artist's live (in-progress) stroke - accumulated from delta broadcasts
   // so the remote overlay always shows the full stroke, not just each chunk.
   const remoteActiveStrokesRef = useRef<Map<string, LiveAccumulated>>(new Map());
   const renderedStrokeIdsRef = useRef<Set<string>>(new Set());

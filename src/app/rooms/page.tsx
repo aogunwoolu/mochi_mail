@@ -176,7 +176,7 @@ function RoomsPageInner() {
     );
   }
 
-  // Stable room link uses room ID — the invite token can be rotated separately
+  // Stable room link uses room ID - the invite token can be rotated separately
   const getInviteLink = (room: RoomSummary) => `${globalThis.location.origin}/rooms/${room.inviteToken}`;
 
   const handleJoin = async () => {
@@ -268,7 +268,7 @@ function RoomsPageInner() {
             </button>
           </div>
 
-          {/* Invite link — the one link to share */}
+          {/* Invite link - the one link to share */}
           <div>
             <FieldLabel>Invite link</FieldLabel>
             <div className="flex items-center gap-2 rounded-xl px-3 py-2.5" style={{ background: "var(--surface-active)" }}>
@@ -285,7 +285,7 @@ function RoomsPageInner() {
                 onClick={async () => {
                   try {
                     await rooms.rotateRoomInviteToken(primaryRoom.id);
-                    flash("Invite link rotated — old link no longer works.");
+                    flash("Invite link rotated - old link no longer works.");
                   } catch (err) {
                     flash(errMsg(err, "Failed to rotate invite link."), true);
                   }
@@ -319,11 +319,11 @@ function RoomsPageInner() {
           Loading your rooms…
         </div>
       ) : (
-        /* No room yet — the canvas creates one automatically on first visit. */
+        /* No room yet - the canvas creates one automatically on first visit. */
         <section className="rounded-2xl border p-5 text-center flex flex-col items-center gap-3" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
           <p className="text-sm font-semibold">No room yet</p>
           <p className="text-xs max-w-xs" style={{ color: "var(--muted)" }}>
-            Your room is created the first time you open the canvas. Head there to get started — it will appear here automatically.
+            Your room is created the first time you open the canvas. Head there to get started - it will appear here automatically.
           </p>
           <button
             onClick={() => router.push("/")}
@@ -351,7 +351,7 @@ function RoomsPageInner() {
             />
           </div>
           <div>
-            <FieldLabel>Password <span className="font-normal" style={{ color: "var(--muted)" }}>— only if the room requires one</span></FieldLabel>
+            <FieldLabel>Password <span className="font-normal" style={{ color: "var(--muted)" }}>- only if the room requires one</span></FieldLabel>
             <input
               value={joinPassword}
               onChange={(e) => setJoinPassword(e.target.value)}
@@ -434,16 +434,16 @@ function RoomsPageInner() {
                 <input value={createTitle} onChange={(e) => setCreateTitle(e.target.value)} className="input-soft w-full px-3 py-2 text-sm outline-none" placeholder="e.g. Weekend sketch club" />
               </div>
               <div>
-                <FieldLabel>Description <span className="font-normal" style={{ color: "var(--muted)" }}>— optional</span></FieldLabel>
+                <FieldLabel>Description <span className="font-normal" style={{ color: "var(--muted)" }}>- optional</span></FieldLabel>
                 <textarea value={createDescription} onChange={(e) => setCreateDescription(e.target.value)} rows={2} className="input-soft w-full px-3 py-2 text-sm outline-none" placeholder="What's this room for?" />
               </div>
               <div>
-                <FieldLabel>Password <span className="font-normal" style={{ color: "var(--muted)" }}>— optional, locks the room</span></FieldLabel>
+                <FieldLabel>Password <span className="font-normal" style={{ color: "var(--muted)" }}>- optional, locks the room</span></FieldLabel>
                 <input value={createPassword} onChange={(e) => setCreatePassword(e.target.value)} type="password" className="input-soft w-full px-3 py-2 text-sm outline-none" placeholder="Leave blank for no password" />
               </div>
               <label className="flex items-center gap-2 text-xs" style={{ color: "var(--muted-strong)" }}>
                 <input type="checkbox" checked={createPublic} onChange={(e) => setCreatePublic(e.target.checked)} />
-                Make public — show in discovery so anyone can find it
+                Make public - show in discovery so anyone can find it
               </label>
               <button onClick={handleCreate} className="btn-smooth self-start rounded-xl px-3 py-2 text-xs font-semibold text-white" style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
                 Create room

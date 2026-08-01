@@ -345,7 +345,7 @@ export function useAccount() {
 
   // OAuth sign-up/sign-in (Google, Discord). For the anonymous user this links
   // the provider identity onto the *existing* auth user (same auth.uid()), so
-  // all their assets/mail/space carry over — exactly like saveAccount but with
+  // all their assets/mail/space carry over - exactly like saveAccount but with
   // no password. Requires the provider to be enabled in the Supabase dashboard,
   // and "Allow manual linking" turned on for the linkIdentity path.
   // Both calls redirect away to the provider; on return, detectSessionInUrl
@@ -368,7 +368,7 @@ export function useAccount() {
   //
   // NOTE: this uses a REAL email (unlike `signUp`, which uses a fake
   // username@mochimail.app address). If Supabase "Confirm email" is enabled the
-  // address won't be active until verified — for the smoothest flow, enable
+  // address won't be active until verified - for the smoothest flow, enable
   // auto-confirm / disable secure email change for this project.
   const saveAccount = useCallback(async (input: {
     email: string;
@@ -378,7 +378,7 @@ export function useAccount() {
     const email = input.email.trim().toLowerCase();
     const password = input.password.trim();
     if (!email || !password) return { ok: false, error: "Email and password are required." };
-    if (!authUser) return { ok: false, error: "Still getting you set up — try again in a moment." };
+    if (!authUser) return { ok: false, error: "Still getting you set up - try again in a moment." };
 
     const supabase = createSupabaseBrowserClient();
     const displayName = (input.displayName ?? "").trim();

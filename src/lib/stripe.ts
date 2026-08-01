@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 
 // Server-only singleton Stripe client. NEVER import this from a client component
-// — it reads the secret key. The billing route handlers (which run with
+// - it reads the secret key. The billing route handlers (which run with
 // `runtime = "nodejs"`) are the only callers.
 
 let stripe: Stripe | null = null;

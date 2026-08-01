@@ -39,7 +39,7 @@ export function WipBanner({ onOpenFeedback }: WipBannerProps) {
         role="status"
       >
         <span aria-hidden>🍡</span>
-        <span className="truncate">MochiMail is still baking — a work in progress!</span>
+        <span className="truncate">MochiMail is still baking - a work in progress!</span>
         <button
           onClick={onOpenFeedback}
           className="btn-smooth shrink-0 rounded-full px-3 py-1 text-[12px] font-bold text-white"

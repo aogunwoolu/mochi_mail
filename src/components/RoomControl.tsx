@@ -59,7 +59,7 @@ export default function RoomControl({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // silent — URL is in the address bar anyway
+      // silent - URL is in the address bar anyway
     }
   }
 
@@ -157,7 +157,7 @@ export default function RoomControl({
           boxShadow: "0 4px 16px rgba(143,109,178,0.12), 0 1px 4px rgba(0,0,0,0.07)",
         }}
       >
-        {/* Privacy badge — non-owners see read-only */}
+        {/* Privacy badge - non-owners see read-only */}
         {!isOwner && (
           <span
             className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold"
@@ -189,7 +189,7 @@ export default function RoomControl({
           {copied ? "Copied!" : "Copy link"}
         </button>
 
-        {/* Settings button — owner only */}
+        {/* Settings button - owner only */}
         {isOwner && (
           <>
             <span className="h-4 w-px shrink-0" style={{ background: "var(--border)" }} />
@@ -209,7 +209,7 @@ export default function RoomControl({
         )}
       </div>
 
-      {/* Settings popover — drops below the chip */}
+      {/* Settings popover - drops below the chip */}
       {settingsOpen && isOwner && (
         <div
           className="absolute left-0 mt-2 w-64 rounded-2xl p-4 flex flex-col gap-3"
@@ -235,7 +235,7 @@ export default function RoomControl({
               }}
             >
               {isPublic ? <FiGlobe size={13} /> : <FiLock size={13} />}
-              <span className="flex-1 text-left">{isPublic ? "Public — anyone can find it" : "Private — invite only"}</span>
+              <span className="flex-1 text-left">{isPublic ? "Public - anyone can find it" : "Private - invite only"}</span>
             </button>
           </div>
 
@@ -255,7 +255,7 @@ export default function RoomControl({
               )}
             </div>
             <p className="mb-2 text-[11px]" style={{ color: "var(--muted)" }}>
-              {hasPassword ? "Password is set. New members must enter it to join." : "No password — anyone with the link can join."}
+              {hasPassword ? "Password is set. New members must enter it to join." : "No password - anyone with the link can join."}
             </p>
             <div className="flex gap-1.5">
               <input

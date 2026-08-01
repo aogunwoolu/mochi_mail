@@ -15,7 +15,7 @@ function Card({ children }: Readonly<{ children: React.ReactNode }>) {
 }
 
 /** Gentle inline "save your account" step shown only when an anonymous user tries
- *  to subscribe — so Plus perks bind to a durable, recoverable identity. */
+ *  to subscribe - so Plus perks bind to a durable, recoverable identity. */
 function SaveAccountStep({ onSaved, busy }: Readonly<{ onSaved: (i: { email: string; password: string; displayName: string }) => void; busy: boolean }>) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -190,7 +190,7 @@ export default function SupportMochiPanel() {
           {/* Tip */}
           <div className="mt-2 rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.6)" }}>
             <p className="text-sm font-semibold">Or buy us a tea 🍵</p>
-            <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted-strong)" }}>A one-time thank-you — no account needed.</p>
+            <p className="mt-0.5 text-[11px]" style={{ color: "var(--muted-strong)" }}>A one-time thank-you - no account needed.</p>
             <div className="mt-2 flex gap-2">
               {TIP_AMOUNTS_CENTS.map((cents) => (
                 <button

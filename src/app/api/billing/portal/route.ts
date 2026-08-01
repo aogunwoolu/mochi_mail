@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Opens the Stripe Billing Portal so members can update or cancel their
-// membership themselves — an honest, easy exit, no dark patterns.
+// membership themselves - an honest, easy exit, no dark patterns.
 export async function POST(req: NextRequest) {
   const stripe = getStripe();
   const admin = getAdminClient();

@@ -51,7 +51,7 @@ export default function RoomInvitePage() {
           const supabase = createSupabaseBrowserClient();
 
           // If the user already has access (owner or existing member), RLS lets them
-          // read the room directly — skip the join UI and go straight to the canvas.
+          // read the room directly - skip the join UI and go straight to the canvas.
           const { data: existingAccess } = await supabase
             .from("rooms")
             .select("id, invite_token")
@@ -103,7 +103,7 @@ export default function RoomInvitePage() {
       router.push(`/rooms?invite=${encodeURIComponent(token ?? "")}`);
       return;
     }
-  // rooms.getInvitePreview is a stable useCallback — safe to list here.
+  // rooms.getInvitePreview is a stable useCallback - safe to list here.
   // Don't include the whole `rooms` object or the effect re-runs every render.
   }, [account.hydrated, account.hasSession, rooms.getInvitePreview, router, token]);
 

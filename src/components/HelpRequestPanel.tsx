@@ -11,7 +11,7 @@ import "@uiw/react-markdown-preview/markdown.css";
 // The editor touches `document` at render time, so keep it client-only.
 const MDEditor = dynamic(() => import("@uiw/react-md-editor"), { ssr: false });
 
-// Only formatting that Discord actually renders in embeds — no images/tables.
+// Only formatting that Discord actually renders in embeds - no images/tables.
 const TOOLBAR = [
   commands.bold,
   commands.italic,
@@ -57,7 +57,7 @@ export default function HelpRequestPanel({ defaultOpen = false }: Readonly<{ def
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // When opened via the WIP banner, bring the form into view — it sits at the
+  // When opened via the WIP banner, bring the form into view - it sits at the
   // bottom of the account panel's scroll area.
   useEffect(() => {
     if (defaultOpen) rootRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -155,7 +155,7 @@ export default function HelpRequestPanel({ defaultOpen = false }: Readonly<{ def
       await navigator.clipboard.writeText(sentCase);
       toast("Case number copied!", { icon: "star" });
     } catch {
-      /* clipboard unavailable — the number is visible to copy manually */
+      /* clipboard unavailable - the number is visible to copy manually */
     }
   };
 

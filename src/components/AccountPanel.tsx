@@ -225,7 +225,7 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
         <input id="avatar-url" value={props.avatarUrl} onChange={(e) => props.setAvatarUrl(e.target.value)} placeholder="🔗 Or paste a custom avatar URL" className="input-soft mt-2 w-full px-3 py-2 text-sm outline-none" />
       </SectionCard>
 
-      <SectionCard title="Space look" note="Wallpaper, soundtrack, fonts & themes now live in your Space — customize them there.">
+      <SectionCard title="Space look" note="Wallpaper, soundtrack, fonts & themes now live in your Space - customize them there.">
         <button
           onClick={props.onOpenSpaces}
           className="btn-smooth flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold"
@@ -487,7 +487,7 @@ export default function AccountPanel({
     saveTimerRef.current = setTimeout(() => {
       const f = latestFieldsRef.current;
       // Space look (wallpaper / accent / soundtrack) is owned by SpaceStudio and
-      // stored in the same profile fields — do NOT write them here or we'd clobber it.
+      // stored in the same profile fields - do NOT write them here or we'd clobber it.
       onUpdateAccount({
         displayName: f.profileName.trim() || currentAccount.displayName,
         avatarUrl: f.avatarUrl.trim(),
@@ -533,7 +533,7 @@ export default function AccountPanel({
   const handleOAuth = async (provider: "google" | "discord") => {
     setOauthBusy(provider);
     const result = await onOAuth(provider);
-    // On success the browser navigates away to the provider — keep the spinner
+    // On success the browser navigates away to the provider - keep the spinner
     // going until then. Only reset on failure.
     if (!result.ok) {
       setOauthBusy(null);

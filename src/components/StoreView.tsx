@@ -418,7 +418,7 @@ export default function StoreView({
                   <span className="ml-1 shrink-0 uppercase tracking-wide">{itemTypeLabel(item.type)}</span>
                 </div>
 
-                {/* Tags — fixed min-height so cards without tags don't collapse */}
+                {/* Tags - fixed min-height so cards without tags don't collapse */}
                 <div className="mb-2 flex min-h-5 flex-wrap gap-1">
                   {item.tags.slice(0, 3).map((tag) => (
                     <span key={tag} className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: "var(--surface)", color: "var(--muted)" }}>
@@ -427,7 +427,7 @@ export default function StoreView({
                   ))}
                 </div>
 
-                {/* Stats + Add button — pinned to bottom */}
+                {/* Stats + Add button - pinned to bottom */}
                 <div className="mt-auto flex items-center gap-1.5">
                   <button
                     onClick={() => onLike(item.id)}

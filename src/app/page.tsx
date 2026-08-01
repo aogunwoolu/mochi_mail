@@ -287,7 +287,7 @@ export default function Home() {
     (s: Sticker) => {
       setSelectedAsset(s);
       setBrushSettings((prev) => ({ ...prev, tool: "sticker" }));
-      toast(`${s.name} selected — click to place!`, { icon: "sticker" });
+      toast(`${s.name} selected - click to place!`, { icon: "sticker" });
     },
     [setSelectedAsset],
   );
@@ -296,7 +296,7 @@ export default function Home() {
     (w: WashiTape) => {
       setSelectedAsset(w);
       setBrushSettings((prev) => ({ ...prev, tool: "washi" }));
-      toast(`${w.name} selected — click to place!`, { icon: "ribbon" });
+      toast(`${w.name} selected - click to place!`, { icon: "ribbon" });
     },
     [setSelectedAsset],
   );
@@ -379,7 +379,7 @@ export default function Home() {
     setExportModalOpen(false);
     exportCanvas(canvasRef.current, placedItems, "mochimail_letter", 3000, cropRegion, staticFormat)
       .then(() => toast("Canvas saved!", { icon: "save" }))
-      .catch(() => toast("Export failed — try again", { variant: "error", icon: "warning" }))
+      .catch(() => toast("Export failed - try again", { variant: "error", icon: "warning" }))
       .finally(() => setIsExporting(false));
     trackCanvasExport();
   }, [placedItems, isExporting, staticFormat, trackCanvasExport]);
@@ -613,7 +613,7 @@ export default function Home() {
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      // Stop any ongoing inertia — user is actively zooming
+      // Stop any ongoing inertia - user is actively zooming
       if (momentumRafRef.current) { cancelAnimationFrame(momentumRafRef.current); momentumRafRef.current = null; }
       // Normalize pixel vs line delta; clamp to cap per-event zoom jumps
       const raw = e.deltaMode === 1 ? e.deltaY * 8 : e.deltaY;
@@ -625,7 +625,7 @@ export default function Home() {
       zoomStateRef.current.current = newZoom;
       zoomStateRef.current.target = newZoom;
       zoomStateRef.current.isAnimating = false;
-      // Throttle React re-render — only used for the display %, doesn't affect rendering
+      // Throttle React re-render - only used for the display %, doesn't affect rendering
       if (!zoomDisplayThrottleRef.current) {
         zoomDisplayThrottleRef.current = setTimeout(() => {
           setCanvasZoom(zoomStateRef.current.current);
@@ -695,13 +695,13 @@ export default function Home() {
     const centerTop = Math.max(0, Math.floor((CANVAS_H - el.clientHeight) / 2));
 
     const onScroll = () => {
-      // Skip during active pinch — scroll is set programmatically every frame
+      // Skip during active pinch - scroll is set programmatically every frame
       if (isPinchingRef.current) return;
       const maxLeft = Math.max(0, CANVAS_W - el.clientWidth);
       const maxTop = Math.max(0, CANVAS_H - el.clientHeight);
       let dx = 0;
       let dy = 0;
-      // shiftContent math uses unzoomed CANVAS_W — only valid at 1:1 zoom.
+      // shiftContent math uses unzoomed CANVAS_W - only valid at 1:1 zoom.
       // At any other zoom level the scroll range is CANVAS_W*zoom, so the thresholds
       // fire at the wrong scroll positions and shift pixel data into the wrong location.
       const atNativeZoom = Math.abs(zoomStateRef.current.current - 1) < 0.01;
@@ -850,7 +850,7 @@ export default function Home() {
 
   return (
     <div className="relative z-10 flex h-svh flex-col overflow-hidden">
-      {/* Header — hidden on studio (full-screen canvas) */}
+      {/* Header - hidden on studio (full-screen canvas) */}
       {!isStudio && (
         <AppHeader
           activeTab={activeTab}
@@ -859,7 +859,7 @@ export default function Home() {
           onAccountClick={() => {
             // Guard against the Windows/Chromium "ghost click" that can land
             // here right after a file picker (e.g. the Help & Feedback
-            // attachment input) closes — see filePickerGuard.ts.
+            // attachment input) closes - see filePickerGuard.ts.
             if (justOpenedFilePicker()) return;
             setAccountOpen((p) => !p);
           }}
@@ -870,7 +870,7 @@ export default function Home() {
         />
       )}
 
-      {/* Work-in-progress notice — visible on every tab */}
+      {/* Work-in-progress notice - visible on every tab */}
       <WipBanner
         onOpenFeedback={() => {
           setAccountOpensOnHelp(true);
@@ -925,7 +925,7 @@ export default function Home() {
         className="relative flex-1 overflow-hidden"
         style={{ display: isStudio ? "flex" : "none" }}
       >
-        {/* Room control chip — top left */}
+        {/* Room control chip - top left */}
         <RoomControl
           phase={roomPhase}
           isPublic={roomIsPublic}
@@ -1236,7 +1236,7 @@ export default function Home() {
           />
         )}
 
-        {/* Zoom controls — horizontal pill, bottom-left */}
+        {/* Zoom controls - horizontal pill, bottom-left */}
         <div
           className="pointer-events-auto absolute z-50 flex items-center gap-0.5 rounded-2xl p-1.5"
           style={{
@@ -1302,7 +1302,7 @@ export default function Home() {
           Layers
         </button>
 
-        {/* Layer panel — floats above the scrollable canvas */}
+        {/* Layer panel - floats above the scrollable canvas */}
         {showLayerPanel && (
           <LayerPanel
             items={placedItems}
@@ -1378,7 +1378,7 @@ export default function Home() {
           onOpenOwnProfile={() => setAccountOpen(true)}
         />
 
-        {/* Floating bottom tab bar — studio only */}
+        {/* Floating bottom tab bar - studio only */}
         <nav
           className="pointer-events-auto absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-full px-2 py-2"
           style={{
@@ -1390,7 +1390,7 @@ export default function Home() {
           }}
           aria-label="Navigation"
         >
-          {/* Canvas — active indicator */}
+          {/* Canvas - active indicator */}
           <span
             className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-bold"
             style={{

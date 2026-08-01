@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
 
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
   if (rateLimited(ip)) {
-    return NextResponse.json({ error: "Too many requests — please wait a minute and try again." }, { status: 429 });
+    return NextResponse.json({ error: "Too many requests - please wait a minute and try again." }, { status: 429 });
   }
 
   let body: unknown;
@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
       });
       if (!followUp.ok) {
         console.error("Discord attachment follow-up failed:", followUp.status, await followUp.text().catch(() => ""));
-        // The post itself succeeded — don't fail the whole request.
+        // The post itself succeeded - don't fail the whole request.
       }
     }
   }

@@ -32,7 +32,7 @@ export interface DrawingCanvasHandle {
   clearCanvas: () => void;
   undo: () => void;
   redo: () => void;
-  /** Full composite including current animated-GIF frame — use for static PNG export. */
+  /** Full composite including current animated-GIF frame - use for static PNG export. */
   getCompositeCanvas: () => HTMLCanvasElement;
   /**
    * Static layers only (background + strokes + overlay stickers, no animated GIFs).
@@ -54,7 +54,7 @@ export interface DrawingCanvasHandle {
   swapStrokeLayers: (layerA: number, layerB: number) => void;
 }
 
-// ─── Local stroke entry (lightweight — no pixel data) ────────────────────────
+// ─── Local stroke entry (lightweight - no pixel data) ────────────────────────
 
 type LocalStrokeEntry = {
   id: string;
@@ -110,9 +110,9 @@ interface DrawingCanvasProps {
     tool: "pen" | "eraser",
     layerIndex: number,
   ) => void;
-  /** Fired when the user undoes — sync layer should delete the stroke from DB. */
+  /** Fired when the user undoes - sync layer should delete the stroke from DB. */
   onUndoStroke?: (strokeId: string) => void;
-  /** Fired when the user redoes — sync layer should re-insert the stroke to DB. */
+  /** Fired when the user redoes - sync layer should re-insert the stroke to DB. */
   onRedoStroke?: (stroke: LocalStrokeEntry) => void;
   /** Fired whenever the selected item changes (id or null). */
   onItemSelected?: (id: string | null) => void;
@@ -138,7 +138,7 @@ interface DrawingCanvasProps {
    * Fired every frame during a 2-finger gesture.
    * prevCx/prevCy = centroid last frame, cx/cy = centroid this frame.
    * scaleDelta = dist_this / dist_prev (1.0 = no zoom change).
-   * One call handles both pan and zoom — do NOT adjust scroll separately.
+   * One call handles both pan and zoom - do NOT adjust scroll separately.
    */
   onPinchZoom?: (scaleDelta: number, prevCx: number, prevCy: number, cx: number, cy: number) => void;
   /** Fired when the 2-finger gesture ends, with the final pan velocity (px/frame at 60fps). */
@@ -209,7 +209,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     const backgroundCanvasRef = useRef<HTMLCanvasElement>(null);
     const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
     const activeStrokeCanvasRef = useRef<HTMLCanvasElement>(null);
-    // Per-layer canvases — one per layer index so animated GIFs can be interleaved
+    // Per-layer canvases - one per layer index so animated GIFs can be interleaved
     const layerCanvasRefs = useRef<(HTMLCanvasElement | null)[]>(
       Array.from({ length: 5 }, () => null)
     );
@@ -317,7 +317,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     currentDrawingLayerRef.current = currentDrawingLayer ?? defaultLayerIndex;
 
     // Stable ref so getCompositeCanvas closure always sees fresh placedItems
-    // Items sorted by display position (back→front) — used for render + hit detection
+    // Items sorted by display position (back→front) - used for render + hit detection
     const sortedByLayer = useMemo(
       () => [...placedItems].sort((a, b) => positionOf(a.layerIndex ?? 0) - positionOf(b.layerIndex ?? 0)),
       [placedItems, positionOf],
@@ -326,14 +326,14 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
     // Stable ref so getCompositeCanvas / drawAnimatedLayer always see the correct render order
     const placedItemsRef = useRef(sortedByLayer);
     placedItemsRef.current = sortedByLayer;
-    // DOM refs for animated <img> elements — these are in the live document so the
+    // DOM refs for animated <img> elements - these are in the live document so the
     // browser advances their GIF frames. drawAnimatedLayer() reads from here.
     const animatedImgRefsRef = useRef<Map<string, HTMLImageElement>>(new Map());
     const rafIdRef = useRef<number | null>(null);
     // Stable ref so handlePointerMove can call handlePointerUp without a dep cycle
     const handlePointerUpRef = useRef<((e?: React.PointerEvent<HTMLCanvasElement>) => void) | null>(null);
 
-    // Full accumulated points for the current stroke — used for broadcasting and DB
+    // Full accumulated points for the current stroke - used for broadcasting and DB
     // persistence.  activeStrokePointsRef is trimmed by the freeze algorithm (for
     // render perf), so we keep a separate unbounded copy here.
     const allStrokePointsRef = useRef<[number, number, number][]>([]);
@@ -750,10 +750,10 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
         if (mtPointersRef.current.size >= 2) {
           // Capture this pointer so its pointermove events are guaranteed to reach
-          // the canvas — without this, iOS only delivers moves for the primary pointer.
+          // the canvas - without this, iOS only delivers moves for the primary pointer.
           try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
 
-          // Second finger — abort any in-progress stroke and enter pan/pinch mode
+          // Second finger - abort any in-progress stroke and enter pan/pinch mode
           if (isDrawing.current) {
             isDrawing.current = false;
             activeStrokePointsRef.current = [];
@@ -870,7 +870,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           return;
         }
 
-        // Pen / eraser — generate a fresh stroke ID
+        // Pen / eraser - generate a fresh stroke ID
         currentStrokeIdRef.current = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
         frozenPointCountRef.current = 0;
 
@@ -948,7 +948,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             };
           }
 
-          // Fire ONE combined callback — parent handles pan+zoom in a single
+          // Fire ONE combined callback - parent handles pan+zoom in a single
           // scroll calculation to avoid double-write interference.
           const scaleDelta = pinchDistRef.current > 0 && dist > 0
             ? dist / pinchDistRef.current
@@ -965,7 +965,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) {
           return;
         }
-        // Apple Pencil hover detection — end stroke to prevent ghost lines
+        // Apple Pencil hover detection - end stroke to prevent ghost lines
         if (e.pointerType === "pen" && e.buttons === 0) {
           handlePointerUpRef.current?.(e);
           return;
@@ -1016,7 +1016,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               ev.pressure || 0.5,
             ];
             activeStrokePointsRef.current.push(pt);
-            allStrokePointsRef.current.push(pt); // unbounded — used for sync
+            allStrokePointsRef.current.push(pt); // unbounded - used for sync
           }
         }
 
@@ -1075,7 +1075,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
             pinchVelRef.current = { x: 0, y: 0 };
           }
         }
-        // Still in pinch mode (one finger remains) — don't process as stroke end
+        // Still in pinch mode (one finger remains) - don't process as stroke end
         if (isPinchPanRef.current) return;
 
         if (e) {
@@ -1110,7 +1110,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           const remainingDelta = allPts.slice(lastBroadcastIndexRef.current);
           onStrokeUpdate?.(strokeId, remainingDelta, color, size, tool, true, strokeLayer);
 
-          // Clear the active stroke canvas — the stroke now lives in localStrokesRef
+          // Clear the active stroke canvas - the stroke now lives in localStrokesRef
           // and renderAll below will composite it at the correct layer depth.
           const ac = activeStrokeCanvasRef.current;
           if (ac) {
@@ -1129,7 +1129,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           onStrokeComplete?.(strokeId, allPts, color, size, tool, strokeLayer);
           currentStrokeIdRef.current = "";
         } else if (isDrawing.current) {
-          // Washi — commit the overlay-canvas preview to the active layer canvas
+          // Washi - commit the overlay-canvas preview to the active layer canvas
           if (brushSettings.tool === "washi" && washiStartRef.current) {
             const ov = overlayCanvasRef.current;
             const activeLayerId = currentDrawingLayer ?? defaultLayerIndex;
@@ -1163,7 +1163,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         if (!canvas) continue;
         canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
       }
-      // Reset local undo history — clearing is not undoable
+      // Reset local undo history - clearing is not undoable
       localStrokesRef.current = [];
       undoneStrokesRef.current = [];
       // Also drop completed remote strokes, otherwise the next re-render
@@ -1210,7 +1210,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
         const lc = layerCanvasRefs.current[li];
         if (lc) ctx.drawImage(lc, 0, 0);
       }
-      // ImageBitmap is GPU-backed — far cheaper than a 115 MB ImageData array
+      // ImageBitmap is GPU-backed - far cheaper than a 115 MB ImageData array
       void createImageBitmap(composite).then((bitmap) => {
         sessionBaseRef.current?.close();
         sessionBaseRef.current = bitmap;
@@ -1219,7 +1219,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       });
     }, [width, height, maxLayerIndex]);
 
-    // Draws background + strokes + static stickers. No GIFs — use as animation base.
+    // Draws background + strokes + static stickers. No GIFs - use as animation base.
     const getBaseCanvas = useCallback(() => {
       const w = canvasRef.current?.width ?? width;
       const h = canvasRef.current?.height ?? height;
@@ -1602,15 +1602,15 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       >
         {/* z-stack (back → front) for maxLayerIndex=4:
               z:0   background
-              z:1   layerCanvasRefs[0]   — layer 0 strokes/stickers
+              z:1   layerCanvasRefs[0]   - layer 0 strokes/stickers
               z:2   animated items layer 0  (DOM <img>)
-              z:3   activeStrokeCanvas   — live preview when drawing on layer 0
-              z:4   layerCanvasRefs[1]   — layer 1
+              z:3   activeStrokeCanvas   - live preview when drawing on layer 0
+              z:4   layerCanvasRefs[1]   - layer 1
               z:5   animated items layer 1
-              z:6   activeStrokeCanvas   — live preview when drawing on layer 1
+              z:6   activeStrokeCanvas   - live preview when drawing on layer 1
               … (formula: layer L canvas = L*3+1, items = L*3+2, active stroke = L*3+3)
-              z:16  canvasRef            — transparent pointer-capture only (maxLayerIndex*3+4)
-              z:17  overlayCanvasRef     — washi tape preview / UI */}
+              z:16  canvasRef            - transparent pointer-capture only (maxLayerIndex*3+4)
+              z:17  overlayCanvasRef     - washi tape preview / UI */}
         <canvas
           ref={backgroundCanvasRef}
           width={width}
@@ -1619,7 +1619,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           style={{ imageRendering: "crisp-edges", width: "100%", height: "100%", zIndex: 0 }}
         />
 
-        {/* Layer canvases — one per layer, z-indexed so DOM animated items can sit between them */}
+        {/* Layer canvases - one per layer, z-indexed so DOM animated items can sit between them */}
         {Array.from({ length: maxLayerIndex + 1 }, (_, li) => (
           <canvas
             key={li}
@@ -1631,7 +1631,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           />
         ))}
 
-        {/* Active stroke preview — z-index tracks currentDrawingLayer so it sits above that layer */}
+        {/* Active stroke preview - z-index tracks currentDrawingLayer so it sits above that layer */}
         <canvas
           ref={activeStrokeCanvasRef}
           width={width}
@@ -1640,7 +1640,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
           style={{ width: "100%", height: "100%", zIndex: Math.max(0, positionOf(currentDrawingLayer ?? defaultLayerIndex)) * 3 + 3 }}
         />
 
-        {/* Pointer capture canvas — transparent, sits above all layer canvases, handles all touch/mouse events */}
+        {/* Pointer capture canvas - transparent, sits above all layer canvases, handles all touch/mouse events */}
         <canvas
           ref={canvasRef}
           width={width}
@@ -1681,7 +1681,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               display: isLayerHidden ? "none" : undefined,
             }}
           >
-            {/* GIF render — pointer-events-none so drawing still works over it */}
+            {/* GIF render - pointer-events-none so drawing still works over it */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               ref={(el) => {
@@ -1699,7 +1699,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 pointerEvents: "none",
               }}
             />
-            {/* Delete button — inside top-right, doesn't overlap corner handles */}
+            {/* Delete button - inside top-right, doesn't overlap corner handles */}
             <button
               onPointerDown={(e) => {
                 e.stopPropagation();
@@ -1746,7 +1746,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 }}
               />
 
-              {/* Rotation handle — above top-center with larger hit area */}
+              {/* Rotation handle - above top-center with larger hit area */}
               <div
                 style={{
                   position: "absolute",
@@ -1865,7 +1865,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
               ))}
             </div>
 
-            {/* Non-rotated action toolbar — centered below item */}
+            {/* Non-rotated action toolbar - centered below item */}
             <div
               className="absolute flex items-center"
               style={{
@@ -1905,7 +1905,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
 
               <div style={{ width: 1, height: 18, background: "rgba(0,0,0,0.1)", margin: "0 2px" }} />
 
-              {/* Opacity slider — for stickers and washi */}
+              {/* Opacity slider - for stickers and washi */}
               {selectedItem.type !== "text" && (
                 <div className="flex items-center gap-1" style={{ padding: "0 2px" }}>
                   <span
@@ -1935,7 +1935,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 </div>
               )}
 
-              {/* Edit text — text items only */}
+              {/* Edit text - text items only */}
               {selectedItem.type === "text" && (
                 <button
                   className="btn-smooth flex h-7 w-7 items-center justify-center rounded-full text-sm transition-colors hover:bg-pink-50"
@@ -1954,7 +1954,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
                 </button>
               )}
 
-              {/* Layer order buttons — move item between layer buckets (0=back … 4=front) */}
+              {/* Layer order buttons - move item between layer buckets (0=back … 4=front) */}
               {onUpdatePlacedItem ? (
                 <>
                   <div style={{ width: 1, height: 18, background: "rgba(0,0,0,0.1)", margin: "0 2px" }} />

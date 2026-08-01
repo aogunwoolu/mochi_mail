@@ -1,7 +1,7 @@
 {
   "name": "MochiMail - Digital Stationery Hub",
   "short_name": "MochiMail",
-  "description": "Digital stationery, stickers, and snail mail — reimagined",
+  "description": "Digital stationery, stickers, and snail mail - reimagined",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fff8ff",

@@ -27,9 +27,9 @@ export function createSupabaseBrowserClient(): SupabaseClient<Database> {
       auth: {
         // Persist the session in localStorage and refresh it automatically so
         // users (both saved accounts and anonymous guests) stay logged in across
-        // page refreshes. This app does all auth client-side — no server/SSR
+        // page refreshes. This app does all auth client-side - no server/SSR
         // route reads the session from cookies (route handlers use the service
-        // role key) — so cookie-based storage gave no benefit and dropped
+        // role key) - so cookie-based storage gave no benefit and dropped
         // sessions on reload. localStorage persistence is the reliable choice.
         persistSession: true,
         autoRefreshToken: true,

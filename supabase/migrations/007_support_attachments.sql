@@ -1,5 +1,5 @@
 -- Help & Feedback attachments.
--- Public-read bucket that signed-in users (including anonymous guests — see
+-- Public-read bucket that signed-in users (including anonymous guests - see
 -- 005) upload screenshots/videos into from the Help & Feedback form. The
 -- server route then links the public URLs into the Discord forum thread.
 

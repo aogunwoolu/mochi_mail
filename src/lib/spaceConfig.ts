@@ -24,7 +24,7 @@ export interface FontConfig {
   weight?: number;
 }
 
-/** Per-section typography overrides — anything unset falls back to the page font. */
+/** Per-section typography overrides - anything unset falls back to the page font. */
 export interface SectionFont {
   family?: string;
   weight?: number;
@@ -45,7 +45,7 @@ export type SpaceSectionType =
   | "links"      // list of labelled links
   | "gallery"    // grid of photos (URLs)
   | "guestbook"  // visitor notes + sign button
-  | "friends"    // "Top 8" — usernames linking to their spaces
+  | "friends"    // "Top 8" - usernames linking to their spaces
   | "marquee"    // scrolling text banner
   | "music";     // visible embedded player (YouTube / Spotify)
 
@@ -67,19 +67,19 @@ export interface SpaceSection {
   links?: SpaceLink[];
   /** gallery image URLs */
   images?: string[];
-  /** friends section — usernames */
+  /** friends section - usernames */
   friends?: string[];
-  /** music section — YouTube or Spotify URL */
+  /** music section - YouTube or Spotify URL */
   url?: string;
-  /** board section — embed height preset */
+  /** board section - embed height preset */
   size?: "s" | "m" | "l";
-  /** row width — sections flow side by side when they fit */
+  /** row width - sections flow side by side when they fit */
   width?: SectionWidth;
   /** typography overrides for this section's text */
   font?: SectionFont;
 }
 
-/** Layout used when a space has never customised its sections — mirrors the
+/** Layout used when a space has never customised its sections - mirrors the
  *  pre-sections page (profile card + board + visitor notes). */
 export function defaultSections(): SpaceSection[] {
   return [
@@ -275,7 +275,7 @@ export interface ThemePreset {
   bg: BgConfig;
   font: FontConfig;
   lineColor: string;
-  /** Mochi Plus exclusive. NEVER set this on a theme that already shipped free —
+  /** Mochi Plus exclusive. NEVER set this on a theme that already shipped free -
    *  Plus only ADDS new themes, it never paywalls existing ones. */
   plusOnly?: boolean;
 }
@@ -283,7 +283,7 @@ export interface ThemePreset {
 // NOTE ON READABILITY: a theme's `font.color` is rendered on the profile-card
 // overlay, which sits on a near-white translucent surface (rgba(255,255,255,0.84))
 // regardless of how dark the page background is. So every `font.color` below is a
-// deep, theme-tinted tone chosen to stay legible on that light card — even for the
+// deep, theme-tinted tone chosen to stay legible on that light card - even for the
 // "night" themes whose backgrounds are dark. Keep new themes to dark font colors.
 export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
   // ── Soft pinks & florals ──────────────────────────────────────────────────
@@ -488,7 +488,7 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
     font: { family: "Space Mono", color: "#2e2a55", size: 13 },
     lineColor: "#a78bfa",
   },
-  // ── ♡ Mochi Plus exclusives (NEW — additive, never replace free themes) ──────
+  // ── ♡ Mochi Plus exclusives (NEW - additive, never replace free themes) ──────
   {
     label: "Aurora",
     emoji: "🌌",

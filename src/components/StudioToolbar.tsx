@@ -430,7 +430,7 @@ export default function StudioToolbar({
       const code = error instanceof Error ? error.message : "unknown";
       if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY not set on the server.");
       else if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY not set on the server.");
-      else if (code === "rate_limited") setGifError("Too many requests — please wait a moment.");
+      else if (code === "rate_limited") setGifError("Too many requests - please wait a moment.");
       else setGifError("GIF search failed.");
     } finally {
       setGifLoading(false);
@@ -628,7 +628,7 @@ export default function StudioToolbar({
 
           <Divider />
 
-          {/* Color swatches — 2-column grid */}
+          {/* Color swatches - 2-column grid */}
           <div className="grid grid-cols-2 gap-1.5 px-0.5 py-0.5">
             {userPalette.map((color, i) => {
               const selected = brushSettings.color === color;
@@ -674,7 +674,7 @@ export default function StudioToolbar({
                         ? "inset 0 0 0 1.5px rgba(0,0,0,0.15)"
                         : "0 1px 4px rgba(0,0,0,0.15)",
                     }}
-                    title={`${color} — right-click or hold to change`}
+                    title={`${color} - right-click or hold to change`}
                     aria-label={`Color ${color}`}
                   />
                   <input
@@ -729,7 +729,7 @@ export default function StudioToolbar({
         </div>
       </div>
 
-      {/* ── Brush size — floats to the right of the toolbar, same vertical center ── */}
+      {/* ── Brush size - floats to the right of the toolbar, same vertical center ── */}
       {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
         <div
           className="pointer-events-none absolute left-[4.5rem] z-20 flex items-center gap-2"
@@ -778,7 +778,7 @@ export default function StudioToolbar({
         </div>
       )}
 
-      {/* ── Text options — floats to the right of the toolbar when text tool active ── */}
+      {/* ── Text options - floats to the right of the toolbar when text tool active ── */}
       {brushSettings.tool === "text" && (
         <div
           className="pointer-events-none absolute left-[4.5rem] z-20 flex items-center"
@@ -1002,7 +1002,7 @@ export default function StudioToolbar({
         </button>
       </div>
 
-      {/* ── Asset drawer — rendered LAST so it always paints above toolbar/buttons ── */}
+      {/* ── Asset drawer - rendered LAST so it always paints above toolbar/buttons ── */}
       {drawerOpen && (
         <>
           {/* Backdrop */}

@@ -530,7 +530,7 @@ export function useAssets(user: ViewerIdentity) {
 
   const loadBoardState = useCallback(async (roomId?: string | null) => {
     const isSharedRoomRead = !!roomId;
-    // Same accountId gate as saveBoardState — anonymous users sync their board.
+    // Same accountId gate as saveBoardState - anonymous users sync their board.
     if (!user?.id || (!user.accountId && !isSharedRoomRead) || boardPersistenceDisabledRef.current) return;
     const supabase = createSupabaseBrowserClient();
     // For shared rooms load the most recently updated board from any participant;

@@ -19,7 +19,7 @@ interface LayerPanelProps {
   layerUsers?: Record<number, LayerUser[]>;
   onHide?: () => void;
   align?: "left" | "right";
-  /** Display order of stable layer ids — index 0 is back, last is front. */
+  /** Display order of stable layer ids - index 0 is back, last is front. */
   layerOrder?: number[];
   /** Stable ids of layers currently hidden from rendering. */
   hiddenLayerIds?: number[];
@@ -199,7 +199,7 @@ export default function LayerPanel({
 
   const handleTouchMove = (e: React.TouchEvent, targetLayerIdx: number) => {
     if (!touchDragItemRef.current) return;
-    // NOTE: preventDefault() is useless here — React registers touchmove
+    // NOTE: preventDefault() is useless here - React registers touchmove
     // passively at the root. Scrolling is suppressed instead via
     // `touchAction: "none"` on the draggable thumbs below.
     const touch = e.touches[0];
@@ -424,7 +424,7 @@ export default function LayerPanel({
                             onDragEnd={handleDragEnd}
                             onTouchStart={(e) => handleTouchStart(e, item.id)}
                             onClick={() => onSelectItem(isSelected ? null : item.id)}
-                            title={`${item.type === "text" ? (item.text ?? "Text") : item.type} — drag to move layer`}
+                            title={`${item.type === "text" ? (item.text ?? "Text") : item.type} - drag to move layer`}
                             style={{
                               cursor: "grab",
                               touchAction: "none",

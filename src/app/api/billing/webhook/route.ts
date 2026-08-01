@@ -56,7 +56,7 @@ async function upsertFromSubscription(
       .maybeSingle();
     resolvedUserId = data?.user_id ?? null;
   }
-  if (!resolvedUserId) return; // can't attribute — ignore
+  if (!resolvedUserId) return; // can't attribute - ignore
 
   const interval = sub.items?.data?.[0]?.price?.recurring?.interval;
   const plan = interval === "year" ? "yearly" : interval === "month" ? "monthly" : null;

@@ -1,9 +1,9 @@
-// Mochi Plus — the single source of truth for "free vs Plus".
+// Mochi Plus - the single source of truth for "free vs Plus".
 //
 // CARDINAL RULE: free limits/content must NEVER shrink below what's free today.
 // `FREE` is pinned to today's actual values; `PLUS` only raises ceilings. We
 // deliberately do NOT invent brand-new restrictions on free users just so we
-// have something to gate — that would be taking away, not adding.
+// have something to gate - that would be taking away, not adding.
 
 import type { Database } from "@/types/database";
 
@@ -25,7 +25,7 @@ export const PLUS: Perks = {
 };
 
 /** Absolute ceiling used for restoring/rendering existing content, so a lapsed
- *  member's extra layers are never destroyed — only new layers beyond the
+ *  member's extra layers are never destroyed - only new layers beyond the
  *  entitlement are blocked. Always >= PLUS.maxLayers. */
 export const LAYER_CEILING = PLUS.maxLayers;
 

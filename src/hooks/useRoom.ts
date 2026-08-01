@@ -85,7 +85,7 @@ async function findOrCreateRoom(
 ): Promise<PersistedRoom | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (user) {
-    // Always try to find an existing owned room first — never create duplicates.
+    // Always try to find an existing owned room first - never create duplicates.
     const { data: existing } = await supabase
       .from("rooms")
       .select("id, title, invite_token, is_public")
@@ -95,7 +95,7 @@ async function findOrCreateRoom(
     const room = existing?.[0] as PersistedRoom | undefined;
     if (room) return room;
   }
-  // No existing room — create the user's first room.
+  // No existing room - create the user's first room.
   // Title matches the rooms-page convention: "Abi's Room" or "My Room".
   const title = ownerName ? `${ownerName}'s Room` : "My Room";
   const { data, error } = await supabase.rpc("create_room", {
@@ -135,7 +135,7 @@ export interface UseRoomReturn {
   phase: RoomPhase;
   activeRoomId: string | null;
   activeRoomTitle: string | null;
-  /** The invite_token — also the ?room= URL param. Share this URL to invite others. */
+  /** The invite_token - also the ?room= URL param. Share this URL to invite others. */
   activeRoomToken: string | null;
   isPublic: boolean;
   hasPassword: boolean;
@@ -265,7 +265,7 @@ export function useRoom({
         // ── Path 1: join_room_by_token ──────────────────────────────────────
         // The only DB function that accepts invite tokens. Works for new joins
         // and is idempotent (safe to call again if already a member/owner).
-        // No password here — if the room is password-protected, the user must
+        // No password here - if the room is password-protected, the user must
         // arrive via /rooms/[token] which has the password form.
         const { data: joinData, error: joinErr } = await supabase.rpc("join_room_by_token", {
           p_token: token,
@@ -294,7 +294,7 @@ export function useRoom({
         }
 
         // ── Path 2: direct table query ──────────────────────────────────────
-        // Catches owners and existing members refreshing the page — they already
+        // Catches owners and existing members refreshing the page - they already
         // have RLS read access so no join RPC is needed.
         const { data: directRoom } = await supabase
           .from("rooms")
@@ -316,7 +316,7 @@ export function useRoom({
         }
 
         // ── Path 3: server API route (bypasses RLS for anonymous users) ────
-        // Called when both DB paths fail — typically because the Supabase RLS
+        // Called when both DB paths fail - typically because the Supabase RLS
         // policy blocks anonymous JWTs from reading the rooms table directly.
         // The API route uses the service-role key server-side.
         try {
@@ -361,7 +361,7 @@ export function useRoom({
           globalThis.history.replaceState(null, "", url.toString());
         }
         console.warn(`[useRoom] All join paths failed for token=${token}`);
-        setError("That invite link was invalid or expired — starting a fresh canvas.");
+        setError("That invite link was invalid or expired - starting a fresh canvas.");
         setPhase("creating");
 
         const room = await findOrCreateRoom(supabase, selfName);
@@ -390,7 +390,7 @@ export function useRoom({
   useEffect(() => {
     if (!hasSession || !activeRoomId || phase !== "drawing") return;
 
-    console.log(`[useRoom] Opening presence channel — roomId=${activeRoomId} selfId=${selfIdRef.current} selfName=${selfNameRef.current}`);
+    console.log(`[useRoom] Opening presence channel - roomId=${activeRoomId} selfId=${selfIdRef.current} selfName=${selfNameRef.current}`);
 
     const supabase = createSupabaseBrowserClient();
     const ch = supabase
@@ -472,7 +472,7 @@ export function useRoom({
     ch.subscribe(async (status) => {
       console.log(`[useRoom:subscribe] self=${selfIdRef.current} status=${status}`);
       if (status !== "SUBSCRIBED") return;
-      // Strip data: URLs from the avatar — they can be hundreds of KB (e.g. GIF stickers
+      // Strip data: URLs from the avatar - they can be hundreds of KB (e.g. GIF stickers
       // used as profile pictures) and will exceed Supabase Realtime's ~250 KB payload
       // limit, causing track() to be silently dropped for all other users.
       const safeAvatarUrl = selfAvatarRef.current?.startsWith("data:") ? undefined : selfAvatarRef.current;

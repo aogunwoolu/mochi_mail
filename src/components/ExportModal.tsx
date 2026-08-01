@@ -70,7 +70,7 @@ export default function ExportModal({
           </span>
         </div>
 
-        {/* Format picker — only for static canvases */}
+        {/* Format picker - only for static canvases */}
         {!hasAnimation && (
           <div className="flex gap-1.5 rounded-xl p-1" style={{ background: "rgba(0,0,0,0.05)" }}>
             {(["png", "jpeg"] as StaticFormat[]).map((fmt) => (

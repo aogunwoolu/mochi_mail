@@ -288,7 +288,7 @@ export function useSpaces(
     return () => {
       cancelled = true;
     };
-    // Only re-fetch when identity/target changes — live config edits (wallpaper,
+    // Only re-fetch when identity/target changes - live config edits (wallpaper,
     // accent, audio) update local state optimistically and must not trigger a
     // refetch that would overwrite in-progress changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -358,7 +358,7 @@ export function useSpaces(
       image_url: item.imageUrl ?? null,
       style: (item.style ?? {}) as unknown as SpaceItemUpdate["style"],
     })
-      // Supabase builders are lazy — without .then()/await the request never fires
+      // Supabase builders are lazy - without .then()/await the request never fires
       .then(({ error }) => { if (error) console.error("[space] item insert failed:", error.message); });
 
     return item;

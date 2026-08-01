@@ -10,7 +10,7 @@ import { parseSpaceConfig, bgToCss } from "@/lib/spaceConfig";
 export function SpaceView({ requestedUser }: { requestedUser: string }) {
   const router = useRouter();
   // Use the app-wide account instance from MochiProvider. Calling useAccount()
-  // here would spin up a second, parallel auth state — on a fresh visit both
+  // here would spin up a second, parallel auth state - on a fresh visit both
   // instances raced signInAnonymously(), creating duplicate anonymous users.
   const { account } = useMochi();
   const spaces = useSpaces([], account.currentAccount, requestedUser || undefined);
