@@ -1,5 +1,4 @@
-
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { generateId } from "@/lib/id";
 import { Letter, DELIVERY_SPEEDS, LetterSendPayload, ViewerIdentity } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -62,39 +61,64 @@ export function useMail(user: ViewerIdentity) {
   const normalizedUser = useMemo(() => ({ ...user, name: viewerName }), [user, viewerName]);
   const storageKey = useMemo(() => storageKeyFor(user), [user]);
   const ownerId = user.accountId ?? null;
-
   const receiverUsername = user.username ?? null;
 
+  // Single-flight lock to prevent stacking parallel fetches
+  const fetchingRef = useRef(false);
+
   const fetchLetters = useCallback(async () => {
-    if (!ownerId) return;
+    if (!ownerId || fetchingRef.current) return;
+    fetchingRef.current = true;
+
     try {
       const supabase = createSupabaseBrowserClient();
-      const base = [
-        supabase.from("letters").select("*").eq("sender_id", ownerId).order("sent_at", { ascending: true }),
-        supabase.from("letters").select("*").eq("receiver_id", ownerId).order("sent_at", { ascending: true }),
-      ] as const;
-      // Fallback: catch letters where receiver_id was null at send time (profile didn't exist yet)
-      const results = receiverUsername
-        ? await Promise.all([
-            ...base,
-            supabase.from("letters").select("*").is("receiver_id", null).eq("receiver_username", receiverUsername).order("sent_at", { ascending: true }),
-          ])
-        : await Promise.all(base);
-      const seen = new Set<string>();
-      const all: Letter[] = [];
-      for (const { data } of results) {
-        for (const row of (data ?? [])) {
-          if (!seen.has(row.id)) {
-            seen.add(row.id);
-            all.push(rowToLetter(row));
-          }
-        }
+
+      // Combine 3 distinct queries into 1 single OR filter
+      const orCondition = receiverUsername
+        ? `sender_id.eq.${ownerId},receiver_id.eq.${ownerId},and(receiver_id.is.null,receiver_username.eq.${receiverUsername})`
+        : `sender_id.eq.${ownerId},receiver_id.eq.${ownerId}`;
+
+      const { data, error } = await supabase
+        .from("letters")
+        .select(`
+          id,
+          sender_id,
+          sender_name,
+          receiver_id,
+          receiver_username,
+          receiver_name,
+          image_data,
+          created_at,
+          envelope_image_data,
+          envelope_name,
+          stamp_image_data,
+          stamp_name,
+          stamp_style,
+          sent_at,
+          delivery_duration,
+          delivery_speed,
+          read
+        `)
+        .or(orCondition)
+        .order("sent_at", { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        setLetters(data.map(rowToLetter));
       }
-      setLetters(all);
     } catch (err) {
       console.error("[useMail] Failed to fetch letters:", err);
+    } finally {
+      fetchingRef.current = false;
     }
   }, [ownerId, receiverUsername]);
+
+  // Keep ref updated to break fetchLetters identity cycles in effect hook
+  const fetchLettersRef = useRef(fetchLetters);
+  useEffect(() => {
+    fetchLettersRef.current = fetchLetters;
+  }, [fetchLetters]);
 
   // Initial load
   useEffect(() => {
@@ -105,24 +129,32 @@ export function useMail(user: ViewerIdentity) {
     void fetchLetters();
   }, [ownerId, storageKey, fetchLetters]);
 
-  // Real-time subscription for new letters; fall back to 30s polling if unavailable
+  // Real-time subscription with stable ref execution
   useEffect(() => {
     if (!ownerId) return;
     const supabase = createSupabaseBrowserClient();
 
     const channel = supabase
       .channel(`letters:${ownerId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "letters", filter: `receiver_id=eq.${ownerId}` }, () => void fetchLetters())
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "letters", filter: `sender_id=eq.${ownerId}` }, () => void fetchLetters())
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "letters", filter: `receiver_id=eq.${ownerId}` },
+        () => void fetchLettersRef.current()
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "letters", filter: `sender_id=eq.${ownerId}` },
+        () => void fetchLettersRef.current()
+      )
       .subscribe();
 
-    const fallback = globalThis.setInterval(() => void fetchLetters(), 30_000);
+    const fallback = globalThis.setInterval(() => void fetchLettersRef.current(), 30_000);
 
     return () => {
       void supabase.removeChannel(channel);
       globalThis.clearInterval(fallback);
     };
-  }, [ownerId, fetchLetters]);
+  }, [ownerId]); // Removed fetchLetters from deps to prevent re-subscribing on re-renders
 
   // Persist guest letters to localStorage
   useEffect(() => {
@@ -148,12 +180,12 @@ export function useMail(user: ViewerIdentity) {
       stampName,
     }: LetterSendPayload): Letter => {
       const speedConfig = DELIVERY_SPEEDS.find((s) => s.id === speed)!;
-      const receiverUsername = receiverName.toLowerCase().replaceAll(/\s+/g, "_");
+      const targetUsername = receiverName.toLowerCase().replaceAll(/\s+/g, "_");
       const letter: Letter = {
         id: generateId(),
         senderId: user.id,
         senderName: viewerName,
-        receiverId: receiverUsername,
+        receiverId: targetUsername,
         receiverName,
         imageData,
         envelopeImageData,
@@ -176,7 +208,7 @@ export function useMail(user: ViewerIdentity) {
             const { data: profile } = await supabase
               .from("profiles")
               .select("id")
-              .eq("username", receiverUsername)
+              .eq("username", targetUsername)
               .maybeSingle();
             const receiverId = profile?.id ?? null;
 
@@ -185,7 +217,7 @@ export function useMail(user: ViewerIdentity) {
               sender_id: ownerId,
               sender_name: letter.senderName,
               receiver_id: receiverId,
-              receiver_username: receiverUsername,
+              receiver_username: targetUsername,
               receiver_name: receiverName,
               image_data: letter.imageData,
               envelope_image_data: letter.envelopeImageData ?? null,
