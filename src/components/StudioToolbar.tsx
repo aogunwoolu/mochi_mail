@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { BrushSettings, CustomFont, PASTEL_COLORS, PaperBackground, ScrapbookKit, ScrapbookKitElement, Sticker, StoreItem, ViewerIdentity, WashiTape } from "@/types";
 import StudioAssetDrawer, { type DrawerSection, type GifSearchResult } from "./StudioAssetDrawer";
 import { toast } from "@/lib/toast";
-
+import { logEvent } from "@/lib/posthog";
 
 
 
@@ -358,6 +358,11 @@ export default function StudioToolbar({
     feedbackTimerRef.current = setTimeout(() => setFeedbackMsg(null), 2500);
   }, []);
 
+  const setActiveSelection = (section: DrawerSection) => {
+    setActiveSection(section);
+    logEvent("drawer_section_selected", { section });
+  }
+
   useEffect(() => { setCustomColor(brushSettings.color); }, [brushSettings.color]);
 
   // Persist custom palette
@@ -396,7 +401,8 @@ export default function StudioToolbar({
       const w = ratio >= 1 ? maxEdge : Math.round(maxEdge * ratio);
       const h = ratio >= 1 ? Math.round(maxEdge / ratio) : maxEdge;
       onSaveSticker(title?.trim() || "Animated Sticker", trimmed, w, h, true);
-      setActiveSection("assets");
+      logEvent("gif_added", { title: title?.trim() || "Animated Sticker" });
+      setActiveSelection("assets");
     };
     img.onerror = () => setGifError("Could not load this GIF. Try another result or URL.");
     img.src = trimmed;
@@ -424,6 +430,7 @@ export default function StudioToolbar({
       const json = await res.json();
       if (!res.ok) throw new Error((json as { error?: string }).error ?? "search_failed");
       const mapped = normalizeGifResults(json);
+      logEvent("gifs_searched", { query: q, count: mapped.length });
       setGifResults(mapped);
       if (mapped.length === 0) setGifError("No GIFs found. Try a different search term.");
     } catch (error) {
@@ -448,6 +455,7 @@ export default function StudioToolbar({
           if (code === "missing_giphy_key") setGifError("GIPHY_API_KEY is not configured. Add it in Replit Secrets.");
           else if (code === "missing_gifapi_key") setGifError("GIFAPI_KEY is not configured. Add it in Replit Secrets.");
           else setGifError("GIF provider is not configured.");
+          logEvent("gif_provider_not_configured", { error: code });
         } else {
           void searchGifs();
         }
@@ -457,15 +465,18 @@ export default function StudioToolbar({
 
   const addKitElement = useCallback((el: ScrapbookKitElement) => {
     onSaveSticker(el.name, el.imageData, el.width, el.height);
+    logEvent("gif_added", { title: el.name?.trim() || "Animated Sticker" });
     showFeedback(`"${el.name}" added to your stickers`);
   }, [onSaveSticker, showFeedback]);
 
   const addKitAll = useCallback((kit: ScrapbookKit) => {
     kit.elements.forEach((el) => onSaveSticker(el.name, el.imageData, el.width, el.height));
+    logEvent("gifs_added", { count: kit.elements.length, kit: kit.name });
     showFeedback(`${kit.elements.length} element${kit.elements.length === 1 ? "" : "s"} from "${kit.name}" added`);
   }, [onSaveSticker, showFeedback]);
 
   const setTool = useCallback((tool: BrushSettings["tool"]) => {
+    logEvent("tool_selected", { tool });
     onBrushChange({ tool });
     if (["pen", "eraser", "text", "select"].includes(tool)) onDeselectAsset();
   }, [onBrushChange, onDeselectAsset]);
@@ -1050,7 +1061,7 @@ export default function StudioToolbar({
                 gifUrlInput={gifUrlInput}
                 assetSearch={assetSearch}
                 onClose={() => setDrawerOpen(false)}
-                onSelectSection={setActiveSection}
+                onSelectSection={setActiveSelection}
                 onSelectSticker={onSelectSticker}
                 onSelectWashi={onSelectWashi}
                 onSelectPaper={onSelectPaper}

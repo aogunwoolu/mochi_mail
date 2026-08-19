@@ -52,6 +52,11 @@ export function initPostHog() {
   });
 }
 
+export function logEvent(event: string, props?: Record<string, unknown>) {
+  if (!KEY) return;
+  posthog.capture(event, props);
+}
+
 export function identifyUser(id: string, props?: Record<string, unknown>) {
   if (!KEY) return;
   posthog.identify(id, props);
