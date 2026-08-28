@@ -2,6 +2,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SpaceItem, SpaceItemStyle, SpaceItemType, UserSpace, ViewerIdentity } from "@/types";
+import { sanitizeHref } from "@/lib/utils";
 import {
   BgConfig,
   EMOJI_ROWS,
@@ -635,7 +636,7 @@ function ItemSheet({
                     placeholder="https://… image" className="input-soft w-full px-3 py-2 text-sm outline-none" />
                 </Field>
                 {item.content ? (
-                  <a href={item.content} target="_blank" rel="noopener noreferrer"
+                  <a href={sanitizeHref(item.content)} target="_blank" rel="noopener noreferrer"
                     className="btn-smooth inline-block rounded-xl px-3 py-1.5 text-xs font-semibold"
                     style={{ background: `${accent}18`, color: accent }}>Open ↗</a>
                 ) : null}
@@ -669,7 +670,7 @@ function ItemSheet({
           <div className="space-y-2 rounded-xl p-3" style={{ background: "var(--surface)" }}>
             {item.title ? <p className="text-xs font-semibold" style={{ color: "var(--muted)" }}>{item.title}</p> : null}
             {(item.type === "link" || item.type === "music") && item.content ? (
-              <a href={item.content} target="_blank" rel="noopener noreferrer"
+              <a href={sanitizeHref(item.content)} target="_blank" rel="noopener noreferrer"
                 className="btn-smooth inline-block rounded-xl px-3 py-1.5 text-xs font-semibold"
                 style={{ background: `${accent}18`, color: accent }}>Open ↗</a>
             ) : (
@@ -1218,7 +1219,7 @@ export default function SpaceStudio({
               {audioMuted ? "Tap to play music" : "Now playing"}
             </span>
             {!audioMuted && isOwner && <span className="text-[10px]" style={{ color: "var(--muted)" }}>{spaceConfig.audioLoop ? "· loop" : "· once"}</span>}
-            <a href={selectedSpace.youtubeUrl} target="_blank" rel="noopener noreferrer"
+            <a href={sanitizeHref(selectedSpace.youtubeUrl)} target="_blank" rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
               className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
               style={{ background: `${accent}22`, color: accent }}>
@@ -1315,7 +1316,7 @@ export default function SpaceStudio({
               <div className="flex items-center gap-2 rounded-2xl border px-3 py-2.5" style={{ borderColor: `${accent}55`, background: `${accent}0f` }}>
                 <span>🎵</span>
                 <p className="flex-1 text-xs font-semibold" style={{ color: accent }}>Track active · {spaceConfig.audioLoop ? "looping" : "plays once"}</p>
-                <a href={selectedSpace.youtubeUrl} target="_blank" rel="noopener noreferrer"
+                <a href={sanitizeHref(selectedSpace.youtubeUrl)} target="_blank" rel="noopener noreferrer"
                   className="btn-smooth rounded-full px-2 py-0.5 text-[10px] font-semibold"
                   style={{ background: `${accent}22`, color: accent }}>Open</a>
               </div>

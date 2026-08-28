@@ -4,7 +4,7 @@
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FiArrowLeft, FiCopy, FiCheck, FiExternalLink, FiLock, FiGlobe, FiPlus, FiRefreshCw } from "react-icons/fi";
-import { useAccount } from "@/hooks/useAccount";
+import { useMochi } from "@/context/MochiContext";
 import { useRooms } from "@/hooks/useRooms";
 import { ROOM_TOKEN_KEY } from "@/hooks/useRoom";
 import { RoomSummary } from "@/types";
@@ -110,7 +110,9 @@ function RoomsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const inviteFromUrl = searchParams?.get("invite")?.trim() ?? "";
-  const account = useAccount();
+  // Reuse the app-wide account instance from MochiProvider instead of a
+  // second useAccount() call, which would duplicate the auth/profile fetch.
+  const { account } = useMochi();
   // Use currentAccount for full users, fall back to viewer identity for anonymous users
   const roomIdentity = account.currentAccount ? {
     id: account.currentAccount.id,

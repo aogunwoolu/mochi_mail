@@ -36,6 +36,14 @@ export function createSupabaseBrowserClient(): SupabaseClient<Database> {
         detectSessionInUrl: true,
         storageKey: "mochimail-auth",
       },
+      // Cap the client's realtime send rate so a single misbehaving tab (e.g.
+      // a runaway cursor/stroke broadcast loop) can't flood the shared
+      // Supabase realtime server and degrade it for every other user.
+      realtime: {
+        params: {
+          eventsPerSecond: 20,
+        },
+      },
     }
   );
   return client;

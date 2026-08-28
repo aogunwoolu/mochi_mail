@@ -36,6 +36,10 @@ const GUEST_NAME_KEY = "mochimail_guest_name";
 const GUEST_ID_KEY = "mochimail_guest_id";
 const ANON_TOKENS_KEY = "mochimail_anon_tokens";
 const AUTH_EMAIL_DOMAIN = "mochimail.app";
+// Remembers which provider an OAuth redirect was for, so that if the
+// redirect comes back with "Identity is already linked to another user" we
+// know which provider to retry as a plain sign-in (see the mount effect).
+const OAUTH_PENDING_PROVIDER_KEY = "mochimail_oauth_pending_provider";
 
 function saveAnonTokens(session: { access_token: string; refresh_token: string }) {
   if (typeof window === "undefined") return;
@@ -149,9 +153,25 @@ export function useAccount() {
       window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.search
     );
     const oauthError = redirectParams.get("error_description");
+    const pendingProvider = sessionStorage.getItem(OAUTH_PENDING_PROVIDER_KEY) as "google" | "discord" | null;
     if (oauthError) {
-      toast(oauthError.replaceAll("+", " "), { variant: "error", icon: "warning" });
       window.history.replaceState(null, "", window.location.pathname);
+      // We attempted to LINK this provider onto the current guest session, but
+      // it's already linked to a different (previously saved) account - that
+      // means this is a returning user. Retry as a normal sign-in instead of
+      // just erroring out, so "Continue with Google/Discord" doubles as both
+      // sign-up and log-in like users expect.
+      if (pendingProvider && /already linked/i.test(oauthError)) {
+        sessionStorage.removeItem(OAUTH_PENDING_PROVIDER_KEY);
+        toast("That account already exists - signing you in instead.", { icon: "mail" });
+        void supabase.auth.signInWithOAuth({
+          provider: pendingProvider,
+          options: { redirectTo: window.location.origin },
+        });
+        return;
+      }
+      sessionStorage.removeItem(OAUTH_PENDING_PROVIDER_KEY);
+      toast(oauthError.replaceAll("+", " "), { variant: "error", icon: "warning" });
     }
 
     supabase.auth.getSession().then(async ({ data }) => {
@@ -355,7 +375,13 @@ export function useAccount() {
   ): Promise<{ ok: boolean; error?: string }> => {
     const supabase = createSupabaseBrowserClient();
     const options = { redirectTo: typeof window === "undefined" ? undefined : window.location.origin };
-    const { error } = authUser && isAnonymousUser(authUser)
+    const shouldLink = Boolean(authUser && isAnonymousUser(authUser));
+    // Record which provider we're linking so the post-redirect error handler
+    // (mount effect above) can retry as a sign-in if it's already linked.
+    if (shouldLink && typeof window !== "undefined") {
+      sessionStorage.setItem(OAUTH_PENDING_PROVIDER_KEY, provider);
+    }
+    const { error } = shouldLink
       ? await supabase.auth.linkIdentity({ provider, options })
       : await supabase.auth.signInWithOAuth({ provider, options });
     if (error) return { ok: false, error: error.message };

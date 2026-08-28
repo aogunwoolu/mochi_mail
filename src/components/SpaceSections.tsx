@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { UserSpace } from "@/types";
+import { sanitizeHref } from "@/lib/utils";
 import {
   FONT_CATEGORY_LABELS,
   FONT_OPTIONS,
@@ -522,7 +523,7 @@ export default function SpaceSections({
             ) : (
               <div className="flex flex-wrap gap-2">
                 {links.map((link, i) => (
-                  <a key={i} href={link.url} target="_blank" rel="noopener noreferrer"
+                  <a key={i} href={sanitizeHref(link.url)} target="_blank" rel="noopener noreferrer"
                     className="btn-smooth rounded-2xl border px-4 py-2 font-semibold"
                     style={{ borderColor: `${accent}44`, background: `${accent}10`, ...headingStyle(section), fontSize: 14 }}>
                     {link.label || link.url} ↗

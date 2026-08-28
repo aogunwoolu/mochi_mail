@@ -3,12 +3,18 @@ import type { Database } from "@/types/database";
 
 // Server-only service-role client + access-token verification, shared by the
 // billing route handlers. Mirrors the inline pattern in api/rooms/join.
+//
+// Cached per warm serverless instance so route handlers don't re-parse client
+// options (and re-create the underlying fetch/connection setup) on every call.
+let adminClient: SupabaseClient<Database> | null = null;
 
 export function getAdminClient(): SupabaseClient<Database> | null {
+  if (adminClient) return adminClient;
   const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) return null;
-  return createClient<Database>(url, serviceKey, { auth: { persistSession: false } });
+  adminClient = createClient<Database>(url, serviceKey, { auth: { persistSession: false } });
+  return adminClient;
 }
 
 export interface VerifiedUser {

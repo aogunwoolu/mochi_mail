@@ -1,5 +1,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { FiMail } from "react-icons/fi";
 import { ViewerIdentity } from "@/types";
 import SupportMochiPanel from "@/components/SupportMochiPanel";
 import HelpRequestPanel from "@/components/HelpRequestPanel";
@@ -278,7 +279,7 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
   if (props.authBusy) {
     authActionLabel = "Working...";
   } else if (props.mode === "signup") {
-    authActionLabel = "✦ Create account";
+    authActionLabel = "Create account";
   }
 
   return (
@@ -659,7 +660,7 @@ export default function AccountPanel({
         ) : (
           <div className="flex flex-1 items-center gap-2.5">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl text-base" style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
-              ✦
+              <FiMail size={18} color="#fff" />
             </div>
             <div>
               <p className="text-sm font-bold">MochiMail</p>

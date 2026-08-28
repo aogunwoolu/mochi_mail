@@ -34,6 +34,7 @@ function generateCaseNumber(category: Category): string {
 // Best-effort in-memory rate limit (per server instance): 3 requests/minute per IP.
 const WINDOW_MS = 60_000;
 const MAX_PER_WINDOW = 3;
+const MAX_TRACKED_IPS = 5000;
 const hits = new Map<string, number[]>();
 
 function rateLimited(ip: string): boolean {
@@ -42,7 +43,14 @@ function rateLimited(ip: string): boolean {
   if (recent.length >= MAX_PER_WINDOW) return true;
   recent.push(now);
   hits.set(ip, recent);
-  if (hits.size > 5000) hits.clear();
+  // Evict only genuinely stale entries once the map grows large, instead of
+  // clearing everyone's counter (which would let an attacker "reset" the
+  // limit for other IPs too by flooding until the map fills up).
+  if (hits.size > MAX_TRACKED_IPS) {
+    for (const [key, times] of hits) {
+      if (times.every((t) => now - t >= WINDOW_MS)) hits.delete(key);
+    }
+  }
   return false;
 }
 
@@ -60,7 +68,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Support requests aren't configured yet." }, { status: 503 });
   }
 
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  // The LAST hop in x-forwarded-for is appended by our own edge/proxy and
+  // can't be spoofed by the client; earlier entries are client-supplied and
+  // trivially forged, so using them would let one requester bypass the limit
+  // by sending a fake, ever-changing first IP.
+  const forwardedFor = req.headers.get("x-forwarded-for");
+  const ip = req.headers.get("x-real-ip") ?? forwardedFor?.split(",").at(-1)?.trim() ?? "unknown";
   if (rateLimited(ip)) {
     return NextResponse.json({ error: "Too many requests - please wait a minute and try again." }, { status: 429 });
   }

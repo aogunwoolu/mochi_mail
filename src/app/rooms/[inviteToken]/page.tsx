@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useAccount } from "@/hooks/useAccount";
+import { useMochi } from "@/context/MochiContext";
 import { useRooms } from "@/hooks/useRooms";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { RoomInvitePreview } from "@/types";
@@ -19,7 +19,9 @@ export default function RoomInvitePage() {
   const router = useRouter();
   const params = useParams<{ inviteToken: string }>();
   const token = params?.inviteToken;
-  const account = useAccount();
+  // Reuse the app-wide account instance from MochiProvider instead of a
+  // second useAccount() call, which would duplicate the auth/profile fetch.
+  const { account } = useMochi();
   // Use currentAccount for full users, fall back to viewer identity for anonymous users
   const roomIdentity = account.currentAccount ? {
     id: account.currentAccount.id,

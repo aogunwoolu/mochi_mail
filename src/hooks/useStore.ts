@@ -22,6 +22,43 @@ function collectionKeyFor(user: ViewerIdentity): string {
   return `${COLLECTION_KEY}:${id}`;
 }
 
+/** Upload a published item's preview image to the `store-items` Storage
+ *  bucket and return its public URL. Only migrates the top-level preview
+ *  (covers stickers/washi/papers/stamps/envelopes/kit previews, the bulk of
+ *  bytes); font glyph maps and full kit element sets stay inline for now -
+ *  a smaller remaining follow-up, see repo memory. Returns null on failure
+ *  so callers keep the base64 fallback rather than losing the image. */
+async function uploadStoreImage(
+  supabase: ReturnType<typeof createSupabaseBrowserClient>,
+  authorId: string,
+  itemId: string,
+  dataUrl: string,
+): Promise<string | null> {
+  try {
+    const isGif = dataUrl.startsWith("data:image/gif");
+    const blob = await (await fetch(dataUrl)).blob();
+    const path = `${authorId}/${itemId}.${isGif ? "gif" : "png"}`;
+    const { error } = await supabase.storage.from("store-items").upload(path, blob, {
+      contentType: isGif ? "image/gif" : "image/png",
+      upsert: true,
+    });
+    if (error) throw error;
+    return supabase.storage.from("store-items").getPublicUrl(path).data.publicUrl ?? null;
+  } catch (err) {
+    console.error("[store] Failed to upload item image:", err);
+    return null;
+  }
+}
+
+// The cross-user store catalog changes slowly (new publishes are rare
+// relative to page views) but this hook mounts on every session app-wide, so
+// without a cache every single page load re-downloads every published user's
+// full payload (base64 images included) - this was the single largest
+// egress driver found in the 2026-08 audit. A short in-memory TTL cache
+// dedupes that across remounts/navigations within the same tab.
+const CATALOG_CACHE_MS = 5 * 60_000;
+let catalogCache: { data: { owner_id: string; payload: unknown }[]; fetchedAt: number } | null = null;
+
 function loadStore(key: string): StoreItem[] {
   if (!globalThis.window) return [];
   try {
@@ -333,12 +370,21 @@ export function useStore(user: ViewerIdentity) {
       try {
         const supabase = createSupabaseBrowserClient();
 
-        // Load published items from all users
-        const { data: storeData, error: storeError } = await supabase
-          .from("store_states")
-          .select("owner_id, payload");
-
-        if (storeError) throw storeError;
+        // Load published items from all users - capped and cached (see
+        // catalogCache above) since this fans out to every publisher's row.
+        let storeData = catalogCache && Date.now() - catalogCache.fetchedAt < CATALOG_CACHE_MS
+          ? catalogCache.data
+          : null;
+        if (!storeData) {
+          const { data, error: storeError } = await supabase
+            .from("store_states")
+            .select("owner_id, payload")
+            .order("updated_at", { ascending: false })
+            .limit(2000);
+          if (storeError) throw storeError;
+          storeData = data ?? [];
+          catalogCache = { data: storeData, fetchedAt: Date.now() };
+        }
         if (cancelled) return;
 
         const seen = new Set<string>();
@@ -420,10 +466,29 @@ export function useStore(user: ViewerIdentity) {
         try {
           const supabase = createSupabaseBrowserClient();
           const myPublishedItems = storeItems.filter((item) => item.authorId === ownerId);
+
+          // Move any still-inline base64 preview images to Storage before
+          // persisting, so the payload every session fetches stays small.
+          const uploaded = await Promise.all(
+            myPublishedItems.map(async (item) => {
+              if (!item.imageData.startsWith("data:")) return item;
+              const url = await uploadStoreImage(supabase, ownerId, item.id, item.imageData);
+              return url ? { ...item, imageData: url } : item;
+            })
+          );
+          if (uploaded.some((item, i) => item !== myPublishedItems[i])) {
+            const byId = new Map(uploaded.map((it) => [it.id, it]));
+            setStoreItems((prev) => {
+              const next = prev.map((item) => byId.get(item.id) ?? item);
+              saveStoreByKey(storeKey, next);
+              return next;
+            });
+          }
+
           await supabase
             .from("store_states")
             .upsert(
-              { owner_id: ownerId, payload: ({ storeItems: myPublishedItems, collection } as unknown as Json), updated_at: new Date().toISOString() },
+              { owner_id: ownerId, payload: ({ storeItems: uploaded, collection } as unknown as Json), updated_at: new Date().toISOString() },
               { onConflict: "owner_id" }
             );
         } catch (err) {

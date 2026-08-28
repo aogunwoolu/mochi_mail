@@ -156,7 +156,7 @@ export function useSpaces(
 
       const { data: ownSpace } = await supabase
         .from("spaces")
-        .select("*")
+        .select("id")
         .eq("owner_id", currentAccount.id)
         .maybeSingle();
 
@@ -230,7 +230,7 @@ export function useSpaces(
         const isSelf = currentAccount?.id === targetProfile.id;
         const query = supabase.from("spaces").select("*").eq("owner_id", targetProfile.id);
         const { data: rows } = isSelf
-          ? await query.order("updated_at", { ascending: false })
+          ? await query.order("updated_at", { ascending: false }).limit(50)
           : await query.limit(1);
 
         spaceRows = rows;
@@ -239,7 +239,8 @@ export function useSpaces(
           .from("spaces")
           .select("*")
           .eq("owner_id", currentAccount.id)
-          .order("updated_at", { ascending: false });
+          .order("updated_at", { ascending: false })
+          .limit(50);
 
         spaceRows = rows;
       } else {
@@ -256,8 +257,11 @@ export function useSpaces(
       const ownerIds = [...new Set(spaceRows.map((row) => row.owner_id))];
 
       const [{ data: itemRows }, { data: profiles }] = await Promise.all([
-        supabase.from("space_items").select("*").in("space_id", spaceIds),
-        supabase.from("profiles").select("*").in("id", ownerIds),
+        supabase.from("space_items").select("*").in("space_id", spaceIds).limit(2000),
+        supabase
+          .from("profiles")
+          .select("id, display_name, username, avatar_url, youtube_url, accent_color, wallpaper, is_supporter")
+          .in("id", ownerIds),
       ]);
 
       if (cancelled) return;

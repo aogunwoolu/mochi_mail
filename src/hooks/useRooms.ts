@@ -64,18 +64,24 @@ export function useRooms(currentAccount: AccountIdentity) {
 
     try {
       const [{ data: roomRows, error: roomsError }, { data: memberRows, error: membersError }] = await Promise.all([
-        supabase.from("rooms").select("*").order("updated_at", { ascending: false }),
-        supabase.from("room_members").select("room_id,user_id").eq("user_id", account.id),
+        supabase
+          .from("rooms")
+          .select("id, owner_id, title, description, is_public, invite_token, room_code, password_hash, updated_at, created_at")
+          .order("updated_at", { ascending: false })
+          .limit(200),
+        supabase.from("room_members").select("room_id,user_id").eq("user_id", account.id).limit(200),
       ]);
 
       if (roomsError) throw roomsError;
       if (membersError) throw membersError;
 
       const ownerIds = [...new Set((roomRows ?? []).map((room) => room.owner_id))];
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("*")
-        .in("id", ownerIds);
+      const { data: profiles, error: profilesError } = ownerIds.length
+        ? await supabase
+            .from("profiles")
+            .select("id, display_name, username")
+            .in("id", ownerIds)
+        : { data: [], error: null };
 
       if (profilesError) throw profilesError;
 
