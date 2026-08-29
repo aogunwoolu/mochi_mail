@@ -94,15 +94,17 @@ Simply export your drawing from Procreate as a PNG and name it according to this
 
 ## 📎 Procreate Reference Templates
 
-The `templates/` folder has transparent SVG guides you can drop into Procreate to keep every icon consistent:
+The `templates/` folder has transparent guide images you can drop into Procreate to keep every icon consistent.
+**Procreate can't import `.svg` files directly** — use the `.png` versions of each template instead (the `.svg`
+source files are there if you ever want to tweak/regenerate them):
 
-- `templates/single-icon-128.svg` / `templates/single-icon-256.svg` — a single-icon canvas with a safe-margin box, inscribed circle guide, and center crosshair.
-- `templates/contact-sheet.svg` — all 38 icon slots in one labeled grid, **with the current fallback vector icon already traced at low opacity in each cell** — so you can see exactly what shape you're replacing and trace/reinterpret it in your own style, then export them individually afterward.
+- `templates/single-icon-128.png` / `templates/single-icon-256.png` — a single-icon canvas with a safe-margin box, inscribed circle guide, and center crosshair.
+- `templates/contact-sheet.png` — all 38 icon slots in one labeled grid, **with the current fallback vector icon already traced at low opacity in each cell** — so you can see exactly what shape you're replacing and trace/reinterpret it in your own style, then export them individually afterward.
 
 **To use in Procreate:**
-1. AirDrop/share the `.svg` file to your iPad, or open it in Files, then import it into a new Procreate canvas (Procreate can import SVGs as a new layer).
-2. The faint icon shapes and guide lines come in on their own layer — lock it so you don't draw on it directly.
-3. Add a new layer above the guide and draw your icon on top of (or inspired by) the faint reference shape, inside the dashed safe-margin box.
+1. AirDrop/share the `.png` file to your iPad, or save it into Photos/Files, then in Procreate tap **+** → **Import** (or **Insert a Photo**) to bring it in as a new canvas sized to the image.
+2. Add a new layer above it, and lower the imported guide layer's opacity a touch further if needed; lock it so you don't draw on it directly.
+3. Draw your icon on top of (or inspired by) the faint reference shape, inside the dashed safe-margin box.
 4. Hide or delete the guide layer, then export just your artwork layer as a transparent PNG using the filenames above.
 
 ### ✂️ Auto-crop the finished contact sheet
