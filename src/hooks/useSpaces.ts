@@ -260,7 +260,9 @@ export function useSpaces(
         supabase.from("space_items").select("*").in("space_id", spaceIds).limit(2000),
         supabase
           .from("profiles")
-          .select("id, display_name, username, avatar_url, youtube_url, accent_color, wallpaper, is_supporter")
+          .select(
+            "id, display_name, username, avatar_url, bio, youtube_url, accent_color, wallpaper, is_supporter, created_at, updated_at"
+          )
           .in("id", ownerIds),
       ]);
 
