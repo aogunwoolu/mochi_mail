@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MochiMail Icon Sheet Splitter</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #fff8ff; color: #3a2a3a; padding: 24px; max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 20px; }
+  p { color: #6b5b6b; font-size: 14px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 16px 0; padding: 12px; background: #ffeaf5; border-radius: 12px; }
+  .controls label { font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+  .controls input[type="number"] { width: 70px; }
+  button { background: #ff69b4; color: white; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: #7fb3ff; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin-top: 20px; }
+  .cell { background: repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 12px 12px; border: 1px solid #ddd; border-radius: 8px; padding: 6px; text-align: center; }
+  .cell img { width: 64px; height: 64px; object-fit: contain; }
+  .cell .name { font-size: 10px; color: #555; word-break: break-all; margin-top: 4px; }
+  .cell a { font-size: 10px; color: #ff69b4; }
+  #status { font-size: 13px; color: #6b5b6b; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>🎨 Icon Sheet Splitter</h1>
+  <p>
+    Upload your finished <code>contact-sheet</code> drawing (exported from Procreate as one PNG) and this tool
+    will automatically crop out each of the 38 icon cells and save them individually as
+    <code>&lt;name&gt;.png</code> &mdash; ready to drop into <code>public/icons/handdrawn/</code>.
+  </p>
+
+  <div class="controls">
+    <label>Contact sheet PNG
+      <input type="file" id="fileInput" accept="image/png" />
+    </label>
+    <label>Grid columns
+      <input type="number" id="cols" value="6" min="1" />
+    </label>
+    <label>Cell size (px)
+      <input type="number" id="cellSize" value="128" min="16" />
+    </label>
+    <label>Gap (px)
+      <input type="number" id="gap" value="16" min="0" />
+    </label>
+    <label>Outer margin (px)
+      <input type="number" id="margin" value="16" min="0" />
+    </label>
+    <label>Label row height (px)
+      <input type="number" id="labelH" value="20" min="0" />
+    </label>
+    <button id="splitBtn" disabled>Split Icons</button>
+  </div>
+
+  <div class="controls">
+    <button id="pickFolderBtn" class="secondary">📁 Save directly to a folder</button>
+    <button id="zipBtn" class="secondary" disabled>⬇️ Download All as ZIP</button>
+  </div>
+  <div id="status"></div>
+
+  <div id="grid"></div>
+
+  <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script>
+    // Must match the order/layout used to generate templates/contact-sheet.svg
+    const ICON_NAMES = [
+      "pen","eraser","select","text","assets","undo","redo","export","clear",
+      "canvas","mail","shop","rooms",
+      "layers","eye-open","eye-closed","arrow-up","arrow-down","trash",
+      "compose","envelope","stamp","paper","speed-express","speed-standard","speed-snail","send",
+      "search","heart","heart-outline","download","check","publish",
+      "close","copy","lock","globe","settings",
+    ];
+    const SHEET_COLS_REF = 6; // columns used when generating the reference sheet dimensions below
+    const SHEET_CELL_REF = 128;
+
+    const fileInput = document.getElementById("fileInput");
+    const splitBtn = document.getElementById("splitBtn");
+    const zipBtn = document.getElementById("zipBtn");
+    const pickFolderBtn = document.getElementById("pickFolderBtn");
+    const statusEl = document.getElementById("status");
+    const grid = document.getElementById("grid");
+
+    let uploadedImage = null;
+    let croppedIcons = []; // { name, blob, url }
+    let dirHandle = null;
+
+    fileInput.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const img = new Image();
+      img.onload = () => {
+        uploadedImage = img;
+        splitBtn.disabled = false;
+        statusEl.textContent = `Loaded image ${img.width}×${img.height}px.`;
+      };
+      img.src = URL.createObjectURL(file);
+    });
+
+    pickFolderBtn.addEventListener("click", async () => {
+      if (!window.showDirectoryPicker) {
+        statusEl.textContent = "Your browser doesn't support folder access (try Chrome/Edge), use the ZIP download instead.";
+        return;
+      }
+      try {
+        dirHandle = await window.showDirectoryPicker();
+        statusEl.textContent = `Destination folder selected: "${dirHandle.name}". Split icons, then they'll save there automatically.`;
+      } catch {
+        statusEl.textContent = "Folder selection cancelled.";
+      }
+    });
+
+    splitBtn.addEventListener("click", async () => {
+      if (!uploadedImage) return;
+
+      const cols = Number(document.getElementById("cols").value) || SHEET_COLS_REF;
+      const cellSize = Number(document.getElementById("cellSize").value) || SHEET_CELL_REF;
+      const gap = Number(document.getElementById("gap").value) || 0;
+      const margin = Number(document.getElementById("margin").value) || 0;
+      const labelH = Number(document.getElementById("labelH").value) || 0;
+
+      // Scale factor in case the exported PNG isn't exactly the reference sheet resolution.
+      const refWidth = margin * 2 + cols * cellSize + (cols - 1) * gap;
+      const scale = uploadedImage.width / refWidth;
+
+      croppedIcons = [];
+      grid.innerHTML = "";
+
+      ICON_NAMES.forEach((name, i) => {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+        const x = (margin + col * (cellSize + gap)) * scale;
+        const y = (margin + row * (cellSize + labelH + gap)) * scale;
+        const size = cellSize * scale;
+
+        const canvas = document.createElement("canvas");
+        canvas.width = cellSize;
+        canvas.height = cellSize;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(uploadedImage, x, y, size, size, 0, 0, cellSize, cellSize);
+
+        const url = canvas.toDataURL("image/png");
+        croppedIcons.push({ name, canvas, url });
+
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.innerHTML = `
+          <img src="${url}" alt="${name}" />
+          <div class="name">${name}.png</div>
+          <a download="${name}.png" href="${url}">Download</a>
+        `;
+        grid.appendChild(cell);
+      });
+
+      zipBtn.disabled = false;
+      statusEl.textContent = `Split ${croppedIcons.length} icons. Preview them above, then download individually, as a ZIP, or save to a folder.`;
+
+      if (dirHandle) {
+        await saveToFolder();
+      }
+    });
+
+    async function saveToFolder() {
+      statusEl.textContent = "Saving icons to selected folder...";
+      for (const { name, canvas } of croppedIcons) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        const fileHandle = await dirHandle.getFileHandle(`${name}.png`, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      }
+      statusEl.textContent = `Saved all ${croppedIcons.length} icons to "${dirHandle.name}". Refresh the app to see them!`;
+    }
+
+    zipBtn.addEventListener("click", async () => {
+      if (!croppedIcons.length) return;
+      statusEl.textContent = "Zipping...";
+      const zip = new JSZip();
+      for (const { name, canvas } of croppedIcons) {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        zip.file(`${name}.png`, blob);
+      }
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(zipBlob);
+      a.download = "handdrawn-icons.zip";
+      a.click();
+      statusEl.textContent = "ZIP downloaded — unzip it directly into public/icons/handdrawn/.";
+    });
+  </script>
+</body>
+</html>
