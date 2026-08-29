@@ -22,6 +22,27 @@ function collectionKeyFor(user: ViewerIdentity): string {
   return `${COLLECTION_KEY}:${id}`;
 }
 
+function dataUrlToBlob(dataUrl: string): Blob | null {
+  try {
+    if (!dataUrl || !dataUrl.startsWith("data:")) return null;
+    const commaIdx = dataUrl.indexOf(",");
+    if (commaIdx === -1) return null;
+    const header = dataUrl.slice(0, commaIdx);
+    const base64 = dataUrl.slice(commaIdx + 1);
+    const mimeMatch = header.match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : "image/png";
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
+  } catch {
+    return null;
+  }
+}
+
 /** Upload a published item's preview image to the `store-items` Storage
  *  bucket and return its public URL. Only migrates the top-level preview
  *  (covers stickers/washi/papers/stamps/envelopes/kit previews, the bulk of
@@ -35,8 +56,10 @@ async function uploadStoreImage(
   dataUrl: string,
 ): Promise<string | null> {
   try {
+    if (!dataUrl || !dataUrl.startsWith("data:")) return null;
     const isGif = dataUrl.startsWith("data:image/gif");
-    const blob = await (await fetch(dataUrl)).blob();
+    const blob = dataUrlToBlob(dataUrl);
+    if (!blob) return null;
     const path = `${authorId}/${itemId}.${isGif ? "gif" : "png"}`;
     const { error } = await supabase.storage.from("store-items").upload(path, blob, {
       contentType: isGif ? "image/gif" : "image/png",

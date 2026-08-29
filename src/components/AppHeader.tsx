@@ -1,7 +1,7 @@
 "use client";
 
-import { FiEdit3, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
 import type { AppTab } from "@/types";
+import HandDrawnIcon from "./ui/HandDrawnIcon";
 
 interface AppHeaderProps {
   activeTab: AppTab;
@@ -49,9 +49,9 @@ export function AppHeader({
         >
           {(
             [
-              { id: "studio" as AppTab, label: "Canvas", icon: <FiEdit3 /> },
-              { id: "mail" as AppTab, label: "Mail", icon: <FiMail /> },
-              { id: "store" as AppTab, label: "Shop", icon: <FiShoppingBag /> },
+              { id: "studio" as AppTab, label: "Canvas", iconName: "canvas" as const },
+              { id: "mail" as AppTab, label: "Mail", iconName: "mail" as const },
+              { id: "store" as AppTab, label: "Shop", iconName: "shop" as const },
             ] as const
           ).map((tab) => (
             <button
@@ -64,7 +64,7 @@ export function AppHeader({
               }}
               aria-current={activeTab === tab.id ? "page" : undefined}
             >
-              {tab.icon}
+              <HandDrawnIcon name={tab.iconName} size={18} color="currentColor" />
               <span className="hidden sm:inline">{tab.label}</span>
               {tab.id === "mail" && unreadCount > 0 && (
                 <span

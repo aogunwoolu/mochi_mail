@@ -13,6 +13,7 @@ import StoreView from "@/components/StoreView";
 import RoomControl from "@/components/RoomControl";
 import { AppHeader } from "@/components/AppHeader";
 import { WipBanner } from "@/components/WipBanner";
+import HandDrawnIcon from "@/components/ui/HandDrawnIcon";
 import { FiEdit3, FiLayers, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
 import { Pencil, Eraser, MousePointer, Type, Scissors, Image, Sparkles } from "lucide-react";
 import { exportCanvas, CropRegion, StaticFormat } from "@/components/ExportUtil";
@@ -1398,7 +1399,7 @@ export default function Home() {
               color: "var(--pink)",
             }}
           >
-            <FiEdit3 size={17} />
+            <HandDrawnIcon name="canvas" size={18} color="currentColor" />
             <span className="hidden sm:inline">Canvas</span>
           </span>
 
@@ -1410,7 +1411,7 @@ export default function Home() {
             style={{ color: "var(--muted-strong)" }}
             aria-label="Mail"
           >
-            <FiMail size={17} />
+            <HandDrawnIcon name="mail" size={18} color="currentColor" />
             <span className="hidden sm:inline">Mail</span>
             {unreadCount > 0 && (
               <span
@@ -1428,7 +1429,7 @@ export default function Home() {
             style={{ color: "var(--muted-strong)" }}
             aria-label="Shop"
           >
-            <FiShoppingBag size={17} />
+            <HandDrawnIcon name="shop" size={18} color="currentColor" />
             <span className="hidden sm:inline">Shop</span>
           </button>
 
@@ -1438,7 +1439,7 @@ export default function Home() {
             style={{ color: "var(--muted-strong)" }}
             aria-label="Rooms"
           >
-            <FiUsers size={17} />
+            <HandDrawnIcon name="rooms" size={18} color="currentColor" />
             <span className="hidden sm:inline">Rooms</span>
           </button>
 

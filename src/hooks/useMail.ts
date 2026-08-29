@@ -14,6 +14,27 @@ function safeLower(value: string | undefined): string {
   return value?.toLowerCase() ?? "";
 }
 
+function dataUrlToBlob(dataUrl: string): Blob | null {
+  try {
+    if (!dataUrl || !dataUrl.startsWith("data:")) return null;
+    const commaIdx = dataUrl.indexOf(",");
+    if (commaIdx === -1) return null;
+    const header = dataUrl.slice(0, commaIdx);
+    const base64 = dataUrl.slice(commaIdx + 1);
+    const mimeMatch = header.match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : "image/png";
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
+  } catch {
+    return null;
+  }
+}
+
 /** Upload a canvas-exported PNG data URL to the `letters` Storage bucket and
  *  return its public URL. Returns null on failure so callers can fall back
  *  to storing the base64 data URL inline (better than losing the letter). */
@@ -25,7 +46,9 @@ async function uploadLetterImage(
   dataUrl: string,
 ): Promise<string | null> {
   try {
-    const blob = await (await fetch(dataUrl)).blob();
+    if (!dataUrl || !dataUrl.startsWith("data:")) return null;
+    const blob = dataUrlToBlob(dataUrl);
+    if (!blob) return null;
     const path = `${senderId}/${letterId}/${fileName}`;
     const { error } = await supabase.storage.from("letters").upload(path, blob, {
       contentType: "image/png",
@@ -337,14 +360,21 @@ export function useMail(user: ViewerIdentity) {
   }, [ownerId]);
 
   const inbox = ownerId
-    ? letters.filter((l) => l.receiverId === ownerId || (receiverUsername && l.receiverId === receiverUsername))
+    ? letters.filter(
+        (l) =>
+          l.receiverId === ownerId ||
+          (receiverUsername && l.receiverId === receiverUsername) ||
+          safeLower(l.receiverName) === safeLower(viewerName)
+      )
     : letters.filter(
         (l) =>
           l.receiverId === user.id ||
           safeLower(l.receiverName) === safeLower(viewerName)
       );
 
-  const sent = letters.filter((l) => l.senderId === (ownerId ?? user.id));
+  const sent = letters.filter(
+    (l) => l.senderId === (ownerId ?? user.id) || l.senderId === user.id
+  );
 
   return {
     user: normalizedUser,

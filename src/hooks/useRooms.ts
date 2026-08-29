@@ -6,6 +6,7 @@ import type { Database } from "@/types/database";
 
 type RoomRow = Database["public"]["Tables"]["rooms"]["Row"];
 type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
+type RoomOwnerProfile = Pick<ProfileRow, "id" | "display_name" | "username">;
 type RoomMemberRow = Database["public"]["Tables"]["room_members"]["Row"];
 
 type AccountIdentity = {
@@ -16,7 +17,7 @@ type AccountIdentity = {
 
 function mapRoom(
   room: RoomRow,
-  profile: ProfileRow | undefined,
+  profile: RoomOwnerProfile | undefined,
   me: AccountIdentity,
   memberRoomIds: Set<string>
 ): RoomSummary {
@@ -86,7 +87,7 @@ export function useRooms(currentAccount: AccountIdentity) {
       if (profilesError) throw profilesError;
 
       const memberRoomIds = new Set((memberRows as RoomMemberRow[] | null)?.map((row) => row.room_id) ?? []);
-      const profilesByOwner = new Map<string, ProfileRow>();
+      const profilesByOwner = new Map<string, RoomOwnerProfile>();
       for (const profile of profiles ?? []) {
         profilesByOwner.set(profile.id, profile);
       }

@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrushSettings, CustomFont, PASTEL_COLORS, PaperBackground, ScrapbookKit, ScrapbookKitElement, Sticker, StoreItem, ViewerIdentity, WashiTape } from "@/types";
 import StudioAssetDrawer, { type DrawerSection, type GifSearchResult } from "./StudioAssetDrawer";
+import HandDrawnIcon from "./ui/HandDrawnIcon";
 import { toast } from "@/lib/toast";
 import { logEvent } from "@/lib/posthog";
 
@@ -485,69 +486,117 @@ export default function StudioToolbar({
   const isWashiActive = brushSettings.tool === "washi" && selectedAsset !== null;
   const shownCollaborators = collaborators.slice(0, 6);
 
-  // Icon SVGs
+  // Icon SVGs wrapped with HandDrawnIcon for drop-in Procreate replacement
   const PenIcon = (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"
-        stroke={brushSettings.tool === "pen" && !isStickerActive && !isWashiActive ? "var(--pink)" : "#666"}
-        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <HandDrawnIcon
+      name="pen"
+      size={22}
+      fallback={
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"
+            stroke={brushSettings.tool === "pen" && !isStickerActive && !isWashiActive ? "var(--pink)" : "#666"}
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      }
+    />
   );
   const TextIcon = (
-    <span
-      className="text-xl font-bold leading-none"
-      style={{ fontFamily: '"Space Mono", monospace', color: brushSettings.tool === "text" ? "var(--pink)" : "#666" }}
-    >
-      T
-    </span>
+    <HandDrawnIcon
+      name="text"
+      size={22}
+      fallback={
+        <span
+          className="text-xl font-bold leading-none"
+          style={{ fontFamily: '"Space Mono", monospace', color: brushSettings.tool === "text" ? "var(--pink)" : "#666" }}
+        >
+          T
+        </span>
+      }
+    />
   );
   const SelectIcon = (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M6 2v15.5l3.5-3.1 2 3.9 1.8-0.9-2-3.9H17L6 2z"
-        stroke={brushSettings.tool === "select" ? "var(--pink)" : "#666"}
-        strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <HandDrawnIcon
+      name="select"
+      size={20}
+      fallback={
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M6 2v15.5l3.5-3.1 2 3.9 1.8-0.9-2-3.9H17L6 2z"
+            stroke={brushSettings.tool === "select" ? "var(--pink)" : "#666"}
+            strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      }
+    />
   );
   const EraserIcon = (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <path d="M20 20H7L3 16l10-10 7 7-3.5 3.5"
-        stroke={brushSettings.tool === "eraser" ? "var(--pink)" : "#666"}
-        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M6 17l4-4"
-        stroke={brushSettings.tool === "eraser" ? "var(--pink)" : "#666"}
-        strokeWidth="2" strokeLinecap="round" />
-    </svg>
+    <HandDrawnIcon
+      name="eraser"
+      size={22}
+      fallback={
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M20 20H7L3 16l10-10 7 7-3.5 3.5"
+            stroke={brushSettings.tool === "eraser" ? "var(--pink)" : "#666"}
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M6 17l4-4"
+            stroke={brushSettings.tool === "eraser" ? "var(--pink)" : "#666"}
+            strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      }
+    />
   );
   const AssetsIcon = (
-    <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
-      <rect x="3" y="3" width="7" height="7" rx="1.5"
-        stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
-      <rect x="14" y="3" width="7" height="7" rx="1.5"
-        stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
-      <rect x="3" y="14" width="7" height="7" rx="1.5"
-        stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
-      <rect x="14" y="14" width="7" height="7" rx="1.5"
-        stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
-    </svg>
+    <HandDrawnIcon
+      name="assets"
+      size={21}
+      fallback={
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"
+            stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
+          <rect x="14" y="3" width="7" height="7" rx="1.5"
+            stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
+          <rect x="3" y="14" width="7" height="7" rx="1.5"
+            stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
+          <rect x="14" y="14" width="7" height="7" rx="1.5"
+            stroke={drawerOpen ? "var(--pink)" : "#666"} strokeWidth="2" />
+        </svg>
+      }
+    />
   );
   const UndoIcon = (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M3 7h10a6 6 0 0 1 0 12H9" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M3 7l4-4M3 7l4 4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <HandDrawnIcon
+      name="undo"
+      size={20}
+      fallback={
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M3 7h10a6 6 0 0 1 0 12H9" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M3 7l4-4M3 7l4 4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      }
+    />
   );
   const RedoIcon = (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M21 7H11a6 6 0 0 0 0 12h4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M21 7l-4-4M21 7l-4 4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <HandDrawnIcon
+      name="redo"
+      size={20}
+      fallback={
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M21 7H11a6 6 0 0 0 0 12h4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M21 7l-4-4M21 7l-4 4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      }
+    />
   );
   const ExportIcon = (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-      <path d="M12 3v13" stroke="white" strokeWidth="2" strokeLinecap="round" />
-      <path d="M8 12l4 4 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M3 20h18" stroke="white" strokeWidth="2" strokeLinecap="round" />
-    </svg>
+    <HandDrawnIcon
+      name="export"
+      size={20}
+      fallback={
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M12 3v13" stroke="white" strokeWidth="2" strokeLinecap="round" />
+          <path d="M8 12l4 4 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M3 20h18" stroke="white" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      }
+    />
   );
 
   return (
