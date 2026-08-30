@@ -591,9 +591,9 @@ export default function StudioToolbar({
       size={20}
       fallback={
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <path d="M12 3v13" stroke="white" strokeWidth="2" strokeLinecap="round" />
-          <path d="M8 12l4 4 4-4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M3 20h18" stroke="white" strokeWidth="2" strokeLinecap="round" />
+          <path d="M12 3v13" stroke="#666" strokeWidth="2" strokeLinecap="round" />
+          <path d="M8 12l4 4 4-4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M3 20h18" stroke="#666" strokeWidth="2" strokeLinecap="round" />
         </svg>
       }
     />
@@ -1044,10 +1044,8 @@ export default function StudioToolbar({
           style={{
             width: 48,
             height: 48,
-            background: isExporting
-              ? "linear-gradient(135deg, rgba(255,107,157,0.5), rgba(167,139,250,0.5))"
-              : "linear-gradient(135deg, var(--pink), var(--lavender))",
-            boxShadow: isExporting ? "none" : "0 6px 18px rgba(255,107,157,0.38)",
+            background: isExporting ? "rgba(255,255,255,0.6)" : "white",
+            boxShadow: isExporting ? "none" : "0 6px 18px rgba(30,10,50,0.12)",
             cursor: isExporting ? "not-allowed" : "pointer",
           }}
           title={isExporting ? "Saving…" : "Save (JPEG or WebM)"}
@@ -1056,7 +1054,7 @@ export default function StudioToolbar({
         >
           {isExporting ? (
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="animate-spin">
-              <circle cx="12" cy="12" r="9" stroke="white" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
+              <circle cx="12" cy="12" r="9" stroke="var(--pink)" strokeWidth="2.5" strokeDasharray="28 56" strokeLinecap="round" />
             </svg>
           ) : ExportIcon}
         </button>

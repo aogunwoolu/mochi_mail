@@ -42,10 +42,9 @@ export function WipBanner({ onOpenFeedback }: WipBannerProps) {
         <span className="truncate">MochiMail is still baking - a work in progress!</span>
         <button
           onClick={onOpenFeedback}
-          className="btn-smooth shrink-0 rounded-full px-3 py-1 text-[12px] font-bold text-white"
+          className="btn-smooth cursor-pointer shrink-0 rounded-full px-3 py-1 text-[12px] font-bold text-white"
           style={{
-            background: "linear-gradient(135deg, var(--pink), var(--lavender))",
-            boxShadow: "0 2px 8px var(--pink-glow)",
+            background: "pink",
           }}
         >
           Found an issue? 💌
