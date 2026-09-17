@@ -89,3 +89,28 @@ Simply export your drawing from Procreate as a PNG and name it according to this
 1. Draw one icon in Procreate (e.g. `pen.png` at 128×128px with transparent background).
 2. Export as PNG and drop it directly into this folder: `public/icons/handdrawn/pen.png`.
 3. Refresh the app in your browser — the pen tool immediately turns into your hand-drawn drawing!
+
+---
+
+## 📎 Procreate Reference Templates
+
+The `templates/` folder has transparent guide images you can drop into Procreate to keep every icon consistent.
+**Procreate can't import `.svg` files directly** — use the `.png` versions of each template instead (the `.svg`
+source files are there if you ever want to tweak/regenerate them):
+
+- `templates/single-icon-128.png` / `templates/single-icon-256.png` — a single-icon canvas with a safe-margin box, inscribed circle guide, and center crosshair.
+- `templates/contact-sheet.png` — all 38 icon slots in one labeled grid, **with the current fallback vector icon already traced at low opacity in each cell** — so you can see exactly what shape you're replacing and trace/reinterpret it in your own style, then export them individually afterward.
+
+**To use in Procreate:**
+1. AirDrop/share the `.png` file to your iPad, or save it into Photos/Files, then in Procreate tap **+** → **Import** (or **Insert a Photo**) to bring it in as a new canvas sized to the image.
+2. Add a new layer above it, and lower the imported guide layer's opacity a touch further if needed; lock it so you don't draw on it directly.
+3. Draw your icon on top of (or inspired by) the faint reference shape, inside the dashed safe-margin box.
+4. Hide or delete the guide layer, then export just your artwork layer as a transparent PNG using the filenames above.
+
+### ✂️ Auto-crop the finished contact sheet
+
+Drew everything on `contact-sheet.svg` in one Procreate canvas? Open `templates/sheet-splitter.html` in your browser
+(double-click it, no install needed), upload your exported contact-sheet PNG, and it will automatically crop out
+all 38 icon cells. It can either save the PNGs straight into a folder you pick (Chrome/Edge) or download them as a
+ZIP you unzip into this folder.
+
