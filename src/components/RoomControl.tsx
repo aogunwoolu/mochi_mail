@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FiCopy, FiCheck, FiLock, FiGlobe, FiSettings, FiX } from "react-icons/fi";
 import type { RoomPhase } from "@/hooks/useRoom";
+import { Skeleton } from "./ui/skeleton";
 
 interface RoomControlProps {
   phase: RoomPhase;
@@ -99,8 +100,8 @@ export default function RoomControl({
           color: "var(--muted)",
         }}
       >
-        <span className="h-2 w-2 animate-pulse rounded-full" style={{ background: "var(--pink)" }} />
-        {phase === "creating" ? "Creating your canvas…" : "Joining room…"}
+        <Skeleton className="h-2.5 w-2.5 rounded-full" />
+        <Skeleton className="h-2.5 w-24" />
       </div>
     );
   }

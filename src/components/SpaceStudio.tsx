@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SpaceItem, SpaceItemStyle, SpaceItemType, UserSpace, ViewerIdentity } from "@/types";
 import { sanitizeHref } from "@/lib/utils";
+import { BoardSkeleton } from "./ui/skeleton";
 import {
   BgConfig,
   EMOJI_ROWS,
@@ -948,10 +949,7 @@ export default function SpaceStudio({
     if (loading) {
       return (
         <div className="flex h-full items-center justify-center p-6">
-          <div className="flex items-center gap-3 rounded-3xl border px-6 py-5 shadow-sm" style={{ background: "rgba(255,255,255,0.78)", borderColor: "var(--border)", backdropFilter: "blur(12px)" }}>
-            <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent" style={{ color: accent }} aria-hidden />
-            <p className="text-sm font-semibold" style={{ color: "var(--foreground-soft)" }}>Arranging the board…</p>
-          </div>
+          <BoardSkeleton />
         </div>
       );
     }

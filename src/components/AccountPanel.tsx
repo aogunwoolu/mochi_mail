@@ -1,6 +1,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FiMail } from "react-icons/fi";
+import { FiEdit3, FiEye, FiEyeOff, FiLock, FiMail, FiUser } from "react-icons/fi";
 import { ViewerIdentity } from "@/types";
 import SupportMochiPanel from "@/components/SupportMochiPanel";
 import HelpRequestPanel from "@/components/HelpRequestPanel";
@@ -152,15 +152,24 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
         <div className="grid gap-2">
           <div>
             <label htmlFor="profile-name" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Display name</label>
-            <input id="profile-name" value={props.profileName} onChange={(e) => props.setProfileName(e.target.value)} placeholder="👤 Display name" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+            <div className="relative">
+              <FiEdit3 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={15} style={{ color: "var(--muted)" }} aria-hidden />
+              <input id="profile-name" value={props.profileName} onChange={(e) => props.setProfileName(e.target.value)} placeholder="Display name" className="input-soft h-10 w-full pl-9 pr-3 text-sm outline-none" />
+            </div>
           </div>
           <div>
             <label htmlFor="profile-bio" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Short bio</label>
-            <textarea id="profile-bio" value={props.bio} onChange={(e) => props.setBio(e.target.value)} placeholder="📝 Short bio" rows={3} className="input-soft w-full resize-none px-3 py-2 text-sm outline-none" />
+            <div className="relative">
+              <FiEdit3 className="pointer-events-none absolute left-3 top-3" size={15} style={{ color: "var(--muted)" }} aria-hidden />
+              <textarea id="profile-bio" value={props.bio} onChange={(e) => props.setBio(e.target.value)} placeholder="A short note about you" rows={3} className="input-soft w-full resize-none pl-9 pr-3 pt-2.5 text-sm outline-none" />
+            </div>
           </div>
           <div>
             <label htmlFor="home-title" className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Space title</label>
-            <input id="home-title" value={props.homeTitle} onChange={(e) => props.setHomeTitle(e.target.value)} placeholder="🏠 Space title" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+            <div className="relative">
+              <FiMail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={15} style={{ color: "var(--muted)" }} aria-hidden />
+              <input id="home-title" value={props.homeTitle} onChange={(e) => props.setHomeTitle(e.target.value)} placeholder="Your space title" className="input-soft h-10 w-full pl-9 pr-3 text-sm outline-none" />
+            </div>
           </div>
         </div>
       </SectionCard>
@@ -223,7 +232,10 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
           />
         </label>
         <label htmlFor="avatar-url" className="sr-only">Custom avatar URL</label>
-        <input id="avatar-url" value={props.avatarUrl} onChange={(e) => props.setAvatarUrl(e.target.value)} placeholder="🔗 Or paste a custom avatar URL" className="input-soft mt-2 w-full px-3 py-2 text-sm outline-none" />
+        <div className="relative mt-2">
+          <FiMail className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={15} style={{ color: "var(--muted)" }} aria-hidden />
+          <input id="avatar-url" value={props.avatarUrl} onChange={(e) => props.setAvatarUrl(e.target.value)} placeholder="Paste a custom avatar URL" className="input-soft h-10 w-full pl-9 pr-3 text-sm outline-none" />
+        </div>
       </SectionCard>
 
       <SectionCard title="Space look" note="Wallpaper, soundtrack, fonts & themes now live in your Space - customize them there.">
@@ -275,6 +287,7 @@ function AuthenticatedPanel(props: Readonly<AuthenticatedPanelProps>) {
 }
 
 function GuestPanel(props: Readonly<GuestPanelProps>) {
+  const [showPassword, setShowPassword] = useState(false);
   let authActionLabel = "Log in";
   if (props.authBusy) {
     authActionLabel = "Working...";
@@ -283,44 +296,46 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-3xl border p-4" style={{ borderColor: "var(--border)", background: "linear-gradient(180deg, rgba(255,255,255,0.92), rgba(248,242,255,0.92))" }}>
-        <p className="text-sm font-semibold">Make your profile permanent</p>
+    <div className="space-y-3">
+      <div className="rounded-2xl border px-4 py-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.7)" }}>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--pink)" }}>Guest mode</p>
+        <p className="mt-1 text-lg font-bold tracking-tight">Keep your little corner</p>
         <p className="mt-1 text-xs leading-relaxed" style={{ color: "var(--muted-strong)" }}>
-          Keep your name, unlock your own space, and send letters from a real account.
+          Create an account when you are ready to keep your name, space, and letters.
         </p>
-        <div className="mt-3 flex gap-2">
-          <div className="flex-1 rounded-2xl px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.8)" }}>Save your look</div>
-          <div className="flex-1 rounded-2xl px-3 py-2 text-xs" style={{ background: "rgba(255,255,255,0.8)" }}>Get a profile space</div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {(["Save your work", "Your own space", "Send letters"] as const).map((item) => (
+            <span key={item} className="rounded-full px-2.5 py-1 text-[10px] font-semibold" style={{ background: "rgba(233,140,169,0.12)", color: "var(--foreground-soft)" }}>{item}</span>
+          ))}
         </div>
-        <p className="mt-3 rounded-2xl px-3 py-2 text-[11px] leading-relaxed" style={{ background: "rgba(255,107,157,0.10)", color: "var(--muted-strong)" }}>
-          ⏳ Heads up: guest sessions and anything you make as a guest are automatically deleted 30 days after you start. Create an account to keep your stuff for good.
-        </p>
       </div>
 
-      <SectionCard title="Guest Name" note="Set how you appear while browsing before you sign up.">
+      <SectionCard title="Your guest name" note="This is how you appear while browsing.">
         <div className="flex gap-2">
-          <label htmlFor="guest-name" className="sr-only">Your artist name</label>
-          <input
-            id="guest-name"
-            value={props.guestName}
-            onChange={(e) => props.setGuestName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && props.handleGuestSave()}
-            className="input-soft min-w-0 flex-1 px-3 py-2 text-sm outline-none"
-            placeholder="✨ Your artist name"
-          />
+          <div className="relative min-w-0 flex-1">
+            <label htmlFor="guest-name" className="sr-only">Your artist name</label>
+            <FiUser className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={15} style={{ color: "var(--muted)" }} aria-hidden />
+            <input
+              id="guest-name"
+              value={props.guestName}
+              onChange={(e) => props.setGuestName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && props.handleGuestSave()}
+              className="input-soft h-10 w-full pl-9 pr-3 text-sm outline-none"
+              placeholder="Your artist name"
+            />
+          </div>
           <button
             onClick={props.handleGuestSave}
             className="btn-smooth shrink-0 rounded-xl px-3 py-2 text-xs font-semibold"
-            style={{ background: "var(--surface)", color: "var(--foreground-soft)", border: "1px solid var(--border)" }}
+            style={{ background: "rgba(233,140,169,0.12)", color: "var(--foreground-soft)", border: "1px solid rgba(233,140,169,0.25)" }}
           >
             Use it
           </button>
         </div>
       </SectionCard>
 
-      <div>
-        <div className="mb-3 flex gap-1 rounded-2xl p-1" style={{ background: "var(--surface)" }}>
+      <div className="rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.58)" }}>
+        <div className="mb-3 flex gap-1 rounded-xl p-1" style={{ background: "rgba(233,140,169,0.08)" }}>
           {(["signup", "login"] as const).map((entry) => (
             <button
               key={entry}
@@ -370,21 +385,39 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
           <div className="h-px flex-1" style={{ background: "var(--border)" }} />
         </div>
 
-        <div className="space-y-2 rounded-2xl border p-3" style={{ borderColor: "var(--border)", background: "rgba(255,255,255,0.7)" }}>
+        <div className="space-y-2.5">
           {props.mode === "signup" ? (
             <div>
               <label htmlFor="signup-display-name" className="mb-1 block px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Display name</label>
-              <input id="signup-display-name" value={props.displayName} onChange={(e) => props.setDisplayName(e.target.value)} placeholder="👤 e.g. Mochi Fox" className="input-soft w-full px-3 py-2 text-sm outline-none" />
+              <div className="relative">
+                <FiEdit3 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={15} style={{ color: "var(--muted)" }} aria-hidden />
+                <input id="signup-display-name" value={props.displayName} onChange={(e) => props.setDisplayName(e.target.value)} placeholder="e.g. Mochi Fox" className="input-soft h-10 w-full pl-9 pr-3 text-sm outline-none" />
+              </div>
             </div>
           ) : null}
           <div>
             <label htmlFor="auth-username" className="mb-1 block px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Username</label>
-            <input id="auth-username" value={props.username} onChange={(e) => props.setUsername(e.target.value)} placeholder="@ e.g. mochifox" className="input-soft w-full px-3 py-2 text-sm outline-none" autoComplete="username" />
+            <div className="relative">
+              <FiUser className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={15} style={{ color: "var(--muted)" }} aria-hidden />
+              <input id="auth-username" value={props.username} onChange={(e) => props.setUsername(e.target.value)} placeholder="e.g. mochifox" className="input-soft h-10 w-full pl-9 pr-3 text-sm outline-none" autoComplete="username" />
+            </div>
             <p className="mt-1 px-0.5 text-[10px]" style={{ color: "var(--muted)" }}>Lowercase letters, numbers, and underscores only.</p>
           </div>
           <div>
             <label htmlFor="auth-password" className="mb-1 block px-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--muted)" }}>Password</label>
-            <input id="auth-password" value={props.password} onChange={(e) => props.setPassword(e.target.value)} type="password" placeholder="🔒 ••••••••" className="input-soft w-full px-3 py-2 text-sm outline-none" autoComplete={props.mode === "signup" ? "new-password" : "current-password"} onKeyDown={(e) => e.key === "Enter" && props.handleAuth()} />
+            <div className="relative">
+              <FiLock className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={15} style={{ color: "var(--muted)" }} aria-hidden />
+              <input id="auth-password" value={props.password} onChange={(e) => props.setPassword(e.target.value)} type={showPassword ? "text" : "password"} placeholder="Enter your password" className="input-soft h-10 w-full pl-9 pr-10 text-sm outline-none" autoComplete={props.mode === "signup" ? "new-password" : "current-password"} onKeyDown={(e) => e.key === "Enter" && props.handleAuth()} />
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg"
+                style={{ color: "var(--muted-strong)" }}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <FiEyeOff size={15} /> : <FiEye size={15} />}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -397,8 +430,8 @@ function GuestPanel(props: Readonly<GuestPanelProps>) {
           disabled={props.authBusy}
           className="btn-smooth btn-ripple mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-white"
           style={{
-            background: "linear-gradient(135deg, var(--pink), var(--lavender))",
-            boxShadow: props.authBusy ? "none" : "0 6px 20px rgba(255,107,157,0.38)",
+            background: "var(--pink)",
+            boxShadow: props.authBusy ? "none" : "0 5px 14px rgba(233,140,169,0.24)",
             opacity: props.authBusy ? 0.8 : 1,
           }}
         >
@@ -627,17 +660,17 @@ export default function AccountPanel({
 
   return (
     <div
-      className="fixed right-4 top-16 z-[400] flex max-h-[calc(100dvh-5rem)] w-[min(28rem,calc(100vw-2rem))] flex-col animate-fade-in overflow-hidden rounded-3xl"
+      className="fixed right-2 top-14 z-[400] flex max-h-[calc(100dvh-4.5rem)] w-[min(26rem,calc(100vw-1rem))] flex-col animate-fade-in overflow-hidden rounded-[26px] sm:right-4 sm:top-16 sm:max-h-[calc(100dvh-5rem)] sm:w-[min(26rem,calc(100vw-2rem))]"
       style={{
-        background: "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(250,245,255,0.96))",
-        border: "1px solid var(--border-strong)",
-        boxShadow: "0 8px 40px rgba(120,60,160,0.18), 0 2px 8px rgba(0,0,0,0.08)",
+        background: "rgba(255,251,253,0.98)",
+        border: "1px solid rgba(233,140,169,0.24)",
+        boxShadow: "0 14px 36px rgba(115,64,82,0.14), 0 2px 8px rgba(0,0,0,0.06)",
       }}
     >
       {/* Banner */}
       <div
-        className="relative flex shrink-0 items-end px-5 pb-4 pt-5"
-        style={{ background: `linear-gradient(135deg, ${accent}22 0%, var(--lavender)22 100%)`, borderBottom: "1px solid var(--border)" }}
+        className="relative flex shrink-0 items-end px-4 pb-3.5 pt-4"
+        style={{ background: "rgba(255,235,242,0.62)", borderBottom: "1px solid rgba(233,140,169,0.16)" }}
       >
         {isAuthenticated && currentAccount ? (
           <div className="flex flex-1 items-center gap-3">
@@ -659,7 +692,7 @@ export default function AccountPanel({
           </div>
         ) : (
           <div className="flex flex-1 items-center gap-2.5">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl text-base" style={{ background: "linear-gradient(135deg, var(--pink), var(--lavender))" }}>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl text-base" style={{ background: "var(--pink)" }}>
               <FiMail size={18} color="#fff" />
             </div>
             <div>
@@ -678,7 +711,7 @@ export default function AccountPanel({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3.5 sm:p-4">
         {panelBody}
         <div className="mt-3">
           <SupportMochiPanel />

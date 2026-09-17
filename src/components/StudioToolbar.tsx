@@ -126,10 +126,8 @@ function ToolBtn({
       style={{ WebkitTapHighlightColor: "transparent" }}
     >
       <span
-        className="flex items-center justify-center rounded-2xl transition-all"
+        className="flex h-9 w-9 items-center justify-center rounded-2xl transition-all sm:h-11 sm:w-11"
         style={{
-          width: 44,
-          height: 44,
           background: active
             ? "linear-gradient(135deg, rgba(255,107,157,0.18), rgba(167,139,250,0.15))"
             : "transparent",
@@ -143,7 +141,7 @@ function ToolBtn({
       </span>
       {label ? (
         <span
-          className="text-[9px] font-semibold leading-none tracking-wide"
+          className="hidden text-[9px] font-semibold leading-none tracking-wide sm:block"
           style={{ color: active ? "var(--pink)" : "var(--muted)" }}
         >
           {label}
@@ -625,11 +623,10 @@ export default function StudioToolbar({
 
       {/* ── Left toolbar (centered in canvas area above tab bar) ── */}
       <div
-        className="pointer-events-none absolute left-3 z-20 flex items-center justify-center"
-        style={{ top: "1rem", bottom: "5.5rem" }}
+        className="pointer-events-none absolute bottom-[5.5rem] left-2 right-2 z-20 flex items-center justify-center sm:bottom-[5.5rem] sm:left-3 sm:right-auto sm:top-4"
       >
         <div
-          className="animate-toolbar-in pointer-events-auto my-auto flex flex-col items-center gap-0.5 px-2 py-3"
+          className="animate-toolbar-in pointer-events-auto flex max-w-full flex-row items-center gap-1 overflow-x-auto px-2 py-2 sm:my-auto sm:flex-col sm:gap-0.5 sm:overflow-y-auto sm:overflow-x-hidden sm:py-3"
           style={{
             maxHeight: "100%",
             overflowY: "auto",
@@ -792,12 +789,11 @@ export default function StudioToolbar({
       {/* ── Brush size - floats to the right of the toolbar, same vertical center ── */}
       {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
         <div
-          className="pointer-events-none absolute left-[4.5rem] z-20 flex items-center gap-2"
-          style={{ top: "1rem", bottom: "5.5rem" }}
+          className="pointer-events-none absolute bottom-[9.25rem] left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 sm:bottom-[5.5rem] sm:left-[4.5rem] sm:top-4 sm:translate-x-0"
         >
           {/* Brush size */}
           <div
-            className="animate-panel-in pointer-events-auto flex flex-col items-center gap-1 px-1.5 py-2"
+            className="animate-panel-in pointer-events-auto flex flex-row items-center gap-1 px-1.5 py-2 sm:flex-col"
             style={{
               background: "rgba(255,255,255,0.96)",
               backdropFilter: "blur(20px)",
@@ -841,11 +837,10 @@ export default function StudioToolbar({
       {/* ── Text options - floats to the right of the toolbar when text tool active ── */}
       {brushSettings.tool === "text" && (
         <div
-          className="pointer-events-none absolute left-[4.5rem] z-20 flex items-center"
-          style={{ top: "1rem", bottom: "5.5rem" }}
+          className="pointer-events-none absolute bottom-[9.25rem] left-1/2 z-20 flex -translate-x-1/2 items-center sm:bottom-[5.5rem] sm:left-[4.5rem] sm:top-4 sm:translate-x-0"
         >
           <div
-            className="animate-panel-in pointer-events-auto flex flex-col items-center gap-0.5 px-1.5 py-2"
+            className="animate-panel-in pointer-events-auto flex flex-row items-center gap-0.5 px-1.5 py-2 sm:flex-col"
             style={{
               background: "rgba(255,255,255,0.96)",
               backdropFilter: "blur(20px)",

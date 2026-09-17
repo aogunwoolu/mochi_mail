@@ -17,19 +17,19 @@
   --surface-soft: rgba(255, 255, 255, 0.62);
   --glass: rgba(255, 255, 255, 0.68);
   --glass-border: rgba(206, 182, 230, 0.45);
-  --pink: #ff6b9d;
-  --pink-glow: rgba(255, 107, 157, 0.3);
-  --mint: #6ee7b7;
-  --mint-glow: rgba(110, 231, 183, 0.3);
-  --sky: #67d4f1;
-  --lavender: #a78bfa;
-  --lavender-glow: rgba(167, 139, 250, 0.3);
-  --coral: #fb923c;
+  --pink: #e98ca9;
+  --pink-glow: rgba(233, 140, 169, 0.22);
+  --mint: #f2bfd0;
+  --mint-glow: rgba(242, 191, 208, 0.2);
+  --sky: #f5b6c9;
+  --lavender: #dca9c1;
+  --lavender-glow: rgba(220, 169, 193, 0.2);
+  --coral: #d98291;
   --muted: rgba(73, 56, 92, 0.56);
   --muted-strong: rgba(73, 56, 92, 0.76);
   --border: rgba(186, 156, 214, 0.25);
   --border-strong: rgba(174, 139, 209, 0.42);
-  --focus-ring: rgba(255, 107, 157, 0.55);
+  --focus-ring: rgba(233, 140, 169, 0.55);
 }
 
 * {
@@ -37,11 +37,8 @@
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
-}
-
-html {
-  /* Prevents elastic scroll on iPad from competing with canvas pan */
-  overscroll-behavior: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(220, 169, 193, 0.58) transparent;
 }
 
 body {
@@ -58,33 +55,33 @@ body {
   touch-action: manipulation;
 }
 
-/* Ambient background gradient */
+/* Soft paper-like atmosphere */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(167, 139, 250, 0.2) 0%, transparent 62%),
-    radial-gradient(ellipse 60% 50% at 80% 80%, rgba(255, 107, 157, 0.15) 0%, transparent 65%),
-    radial-gradient(ellipse 50% 40% at 50% 50%, rgba(110, 231, 183, 0.13) 0%, transparent 60%);
+    radial-gradient(ellipse 70% 48% at 8% 0%, rgba(255, 211, 225, 0.28) 0%, transparent 70%),
+    radial-gradient(ellipse 58% 44% at 100% 100%, rgba(244, 193, 210, 0.18) 0%, transparent 72%);
   pointer-events: none;
   z-index: 0;
 }
 
 /* Sleek scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(153, 121, 186, 0.3);
+  background: rgba(220, 169, 193, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(153, 121, 186, 0.45);
+  background: rgba(214, 136, 169, 0.78);
 }
 
 /* Glass panel utility */
@@ -136,10 +133,19 @@ body::before {
 
 .input-soft {
   width: 100%;
+  min-height: 40px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.82);
   color: var(--foreground);
+  line-height: 1.25;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.input-soft:focus {
+  border-color: rgba(233, 140, 169, 0.58);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 0 0 3px rgba(233, 140, 169, 0.12);
 }
 
 .section-title {
@@ -152,13 +158,13 @@ body::before {
 
 /* Glow effects */
 .glow-pink {
-  box-shadow: 0 0 20px var(--pink-glow), 0 0 60px rgba(255, 107, 157, 0.1);
+  box-shadow: 0 0 12px var(--pink-glow), 0 0 28px rgba(233, 140, 169, 0.08);
 }
 .glow-mint {
-  box-shadow: 0 0 20px var(--mint-glow), 0 0 60px rgba(110, 231, 183, 0.1);
+  box-shadow: 0 0 12px var(--mint-glow), 0 0 28px rgba(242, 191, 208, 0.08);
 }
 .glow-lavender {
-  box-shadow: 0 0 20px var(--lavender-glow), 0 0 60px rgba(167, 139, 250, 0.1);
+  box-shadow: 0 0 12px var(--lavender-glow), 0 0 28px rgba(220, 169, 193, 0.08);
 }
 
 /* Retro scanline overlay - subtle nod */
@@ -195,6 +201,18 @@ body::before {
   transform: translateY(1px) scale(0.91);
   filter: brightness(0.97);
   transition-duration: 0.08s;
+}
+
+/* Quiet content placeholders avoid layout jumps while remote data arrives. */
+.skeleton-shimmer {
+  background: linear-gradient(105deg, rgba(186, 156, 214, 0.16) 25%, rgba(255, 255, 255, 0.72) 45%, rgba(186, 156, 214, 0.16) 65%);
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -20% 0; }
 }
 
 /* Ripple on active */
@@ -271,9 +289,8 @@ textarea::placeholder {
   50% { background-position: 100% 50%; }
 }
 .gradient-border {
-  background: linear-gradient(135deg, var(--pink), var(--lavender), var(--mint), var(--pink));
-  background-size: 300% 300%;
-  animation: gradient-shift 6s ease infinite;
+  background: linear-gradient(135deg, #f3bfd0, #e89bb5, #f7d7e1, #e9abc1);
+  background-size: 160% 160%;
 }
 
 /* Slide-up animation for asset sheet */
@@ -475,7 +492,7 @@ input[type="range"] {
   appearance: none;
   height: 4px;
   border-radius: 999px;
-  background: rgba(167, 139, 250, 0.22);
+  background: rgba(220, 169, 193, 0.26);
   outline: none;
 }
 input[type="range"]::-webkit-slider-thumb {

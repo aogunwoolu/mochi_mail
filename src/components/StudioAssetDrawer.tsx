@@ -7,6 +7,7 @@ import WashiTapeCreator from "./WashiTapeCreator";
 import ScrapbookView from "./ScrapbookView";
 import { exportImageAsset, exportFont } from "@/lib/exportAsset";
 import { getSwatchShadow } from "@/lib/swatchUtils";
+import { Skeleton } from "./ui/skeleton";
 
 export type DrawerSection = "assets" | "paper" | "scrapbook" | "extras" | "fonts";
 
@@ -404,7 +405,7 @@ export default function StudioAssetDrawer({
                 </div>
               )}
               {gifLoading
-                ? <GifSkeletons />
+                ? <div className="space-y-2"><div className="flex items-center gap-2 text-xs font-semibold" style={{ color: "var(--muted-strong)" }}><Skeleton className="h-3 w-3 rounded-full" /><span>Finding something lovely…</span></div><GifSkeletons /></div>
                 : gifResults.length > 0
                   ? <GifGrid results={gifResults} onAdd={addGifFromResult} />
                   : !gifError
