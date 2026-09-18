@@ -1242,7 +1242,6 @@ export default function Home() {
         <div
           className={`canvas-zoom-drawer pointer-events-auto absolute z-20 ${showZoomControls ? "is-open" : "is-closed"}`}
           style={{
-            left: 0,
             bottom: "calc(5.75rem + env(safe-area-inset-bottom, 0px))",
           }}
         >

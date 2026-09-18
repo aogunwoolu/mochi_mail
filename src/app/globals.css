@@ -150,10 +150,11 @@ body::before {
 
 .canvas-zoom-drawer {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: center;
   gap: 0;
-  width: 56px;
+  width: auto;
+  left: 0;
   transition: transform 0.28s ease-in-out;
   will-change: transform;
 }
@@ -163,14 +164,46 @@ body::before {
 }
 
 .canvas-zoom-controls {
-  flex-direction: column;
+  flex-direction: row;
   gap: 0.2rem !important;
-  width: 56px;
+  width: auto;
   padding: 0.35rem !important;
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(220, 169, 193, 0.42);
   box-shadow: 0 5px 18px rgba(115, 64, 82, 0.14);
   backdrop-filter: blur(12px);
+}
+
+@media (max-width: 639px) {
+  .canvas-zoom-drawer {
+    flex-direction: column;
+    align-items: stretch;
+    width: 56px;
+  }
+
+  .canvas-zoom-controls {
+    flex-direction: column;
+    width: 56px;
+  }
+}
+
+@media (min-width: 640px) {
+  .canvas-zoom-drawer {
+    left: calc(6rem + env(safe-area-inset-left, 0px));
+  }
+
+  .canvas-zoom-drawer.is-closed {
+    transform: none;
+  }
+
+  .canvas-zoom-drawer.is-closed .canvas-zoom-controls {
+    display: flex !important;
+  }
+
+  .canvas-zoom-drawer > .zoom-drawer-tab,
+  .zoom-drawer-peek-fixed {
+    display: none !important;
+  }
 }
 
 .zoom-drawer-tab,
