@@ -14,7 +14,7 @@ import RoomControl from "@/components/RoomControl";
 import { AppHeader } from "@/components/AppHeader";
 import { WipBanner } from "@/components/WipBanner";
 import HandDrawnIcon from "@/components/ui/HandDrawnIcon";
-import { FiEdit3, FiLayers, FiMail, FiShoppingBag, FiUsers } from "react-icons/fi";
+import { FiEdit3, FiLayers, FiMail, FiShoppingBag, FiUsers, FiZoomIn } from "react-icons/fi";
 import { Pencil, Eraser, MousePointer, Type, Scissors, Image, Sparkles } from "lucide-react";
 import { exportCanvas, CropRegion, StaticFormat } from "@/components/ExportUtil";
 import ExportModal from "@/components/ExportModal";
@@ -156,6 +156,7 @@ export default function Home() {
   const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
   const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
   const [canvasZoom, setCanvasZoom] = useState(1);
+  const [showZoomControls, setShowZoomControls] = useState(true);
 
   const {
     phase: roomPhase,
@@ -1239,56 +1240,45 @@ export default function Home() {
 
         {/* Zoom controls - horizontal pill, bottom-left */}
         <div
-          className="pointer-events-auto absolute z-50 flex items-center gap-0.5 rounded-2xl p-1.5"
+          className={`canvas-zoom-drawer pointer-events-auto absolute z-20 ${showZoomControls ? "is-open" : "is-closed"}`}
           style={{
-            left: "calc(4.5rem + env(safe-area-inset-left, 0px))",
-            bottom: "calc(1.5rem + env(safe-area-inset-bottom, 0px))",
-            background: "rgba(255,255,255,0.96)",
-            border: "1px solid rgba(186,156,214,0.3)",
-            boxShadow: "0 2px 12px rgba(0,0,0,0.12)",
-            backdropFilter: "blur(10px)",
+            left: 0,
+            bottom: "calc(5.75rem + env(safe-area-inset-bottom, 0px))",
           }}
         >
+          <div className="canvas-zoom-controls flex items-center gap-0.5 rounded-2xl p-1.5">
+            <button onClick={zoomOut} className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold" style={{ color: "var(--muted-strong)" }} title="Zoom out">−</button>
+            <span className="min-w-12 text-center text-[11px] font-semibold tabular-nums" style={{ color: "var(--muted-strong)" }}>{Math.round(canvasZoom * 100)}%</span>
+            <button onClick={zoomIn} className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold" style={{ color: "var(--muted-strong)" }} title="Zoom in">+</button>
+            <div className="mx-0.5 h-5 w-px bg-[rgba(186,156,214,0.3)]" />
+            <button onClick={zoomReset} className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-[13px] font-bold" style={{ background: canvasZoom !== 1 ? "rgba(233,140,169,0.15)" : "transparent", color: "var(--pink)" }} title="Reset zoom" disabled={canvasZoom === 1}>⌂</button>
+          </div>
           <button
-            onClick={zoomOut}
-            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold"
-            style={{ color: "var(--muted-strong)" }}
-            title="Zoom out (-)"
+            onClick={() => setShowZoomControls(false)}
+            className="zoom-drawer-tab btn-smooth flex h-9 w-7 items-center justify-center"
+            title="Tuck zoom controls away"
+            aria-label="Tuck zoom controls away"
           >
-            −
-          </button>
-
-          <span className="min-w-12 text-center text-[11px] font-semibold tabular-nums" style={{ color: "var(--muted-strong)" }}>
-            {Math.round(canvasZoom * 100)}%
-          </span>
-
-          <button
-            onClick={zoomIn}
-            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold"
-            style={{ color: "var(--muted-strong)" }}
-            title="Zoom in (+)"
-          >
-            +
-          </button>
-
-          <div className="mx-0.5 h-5 w-px bg-[rgba(186,156,214,0.3)]" />
-
-          <button
-            onClick={zoomReset}
-            className="btn-smooth flex h-8 w-8 items-center justify-center rounded-xl text-[13px] font-bold"
-            style={{ background: canvasZoom !== 1 ? "rgba(167,139,250,0.15)" : "transparent", color: "#6d28d9" }}
-            title="Reset zoom (100%)"
-            disabled={canvasZoom === 1}
-          >
-            ⌂
+            <FiZoomIn size={15} />
           </button>
         </div>
+
+        {!showZoomControls && (
+          <button
+            onClick={() => setShowZoomControls(true)}
+            className="zoom-drawer-peek-fixed zoom-drawer-peek btn-smooth absolute z-20 flex h-9 w-7 items-center justify-center"
+            title="Bring zoom controls out"
+            aria-label="Bring zoom controls out"
+          >
+            <FiZoomIn size={15} />
+          </button>
+        )}
 
         {/* Layers toggle button */}
         <button
           onClick={() => setShowLayerPanel((v) => !v)}
           title={showLayerPanel ? "Hide layers" : "Show layers"}
-          className="btn-smooth absolute right-3 top-18 z-50 inline-flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-semibold"
+          className="btn-smooth absolute right-2 top-16 z-50 inline-flex items-center gap-1.5 rounded-2xl px-2.5 py-2 text-xs font-semibold sm:right-3 sm:top-18 sm:px-3"
           style={{
             background: showLayerPanel
               ? "rgba(167,139,250,0.18)"
@@ -1381,7 +1371,7 @@ export default function Home() {
 
         {/* Floating bottom tab bar - studio only */}
         <nav
-          className="pointer-events-auto absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-full px-2 py-2"
+          className="pointer-events-auto absolute bottom-[0.65rem] left-1/2 z-50 flex -translate-x-1/2 items-center gap-0.5 rounded-full px-1.5 py-1.5 sm:bottom-6 sm:gap-1 sm:px-2 sm:py-2"
           style={{
             background: "rgba(255,255,255,0.96)",
             backdropFilter: "blur(24px)",

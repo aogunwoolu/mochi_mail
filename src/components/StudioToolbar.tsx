@@ -626,7 +626,7 @@ export default function StudioToolbar({
         className="pointer-events-none absolute bottom-[5.5rem] left-2 right-2 z-20 flex items-center justify-center sm:bottom-[5.5rem] sm:left-3 sm:right-auto sm:top-4"
       >
         <div
-          className="animate-toolbar-in pointer-events-auto flex max-w-full flex-row items-center gap-1 overflow-x-auto px-2 py-2 sm:my-auto sm:flex-col sm:gap-0.5 sm:overflow-y-auto sm:overflow-x-hidden sm:py-3"
+          className="studio-tool-dock animate-toolbar-in pointer-events-auto flex max-w-full flex-row items-center gap-1 overflow-x-hidden px-2 py-2 sm:my-auto sm:flex-col sm:gap-0.5 sm:overflow-y-auto sm:overflow-x-hidden sm:py-3"
           style={{
             maxHeight: "100%",
             overflowY: "auto",
@@ -686,7 +686,7 @@ export default function StudioToolbar({
           <Divider />
 
           {/* Color swatches - 2-column grid */}
-          <div className="grid grid-cols-2 gap-1.5 px-0.5 py-0.5">
+          <div className="studio-palette grid grid-cols-2 gap-1.5 px-0.5 py-0.5">
             {userPalette.map((color, i) => {
               const selected = brushSettings.color === color;
               return (
@@ -789,7 +789,7 @@ export default function StudioToolbar({
       {/* ── Brush size - floats to the right of the toolbar, same vertical center ── */}
       {(brushSettings.tool === "pen" || brushSettings.tool === "eraser") && (
         <div
-          className="pointer-events-none absolute bottom-[9.25rem] left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 sm:bottom-[5.5rem] sm:left-[4.5rem] sm:top-4 sm:translate-x-0"
+          className="pointer-events-none absolute bottom-[10.5rem] left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 sm:bottom-[5.5rem] sm:left-[4.5rem] sm:top-4 sm:translate-x-0"
         >
           {/* Brush size */}
           <div
@@ -837,7 +837,7 @@ export default function StudioToolbar({
       {/* ── Text options - floats to the right of the toolbar when text tool active ── */}
       {brushSettings.tool === "text" && (
         <div
-          className="pointer-events-none absolute bottom-[9.25rem] left-1/2 z-20 flex -translate-x-1/2 items-center sm:bottom-[5.5rem] sm:left-[4.5rem] sm:top-4 sm:translate-x-0"
+          className="pointer-events-none absolute bottom-[10.5rem] left-1/2 z-20 flex -translate-x-1/2 items-center sm:bottom-[5.5rem] sm:left-[4.5rem] sm:top-4 sm:translate-x-0"
         >
           <div
             className="animate-panel-in pointer-events-auto flex flex-row items-center gap-0.5 px-1.5 py-2 sm:flex-col"
@@ -997,7 +997,7 @@ export default function StudioToolbar({
 
       {/* ── Action buttons (bottom right) ────────────────────────────────── */}
       <div
-        className="pointer-events-auto absolute z-30 flex flex-col gap-2.5"
+        className="studio-actions pointer-events-auto absolute z-30 flex flex-col gap-2.5"
         style={{
           right: "calc(1rem + env(safe-area-inset-right, 0px))",
           bottom: "calc(5.5rem + env(safe-area-inset-bottom, 0px))",
@@ -1035,12 +1035,13 @@ export default function StudioToolbar({
         </button>
         <button
           onClick={isExporting ? undefined : onExport}
-          className="btn-smooth btn-ripple flex items-center justify-center rounded-2xl"
+          className="studio-export-action btn-smooth btn-ripple flex items-center justify-center rounded-2xl"
           style={{
             width: 48,
             height: 48,
-            background: isExporting ? "rgba(255,255,255,0.6)" : "white",
-            boxShadow: isExporting ? "none" : "0 6px 18px rgba(30,10,50,0.12)",
+            background: isExporting ? "rgba(255,255,255,0.6)" : "#f3bfd0",
+            border: "1px solid rgba(214,136,169,0.32)",
+            boxShadow: isExporting ? "none" : "0 6px 18px rgba(214,136,169,0.24)",
             cursor: isExporting ? "not-allowed" : "pointer",
           }}
           title={isExporting ? "Saving…" : "Save (JPEG or WebM)"}

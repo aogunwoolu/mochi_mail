@@ -148,6 +148,115 @@ body::before {
   box-shadow: 0 0 0 3px rgba(233, 140, 169, 0.12);
 }
 
+.canvas-zoom-drawer {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  width: 56px;
+  transition: transform 0.28s ease-in-out;
+  will-change: transform;
+}
+
+.canvas-zoom-drawer.is-closed {
+  transform: translateX(-24px);
+}
+
+.canvas-zoom-controls {
+  flex-direction: column;
+  gap: 0.2rem !important;
+  width: 56px;
+  padding: 0.35rem !important;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(220, 169, 193, 0.42);
+  box-shadow: 0 5px 18px rgba(115, 64, 82, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.zoom-drawer-tab,
+.zoom-drawer-peek {
+  width: 56px;
+  border: 1px solid rgba(220, 169, 193, 0.42);
+  color: var(--muted-strong);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 5px 18px rgba(115, 64, 82, 0.12);
+  border-radius: 0 12px 12px 0;
+}
+
+.zoom-drawer-peek {
+  display: none;
+}
+
+.zoom-drawer-peek-fixed {
+  left: 0;
+  width: 32px;
+  bottom: calc(5.75rem + env(safe-area-inset-bottom, 0px));
+  display: flex;
+}
+
+.canvas-zoom-drawer.is-closed .canvas-zoom-controls,
+.canvas-zoom-drawer.is-closed .zoom-drawer-tab {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .canvas-zoom-drawer {
+    top: 13rem !important;
+    bottom: auto !important;
+    height: 190px;
+  }
+
+  .canvas-zoom-drawer.is-closed .zoom-drawer-peek {
+    margin-top: auto;
+  }
+
+  .zoom-drawer-peek-fixed {
+    top: 13rem;
+    bottom: auto;
+  }
+
+  .studio-tool-dock {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 0.25rem;
+    column-gap: 0.35rem;
+    overflow-x: hidden !important;
+    max-width: calc(100vw - 1rem);
+  }
+
+  .studio-palette {
+    display: grid !important;
+    grid-template-columns: repeat(6, 24px);
+    flex: 0 0 100%;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0.25rem;
+  }
+
+  .layer-panel {
+    right: 0.5rem !important;
+    left: auto !important;
+    top: 6.5rem !important;
+    max-width: calc(100vw - 1rem);
+    max-height: 11rem;
+    overflow: hidden;
+  }
+
+  .studio-actions {
+    top: 18rem;
+    right: 0.75rem !important;
+    bottom: auto !important;
+    flex-direction: column;
+    gap: 0.35rem !important;
+  }
+
+  .studio-actions button {
+    width: 2.35rem !important;
+    height: 2.35rem !important;
+    border-radius: 0.8rem !important;
+  }
+}
+
 .section-title {
   font-size: 11px;
   font-weight: 700;

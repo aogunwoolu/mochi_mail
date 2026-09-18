@@ -222,6 +222,7 @@ export default function LayerPanel({
 
   return (
     <div
+      className="layer-panel"
       style={{
         ...positionStyle,
         width: collapsed ? "auto" : 230,
