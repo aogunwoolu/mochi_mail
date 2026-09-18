@@ -587,11 +587,12 @@ export default function StudioToolbar({
     <HandDrawnIcon
       name="export"
       size={20}
+      style={{ filter: "brightness(0) invert(1)" }}
       fallback={
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <path d="M12 3v13" stroke="#666" strokeWidth="2" strokeLinecap="round" />
-          <path d="M8 12l4 4 4-4" stroke="#666" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M3 20h18" stroke="#666" strokeWidth="2" strokeLinecap="round" />
+          <path d="M12 3v13" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+          <path d="M8 12l4 4 4-4" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M3 20h18" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
         </svg>
       }
     />

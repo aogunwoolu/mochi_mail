@@ -52,6 +52,14 @@ export interface DrawingCanvasHandle {
    * Call this when the user reorders layers so stroke z-order updates immediately.
    */
   swapStrokeLayers: (layerA: number, layerB: number) => void;
+  /**
+   * Resolves once every currently-placed sticker/washi image has finished
+   * loading (or failed) - call before export so a still-loading image (e.g.
+   * a freshly-placed GIF sticker) isn't silently skipped from the output.
+   * Resolves after `timeoutMs` regardless, so a stuck network request can
+   * never hang the send flow forever.
+   */
+  waitForAssetsReady: (timeoutMs?: number) => Promise<void>;
 }
 
 // ─── Local stroke entry (lightweight - no pixel data) ────────────────────────
@@ -1316,6 +1324,23 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       return base;
     }, [getBaseCanvas, drawAnimatedLayer]);
 
+    const waitForAssetsReady = useCallback(async (timeoutMs = 4000) => {
+      const pending = [...assetImagesRef.current.values()].filter((img) => !img.complete);
+      if (pending.length === 0) return;
+      await Promise.race([
+        Promise.all(
+          pending.map(
+            (img) =>
+              new Promise<void>((resolve) => {
+                img.addEventListener("load", () => resolve(), { once: true });
+                img.addEventListener("error", () => resolve(), { once: true });
+              }),
+          ),
+        ),
+        new Promise<void>((resolve) => globalThis.setTimeout(resolve, timeoutMs)),
+      ]);
+    }, []);
+
     const shiftSingleCanvas = useCallback(
       (canvas: HTMLCanvasElement | null, dx: number, dy: number) => {
         if (!canvas || (dx === 0 && dy === 0)) return;
@@ -1442,6 +1467,7 @@ const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
       shiftContent,
       setSessionBase,
       swapStrokeLayers,
+      waitForAssetsReady,
     }));
 
     // ── Cursor ────────────────────────────────────────────────────────────────

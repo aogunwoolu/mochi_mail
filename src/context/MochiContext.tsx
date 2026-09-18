@@ -81,6 +81,7 @@ interface MochiMail {
   getDeliveryProgress: (letter: Letter) => number;
   getTimeRemaining: (letter: Letter) => string;
   markAsRead: (letterId: string) => void;
+  checkRecipientExists: (receiverName: string) => Promise<boolean>;
 }
 
 interface MochiStore {

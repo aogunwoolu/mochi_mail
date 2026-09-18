@@ -1467,6 +1467,7 @@ export default function Home() {
           {mailView === "compose" ? (
             <MailComposePanel
               senderName={mail.user.name}
+              senderUsername={account.viewer.username}
               stickers={stickers}
               washiTapes={washiTapes}
               papers={papers}
@@ -1486,6 +1487,7 @@ export default function Home() {
               onDeleteEnvelope={removeEnvelope}
               onDeleteCustomFont={removeCustomFont}
               onBack={() => setMailView("inbox")}
+              checkRecipientExists={mail.checkRecipientExists}
               onSend={(payload) => {
                 mail.sendLetter(payload);
                 trackMailSent({ speed: payload.speed, hasStamp: !!payload.stampName, hasCustomEnvelope: !!payload.envelopeName });
@@ -1496,6 +1498,7 @@ export default function Home() {
               inbox={mail.inbox}
               sent={mail.sent}
               userId={mail.user.id}
+              ownUsername={mail.user.username}
               isDelivered={mail.isDelivered}
               getDeliveryProgress={mail.getDeliveryProgress}
               getTimeRemaining={mail.getTimeRemaining}

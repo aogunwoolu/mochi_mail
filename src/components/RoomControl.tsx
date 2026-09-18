@@ -88,10 +88,8 @@ export default function RoomControl({
   if (phase === "creating" || phase === "joining") {
     return (
       <div
-        className="absolute z-50 flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
+        className="room-control-chip flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
         style={{
-          left: "calc(4.5rem + env(safe-area-inset-left, 0px))",
-          top: "calc(0.75rem + env(safe-area-inset-top, 0px))",
           background: "rgba(255,255,255,0.96)",
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
@@ -107,10 +105,6 @@ export default function RoomControl({
   }
 
   const chipStyle: React.CSSProperties = {
-    position: "absolute",
-    left: "calc(4.5rem + env(safe-area-inset-left, 0px))",
-    top: "calc(0.75rem + env(safe-area-inset-top, 0px))",
-    zIndex: 50,
     background: "rgba(255,255,255,0.96)",
     backdropFilter: "blur(16px)",
     WebkitBackdropFilter: "blur(16px)",
@@ -121,7 +115,7 @@ export default function RoomControl({
   if (phase === "error") {
     return (
       <div
-        className="flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
+        className="room-control-chip flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
         style={{ ...chipStyle, border: "1px solid rgba(252,165,165,0.6)", color: "#b91c1c" }}
       >
         {error ?? "Something went wrong"}
@@ -132,7 +126,7 @@ export default function RoomControl({
   if (phase === "drawing" && error) {
     return (
       <div
-        className="flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
+        className="room-control-chip flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium"
         style={{
           ...chipStyle,
           border: "1px solid rgba(251,191,36,0.5)",
@@ -146,7 +140,7 @@ export default function RoomControl({
   }
 
   return (
-    <div ref={popoverRef} style={{ position: "absolute", left: "calc(4.5rem + env(safe-area-inset-left, 0px))", top: "calc(0.75rem + env(safe-area-inset-top, 0px))", zIndex: 50 }}>
+    <div ref={popoverRef} className="room-control-chip">
       {/* Chip */}
       <div
         className="flex items-center gap-1.5 rounded-full px-2 py-1.5"

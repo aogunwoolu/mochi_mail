@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { generateId } from "@/lib/id";
 import { Letter, DELIVERY_SPEEDS, LetterSendPayload, ViewerIdentity } from "@/types";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { usernameSlug } from "@/lib/utils";
+import { toast } from "@/lib/toast";
 import type { Database } from "@/types/database";
 
 type LetterRow = Database["public"]["Tables"]["letters"]["Row"];
@@ -246,7 +248,7 @@ export function useMail(user: ViewerIdentity) {
       stampName,
     }: LetterSendPayload): Letter => {
       const speedConfig = DELIVERY_SPEEDS.find((s) => s.id === speed)!;
-      const targetUsername = receiverName.toLowerCase().replaceAll(/\s+/g, "_");
+      const targetUsername = usernameSlug(receiverName);
       const letter: Letter = {
         id: generateId(),
         senderId: user.id,
@@ -271,11 +273,12 @@ export function useMail(user: ViewerIdentity) {
         void (async () => {
           try {
             const supabase = createSupabaseBrowserClient();
-            const { data: profile } = await supabase
+            const { data: profile, error: profileError } = await supabase
               .from("profiles")
               .select("id")
               .eq("username", targetUsername)
               .maybeSingle();
+            if (profileError) throw profileError;
             const receiverId = profile?.id ?? null;
 
             // Upload images to Storage (in parallel) instead of writing
@@ -292,7 +295,7 @@ export function useMail(user: ViewerIdentity) {
                 : Promise.resolve(null),
             ]);
 
-            await supabase.from("letters").insert({
+            const { error: insertError } = await supabase.from("letters").insert({
               id: letter.id,
               sender_id: ownerId,
               sender_name: letter.senderName,
@@ -313,6 +316,7 @@ export function useMail(user: ViewerIdentity) {
               delivery_speed: letter.deliverySpeed,
               read: false,
             });
+            if (insertError) throw insertError;
 
             if (receiverId) {
               setLetters((prev) =>
@@ -320,7 +324,14 @@ export function useMail(user: ViewerIdentity) {
               );
             }
           } catch (err) {
+            // Supabase-js does NOT throw on a PostgREST/RLS error by default -
+            // it returns { error } - so every call above explicitly checks and
+            // re-throws it. Without that, a blocked insert would silently
+            // vanish (optimistic local state already showed "sent", but
+            // nothing was ever persisted and the recipient never got it).
             console.error("[useMail] Failed to persist letter:", err);
+            toast("This letter didn't actually send - please try again.", { variant: "error", icon: "warning" });
+            setLetters((prev) => prev.filter((l) => l.id !== letter.id));
           }
         })();
       }
@@ -359,6 +370,31 @@ export function useMail(user: ViewerIdentity) {
       .eq("id", letterId);
   }, [ownerId]);
 
+  /** Checks whether a recipient name resolves to a real account before the
+   *  sender wastes time drawing a letter that can never be delivered. Guests
+   *  (no ownerId) can still check since profile usernames are public. */
+  const checkRecipientExists = useCallback(async (receiverName: string): Promise<boolean> => {
+    const targetUsername = usernameSlug(receiverName);
+    if (!targetUsername) return false;
+    // Sending to yourself is pointless but not actually undeliverable -
+    // let the caller decide whether to allow/warn about that separately.
+    try {
+      const supabase = createSupabaseBrowserClient();
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("username", targetUsername)
+        .maybeSingle();
+      if (error) throw error;
+      return Boolean(data);
+    } catch (err) {
+      console.error("[useMail] Failed to verify recipient:", err);
+      // Fail open - a transient network hiccup shouldn't block sending when
+      // we can't be sure the recipient is actually missing.
+      return true;
+    }
+  }, []);
+
   const inbox = ownerId
     ? letters.filter(
         (l) =>
@@ -386,5 +422,6 @@ export function useMail(user: ViewerIdentity) {
     getDeliveryProgress,
     getTimeRemaining,
     markAsRead,
+    checkRecipientExists,
   };
 }

@@ -74,6 +74,7 @@ type GifSearchResult = {
 interface MailComposePanelProps {
   onSend: (payload: LetterSendPayload) => void;
   senderName: string;
+  senderUsername?: string;
   stickers: Sticker[];
   washiTapes: WashiTape[];
   papers: PaperBackground[];
@@ -93,6 +94,9 @@ interface MailComposePanelProps {
   onDeleteEnvelope: (id: string) => void;
   onDeleteCustomFont: (id: string) => void;
   onBack?: () => void;
+  /** Verifies a typed recipient resolves to a real account before the letter
+   *  is drawn/sent, so typos fail fast instead of vanishing silently. */
+  checkRecipientExists?: (receiverName: string) => Promise<boolean>;
 }
 
 function toNumber(value: unknown, fallback: number): number {
@@ -179,9 +183,21 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   return img;
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+const GIF_PROXY_URL = "/api/gifs/proxy";
+
 export default function MailComposePanel({
   onSend,
   senderName,
+  senderUsername,
   stickers,
   washiTapes,
   papers,
@@ -201,6 +217,7 @@ export default function MailComposePanel({
   onDeleteEnvelope,
   onDeleteCustomFont,
   onBack,
+  checkRecipientExists,
 }: Readonly<MailComposePanelProps>) {
   const letterCanvasRef = useRef<DrawingCanvasHandle>(null);
   const envelopeCanvasRef = useRef<DrawingCanvasHandle>(null);
@@ -208,6 +225,7 @@ export default function MailComposePanel({
   const [receiver, setReceiver] = useState("");
   const [allUsernames, setAllUsernames] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [recipientStatus, setRecipientStatus] = useState<"idle" | "checking" | "found" | "not-found">("idle");
   const [speed, setSpeed] = useState<DeliverySpeed>("standard");
   const [stampStyle, setStampStyle] = useState(STAMP_STYLES[0]);
   const [selectedStamp, setSelectedStamp] = useState<MailStamp | null>(stamps[0] ?? null);
@@ -249,11 +267,33 @@ export default function MailComposePanel({
     supabase
       .from("profiles")
       .select("username")
+      .limit(500)
       .then(({ data, error }) => {
         if (error) console.error("[MailComposePanel] recipient list:", error.message);
         if (data) setAllUsernames(data.map((row) => row.username));
       });
   }, []);
+
+  // Debounced live "does this recipient exist?" check so typos surface
+  // immediately instead of the letter silently vanishing after send.
+  useEffect(() => {
+    const name = receiver.trim();
+    if (!name || !checkRecipientExists) {
+      setRecipientStatus("idle");
+      return;
+    }
+    setRecipientStatus("checking");
+    let cancelled = false;
+    const timeout = globalThis.setTimeout(() => {
+      void checkRecipientExists(name).then((exists) => {
+        if (!cancelled) setRecipientStatus(exists ? "found" : "not-found");
+      });
+    }, 350);
+    return () => {
+      cancelled = true;
+      globalThis.clearTimeout(timeout);
+    };
+  }, [receiver, checkRecipientExists]);
 
   useEffect(() => {
     if (!selectedStamp && stamps.length > 0) setSelectedStamp(stamps[0]);
@@ -372,10 +412,23 @@ export default function MailComposePanel({
   }, [toolDrawer, gifResults.length, gifLoading, searchGifs]);
 
   const addGifAsset = useCallback(async (src: string, title?: string) => {
-    const image = await loadImage(src);
-    onSaveSticker(title?.trim() || "Mail GIF", src, image.naturalWidth || 180, image.naturalHeight || 180, true);
-    setToolDrawer("stickers");
-    toast("GIF saved as sticker!", { icon: "image" });
+    try {
+      // Route through our own proxy and inline the bytes as a data URL -
+      // drawing a remote CDN image straight onto <canvas> with
+      // crossOrigin="anonymous" taints the canvas if that CDN doesn't send
+      // CORS headers, which silently breaks toDataURL() when the letter is
+      // sent. A same-origin data URL never has this problem.
+      const res = await fetch(`${GIF_PROXY_URL}?url=${encodeURIComponent(src)}`);
+      if (!res.ok) throw new Error("proxy_failed");
+      const blob = await res.blob();
+      const dataUrl = await blobToDataUrl(blob);
+      const image = await loadImage(dataUrl);
+      onSaveSticker(title?.trim() || "Mail GIF", dataUrl, image.naturalWidth || 180, image.naturalHeight || 180, true);
+      setToolDrawer("stickers");
+      toast("GIF saved as sticker!", { icon: "image" });
+    } catch {
+      toast("Couldn't save that GIF - try another one.", { variant: "error", icon: "warning" });
+    }
   }, [onSaveSticker]);
 
   const createLetterCanvas = useCallback(() => {
@@ -416,10 +469,22 @@ export default function MailComposePanel({
     ctx.textAlign = "start";
 
     if (selectedStamp?.imageData) {
-      const stampImage = await loadImage(selectedStamp.imageData);
-      const stampWidth = 150;
-      const stampHeight = 172;
-      ctx.drawImage(stampImage, output.width - stampWidth - 78, 72, stampWidth, stampHeight);
+      try {
+        const stampImage = await loadImage(selectedStamp.imageData);
+        const stampWidth = 150;
+        const stampHeight = 172;
+        ctx.drawImage(stampImage, output.width - stampWidth - 78, 72, stampWidth, stampHeight);
+      } catch {
+        // Stamp image failed to load (network hiccup/broken URL) - fall back
+        // to the emoji stamp rather than throwing and losing the whole send.
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.beginPath();
+        ctx.roundRect(output.width - 220, 84, 126, 144, 22);
+        ctx.fill();
+        ctx.font = "72px serif";
+        ctx.fillStyle = "#ff6b9d";
+        ctx.fillText(stampStyle, output.width - 175, 182);
+      }
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.beginPath();
@@ -434,14 +499,34 @@ export default function MailComposePanel({
   }, [receiver, selectedStamp, stampStyle]);
 
   const handleSend = useCallback(async () => {
-    if (!receiver.trim()) {
+    const recipientName = receiver.trim();
+    if (!recipientName) {
       setReceiverShake(true);
       globalThis.setTimeout(() => setReceiverShake(false), 500);
       toast("Add a recipient first!", { variant: "error", icon: "warning" });
       return;
     }
+    if (checkRecipientExists) {
+      setIsSending(true);
+      const exists = recipientStatus === "found" ? true : await checkRecipientExists(recipientName);
+      if (!exists) {
+        setIsSending(false);
+        setRecipientStatus("not-found");
+        setReceiverShake(true);
+        globalThis.setTimeout(() => setReceiverShake(false), 500);
+        toast(`Couldn't find "${recipientName}" - check the spelling or pick a suggestion.`, { variant: "error", icon: "warning" });
+        return;
+      }
+    }
     setIsSending(true);
     try {
+      // Make sure any freshly-placed sticker/washi images have actually
+      // finished loading before we export - otherwise a network hiccup can
+      // silently drop them from the sent letter.
+      await Promise.all([
+        letterCanvasRef.current?.waitForAssetsReady(),
+        envelopeCanvasRef.current?.waitForAssetsReady(),
+      ]);
       const letterCanvas = createLetterCanvas();
       const envelopeCanvas = await createEnvelopeCanvas();
       if (!letterCanvas || !envelopeCanvas) return;
@@ -456,7 +541,7 @@ export default function MailComposePanel({
         return;
       }
       const payload: LetterSendPayload = {
-        receiverName: receiver.trim(),
+        receiverName: recipientName,
         imageData: letterImageData,
         speed,
         stampStyle,
@@ -467,9 +552,9 @@ export default function MailComposePanel({
       };
 
       onSend(payload);
-      toast(`Letter sent to ${receiver.trim()}!`, { icon: "mail" });
+      toast(`Letter sent to ${recipientName}!`, { icon: "mail" });
       setSendPreview({
-        receiverName: receiver.trim(),
+        receiverName: recipientName,
         letterImageData,
         envelopeImageData,
         stampImageData: payload.stampImageData,
@@ -488,7 +573,7 @@ export default function MailComposePanel({
     } finally {
       setIsSending(false);
     }
-  }, [createEnvelopeCanvas, createLetterCanvas, onBack, onSend, receiver, selectedEnvelope?.name, selectedStamp, speed, stampStyle]);
+  }, [checkRecipientExists, createEnvelopeCanvas, createLetterCanvas, onBack, onSend, receiver, recipientStatus, selectedEnvelope?.name, selectedStamp, speed, stampStyle]);
 
   const handleSelectSticker = useCallback((sticker: Sticker) => {
     setSelectedAsset(sticker);
@@ -563,6 +648,11 @@ export default function MailComposePanel({
               <p>{senderName}</p>
               <p className="ml-2 text-xs" style={{ color: "var(--muted)" }}>(me)</p>
             </div>
+            {senderUsername ? (
+              <p className="mt-1 pl-2 text-[11px]" style={{ color: "var(--muted)" }}>
+                Friends can mail you at <span className="font-semibold" style={{ color: "var(--muted-strong)" }}>@{senderUsername}</span>
+              </p>
+            ) : null}
           </div>
           <div className="flex h-full items-center justify-center pb-2 pt-8" style={{ color: "var(--muted)" }}><ArrowRight size={18} /></div>
           <div>
@@ -583,9 +673,16 @@ export default function MailComposePanel({
                 placeholder="Recipient name..."
                 maxLength={30}
                 autoComplete="off"
-                className={`input-soft w-full px-3 py-2 text-sm outline-none transition-all${receiverShake ? " animate-wiggle" : ""}`}
+                className={`input-soft w-full px-3 py-2 pr-9 text-sm outline-none transition-all${receiverShake ? " animate-wiggle" : ""}`}
                 style={receiverShake ? { borderColor: "rgba(231,76,126,0.7)", boxShadow: "0 0 0 3px rgba(231,76,126,0.2)" } : undefined}
               />
+              {receiver.trim() ? (
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm" title={recipientStatus === "found" ? "Recipient found" : recipientStatus === "not-found" ? "No account with this name" : undefined}>
+                  {recipientStatus === "checking" ? <span className="inline-block animate-spin" style={{ color: "var(--muted)" }}>◌</span> : null}
+                  {recipientStatus === "found" ? <span style={{ color: "#4caf82" }}>✓</span> : null}
+                  {recipientStatus === "not-found" ? <span style={{ color: "#e7527e" }}>✕</span> : null}
+                </span>
+              ) : null}
               {showSuggestions && filteredSuggestions.length > 0 ? (
                 <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-2xl border shadow-xl" style={{ background: "var(--glass)", borderColor: "var(--border-strong)", backdropFilter: "blur(12px)" }}>
                   {filteredSuggestions.map((username) => (
@@ -608,6 +705,9 @@ export default function MailComposePanel({
                 </div>
               ) : null}
             </div>
+            {recipientStatus === "not-found" ? (
+              <p className="mt-1 pl-2 text-[11px]" style={{ color: "#e7527e" }}>No account found with that name</p>
+            ) : null}
           </div>
         </div>
       </div>

@@ -199,6 +199,20 @@ body::before {
   display: none;
 }
 
+.room-control-chip {
+  position: absolute;
+  left: calc(4.5rem + env(safe-area-inset-left, 0px));
+  top: calc(0.75rem + env(safe-area-inset-top, 0px));
+  z-index: 50;
+}
+
+/* On non-mobile, the left tool dock sits at top-left too - push the chip past it. */
+@media (min-width: 640px) {
+  .room-control-chip {
+    left: calc(6.75rem + env(safe-area-inset-left, 0px));
+  }
+}
+
 @media (max-width: 639px) {
   .canvas-zoom-drawer {
     top: 13rem !important;
